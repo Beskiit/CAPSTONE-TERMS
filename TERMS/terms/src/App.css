@@ -15,45 +15,18 @@ body{
   min-height: 100vh;
 }
 
-header {
-  width: 100%;
-  padding-left: 0.25rem;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 1rem;
-  background-color: #ffffff;
-}
-
-header img {
-  height: 50px;
-  width: auto;
-}
-
-.header-title {
-  margin: 0;
-  color: #333;
-  font-size: 1rem;
-  font-weight: normal;
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-}
-
 main{
   display: flex;
   justify-content: center;
   align-items: center;
   padding: 2em;
-  background-color: #4E85CF;
   border-radius: 8px;
   margin: auto;
   flex: none;
   width: 400px;
   height: auto;
   min-height: 350px;
+  background: none;
 }
 
 form{
@@ -146,4 +119,19 @@ a{
   text-decoration: none;
   font-size: 0.9em;
   margin-top: 1em;
+}
+
+.deped-logo {
+  width: 100px;
+  height: auto;
+  margin-bottom: 1em;
+}
+
+.login-container {
+  background-color: #4E85CF;
+  border-radius: 8px;
+  padding: 2em;
+  width: 400px;
+  min-height: 350px;
+  margin: auto;
 }

@@ -1,22 +1,23 @@
 import './App.css'
+import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom'
 import depedLogo from './assets/deped-logo.png'
 import EyeIcon from './assets/eye.svg'
 import EyeOffIcon from './assets/eye-close.svg'
 import UserIcon from './assets/user.svg'
 import PasswordIcon from './assets/password.svg'
-import React from 'react'
-import { useState } from 'react'
+import React, { useState } from 'react'
+import Dashboard from './Dashboard.jsx'  
 
 function App() {
   return (
-    <>
-      <header>
-        <Header />
-      </header>
+    <BrowserRouter>
       <main>
-        <LoginForm />
+        <Routes>
+          <Route path="/" element={<LoginForm />} />
+          <Route path="/Dashboard" element={<Dashboard />} />
+        </Routes>
       </main>
-    </>
+    </BrowserRouter>
   )
 }
 
@@ -33,52 +34,61 @@ function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const navigate = useNavigate();
 
   const togglePasswordVisibility = () => {
     setShowPassword(!showPassword);
   };
 
+  const handleLogin = (e) => {
+    e.preventDefault();
+
+    navigate('/Dashboard');
+  }
+
   return (
-    <form>
-      <h2 className='login-title'>Login</h2>
-      <div className="input-container">
-        <div className="input-wrapper">
-          <span className="input-icon"><img src={UserIcon} alt="User" /></span>
-          <input
-            type="text"
-            placeholder="Username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-          />
+    <div className="login-container">
+      <form onSubmit={handleLogin}>
+        <img className='deped-logo' src={depedLogo} alt="DepEd Logo" />
+        <div className="input-container">
+          <div className="input-wrapper">
+            <span className="input-icon"><img src={UserIcon} alt="User" /></span>
+            <input
+              type="text"
+              placeholder="Username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+            />
+          </div>
         </div>
-      </div>
-      
-      <div className="input-container">
-        <div className="input-wrapper">
-          <span className="input-icon"><img src={PasswordIcon} alt="Password" /></span>
-          <input
-            type={showPassword ? "text" : "password"}
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          <button
-            type="button"
-            className="password-toggle"
-            onClick={togglePasswordVisibility}
-          >
-            {showPassword ? <img style={{ height: "1em" }} src={EyeOffIcon} alt="Hide password" /> : <img style={{ height: "1em", paddingLeft: "1em" }} src={EyeIcon} alt="Show password" />}
-          </button>
+        
+        <div className="input-container">
+          <div className="input-wrapper">
+            <span className="input-icon"><img src={PasswordIcon} alt="Password" /></span>
+            <input
+              type={showPassword ? "text" : "password"}
+              placeholder="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <button
+              type="button"
+              className="password-toggle"
+              onClick={togglePasswordVisibility}
+            >
+              {showPassword ? <img style={{ height: "1em" }} src={EyeOffIcon} alt="Hide password" /> : <img style={{ height: "1em", paddingLeft: "1em" }} src={EyeIcon} alt="Show password" />}
+            </button>
+          </div>
+          <div className="forgot-password">
+            <a href="/forgot-password">Forgot Password?</a>
+          </div>
         </div>
-        <div className="forgot-password">
-          <a href="/forgot-password">Forgot Password?</a>
+        <div className='login-button-container'>
+          <button type="submit" className='login-button'>Login</button>
         </div>
-      </div>
-      <div className='login-button-container'>
-        <button type="submit" className='login-button'>Login</button>
-      </div>
-    </form>
-  )
+      </form>
+    </div>
+  );
 }
 
 export default App
