@@ -6,7 +6,7 @@ import EyeOffIcon from './assets/eye-close.svg'
 import UserIcon from './assets/user.svg'
 import PasswordIcon from './assets/password.svg'
 import React, { useState } from 'react'
-import Dashboard from './Dashboard.jsx'  
+import Dashboard from './components/Dashboard.jsx'  
 
 function App() {
   return (
