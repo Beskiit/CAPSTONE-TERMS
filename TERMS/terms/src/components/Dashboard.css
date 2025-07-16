@@ -142,6 +142,10 @@ header img {
   width: 100%;
 }
 
+.dashboard-sidebar{
+  padding-left: 1rem;
+}
+
 .title-container {
   display: flex;
   align-items: center;
@@ -174,6 +178,7 @@ header img {
   border-radius: 1rem;
   padding: 0 .5rem 0 .5rem;
   background-color: #FF8686;
+  margin-top: 0.25rem;
 }
 
 .deadline-details{
@@ -184,3 +189,54 @@ header img {
   font-size: 13px;
   font-weight: bold;
 }
+
+.deadline-component{
+  margin-top: 1rem;
+  padding: 1rem;
+  background-color: white;
+  border-radius: .5rem;
+}
+
+/* Add to your Dashboard.css or a new CSS file */
+
+/* Change calendar background and border */
+.react-calendar {
+  background: #fff;
+  border-radius: 1rem;
+  border: 2px solid #1E56A0;
+  box-shadow: 0 2px 8px rgba(30,86,160,0.08);
+  font-family: inherit;
+}
+
+/* Change header color */
+.react-calendar__navigation {
+  color: #fff;
+  border-radius: 1rem 1rem 0 0;
+}
+
+/* Change weekday labels */
+.react-calendar__month-view__weekdays {
+  background: #f0f4fa;
+  color: #1E56A0;
+  font-weight: bold;
+}
+
+/* Change day tiles */
+.react-calendar__tile {
+  background: none;
+  color: #223861;
+  border-radius: 0.5rem;
+}
+
+/* Highlight selected day */
+.react-calendar__tile--active {
+  background: #1E56A0;
+  color: #fff;
+}
+
+/* Highlight today */
+.react-calendar__tile--now {
+  background: #FF8686;
+  color: #fff;
+}
+
