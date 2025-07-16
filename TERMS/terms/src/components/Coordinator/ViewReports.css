@@ -1,0 +1,59 @@
+body{
+  background-color: #F1F1F1;
+  top: 0;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+
+.dashboard-container {
+  display: flex;
+  margin-top: 2.5rem;
+  height: 88vh;
+  width: 100vw;
+  color: black;
+  position: fixed;
+}
+
+.dashboard-content{
+  padding-left: 1rem;
+  width: 100%;
+}
+
+.report-schedule {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 1rem;
+  padding-left: 5rem;
+}
+
+.report-button{
+    background-color: #1E56A0;
+    color: white;
+    padding: 0.5rem;
+    border: none;
+    border-radius: 0.5rem;
+    margin-right: 5rem;
+    cursor: pointer;
+}
+
+.set-report-schedule {
+  z-index: 1000;
+  background-color: #969696;
+  height: 100%;
+  border: 3px solid red;
+}
+
+.popup-header{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-right: 1rem;
+}
+
+.close-button {
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 1.5rem;
+}

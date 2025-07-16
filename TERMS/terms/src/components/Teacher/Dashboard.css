@@ -6,57 +6,6 @@ body{
   min-height: 100vh;
 }
 
-header {
-  display: flex;
-  flex-direction: row;
-  justify-content: space-between;
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 2.5rem; /* 40px */
-  padding: 0.75rem 1.5rem; /* Adds more height */
-}
-
-header img {
-  height: 50px;
-  width: auto;
-}
-
-.header-title {
-  margin: 0;
-  color: #333;
-  font-size: 1.1rem; /* Try a smaller size if needed */
-  font-weight: normal;
-  white-space: normal; /* Allow wrapping */
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-}
-
-.header-title{
-    color: #333;
-    font-weight: normal;
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-  padding-right: 1rem;
-}
-
-.title{
-  color: black;
-}
-
 .dashboard-container {
   display: flex;
   margin-top: 2.5rem;
@@ -64,58 +13,6 @@ header img {
   width: 100vw;
   color: black;
   position: fixed;
-}
-
-.sidebar {
-  height: 88vh;
-  width: 200px;
-  background-color: #1E56A0;
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-}
-
-.sidebar-menu {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-.sidebar-menu-container{
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-.sidebar-item {
-  width: 100%;
-}
-
-.sidebar-item a {
-  margin-top: 2.5rem;
-  display: block;
-  width: 83%;
-  padding: 0.75rem 1rem;
-  color: white;
-  text-decoration: none;
-  text-align: center;
-}
-
-.sidebar-item a:hover {
-  background-color: #163D75;
-}
-
-.sidebar-item.active a {
-  background-color: #163D75;
-}
-
-.sidebar-menu-logout{
-  margin-top: auto;
-  padding-bottom: 2rem;
 }
 
 .dashboard-content{
@@ -197,9 +94,7 @@ header img {
   border-radius: .5rem;
 }
 
-/* Add to your Dashboard.css or a new CSS file */
-
-/* Change calendar background and border */
+/* React Calendar Customization */
 .react-calendar {
   background: #fff;
   border-radius: 1rem;
@@ -208,33 +103,28 @@ header img {
   font-family: inherit;
 }
 
-/* Change header color */
 .react-calendar__navigation {
   color: #fff;
   border-radius: 1rem 1rem 0 0;
 }
 
-/* Change weekday labels */
 .react-calendar__month-view__weekdays {
   background: #f0f4fa;
   color: #1E56A0;
   font-weight: bold;
 }
 
-/* Change day tiles */
 .react-calendar__tile {
   background: none;
   color: #223861;
   border-radius: 0.5rem;
 }
 
-/* Highlight selected day */
 .react-calendar__tile--active {
   background: #1E56A0;
   color: #fff;
 }
 
-/* Highlight today */
 .react-calendar__tile--now {
   background: #FF8686;
   color: #fff;

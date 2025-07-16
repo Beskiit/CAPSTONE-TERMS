@@ -6,7 +6,8 @@ import EyeOffIcon from './assets/eye-close.svg'
 import UserIcon from './assets/user.svg'
 import PasswordIcon from './assets/password.svg'
 import React, { useState } from 'react'
-import Dashboard from './components/Dashboard.jsx'  
+import Dashboard from './components/Teacher/Dashboard.jsx'  
+import ViewReports from './components/Coordinator/ViewReports.jsx'
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
         <Routes>
           <Route path="/" element={<LoginForm />} />
           <Route path="/Dashboard" element={<Dashboard />} />
+          <Route path="/ViewReports" element={<ViewReports />} />
         </Routes>
       </main>
     </BrowserRouter>
