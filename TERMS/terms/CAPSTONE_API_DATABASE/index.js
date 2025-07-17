@@ -2,6 +2,8 @@ import express from 'express';
 import bodyParser from 'body-parser';
 import cors from 'cors';
 import usersRouter from './routes/users.js';
+import reportAssignmentRouter from './routes/reportAssignment.js';
+
 import db from './db.js'; // ✅ imported but used only in routes
 
 const app = express();
@@ -12,6 +14,7 @@ app.use(express.json());
 
 // Routes
 app.use('/users', usersRouter);
+app.use('/reports', reportAssignmentRouter);
 
 app.get('/', (req, res) => {
   res.send('Welcome to the Capstone API');
