@@ -28,7 +28,6 @@ function ViewReports(){
                             
                             <hr />
                             <form className="schedule-form">
-                            {/* Title */}
                             <div className="form-row">
                                 <label>Title:</label>
                                 <input type="text" placeholder="Enter report title" />
@@ -36,7 +35,6 @@ function ViewReports(){
                                 <label></label>
                             </div>
 
-                            {/* Category and Teacher */}
                             <div className="form-row">
                                 <label>Category:</label>
                                 <select>
@@ -49,7 +47,6 @@ function ViewReports(){
                                 </select>
                             </div>
 
-                            {/* Dates */}
                             <div className="form-row">
                                 <label>Start Date:</label>
                                 <input type="date" />
@@ -58,13 +55,11 @@ function ViewReports(){
                                 <input type="date" />
                             </div>
 
-                            {/* Instructions */}
                             <div className="form-row-ins textarea-row">
                                 <label>Instructions:</label>
                                 <textarea placeholder="Enter instructions for the report"></textarea>
                             </div>
 
-                            {/* Button */}
                             <div className="form-actions">
                                 <button>Set Schedule</button>
                             </div>
