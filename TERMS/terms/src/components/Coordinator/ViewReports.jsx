@@ -19,6 +19,7 @@ function ViewReports(){
                         <button className="report-button" onClick={() => setOpenPopup(true)}>+ Set Report Schedule</button>
                     </div>
                     {
+                        <div className="set-report-schedule-container">
                         <div className="set-report-schedule popup" style={{ display: openPopup ? 'block' : 'none' }}>
                             <div className="popup-header">
                                 <h2>Set Report Schedule</h2>
@@ -26,23 +27,49 @@ function ViewReports(){
                             </div>
                             
                             <hr />
-                            <form action="">
-                                <span>Title:</span>
+                            <form className="schedule-form">
+                            {/* Title */}
+                            <div className="form-row">
+                                <label>Title:</label>
                                 <input type="text" placeholder="Enter report title" />
-                                <div>
-                                    <span>Category:</span>
-                                    <input type="text" />
-                                    <span>Select Teacher:</span>
-                                    <input type="text" />
-                                </div>
-                                <span>Start Date:</span>
+                                <label></label>
+                                <label></label>
+                            </div>
+
+                            {/* Category and Teacher */}
+                            <div className="form-row">
+                                <label>Category:</label>
+                                <select>
+                                <option>Select Category</option>
+                                </select>
+
+                                <label>Select Teacher:</label>
+                                <select>
+                                <option>Select Teacher</option>
+                                </select>
+                            </div>
+
+                            {/* Dates */}
+                            <div className="form-row">
+                                <label>Start Date:</label>
                                 <input type="date" />
-                                <span>Due Date:</span>
+
+                                <label>Due Date:</label>
                                 <input type="date" />
-                                <span>Instructions:</span>
+                            </div>
+
+                            {/* Instructions */}
+                            <div className="form-row-ins textarea-row">
+                                <label>Instructions:</label>
                                 <textarea placeholder="Enter instructions for the report"></textarea>
+                            </div>
+
+                            {/* Button */}
+                            <div className="form-actions">
                                 <button>Set Schedule</button>
+                            </div>
                             </form>
+                        </div>
                         </div>
                     }
                 </div>
