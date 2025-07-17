@@ -36,6 +36,7 @@ function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
   const navigate = useNavigate();
 
   const togglePasswordVisibility = () => {
@@ -45,7 +46,18 @@ function LoginForm() {
   const handleLogin = (e) => {
     e.preventDefault();
 
-    navigate('/Dashboard');
+    if (username === '' || password === '') {
+      setError('Please fill in all fields');
+      return;
+    }
+
+    if (username === 'teacher' || password === 'password') {
+      navigate('/Dashboard');
+      return;
+    }else if(username === 'coordinator' || password === 'password123') {
+      navigate('/ViewReports');
+      return;
+    }
   }
 
   return (
