@@ -19,23 +19,24 @@ export const getReportsByUser = (req, res) => {
       rt.report_name,
       ud.name AS given_by_name,
       ud2.name AS given_to_name,
-      
-      ra.year,
-      ra.from_date,
-      ra.to_date,
+      sy.school_year,     
+      qp.quarter,                 
+      DATE_FORMAT(ra.from_date, '%M %d, %Y %h:%i %p') AS from_date,
+      DATE_FORMAT(ra.to_date, '%M %d, %Y %h:%i %p') AS to_date,
       ra.instruction,
       ra.is_given,
       ra.is_archived,
       ra.allow_late
-    FROM report_assignment ra
-    JOIN report_definition rd ON ra.report_definition_id = rd.report_definition_id
-    JOIN report_type rt ON rd.report_type_id = rt.report_type_id
-    JOIN user_details ud ON ra.given_by = ud.user_id
-    JOIN user_details ud2 ON ra.given_to = ud2.user_id
-    JOIN year_and_quarter yq ON ra.quarter = yq.yr_and_qtr_id
-    JOIN 
-    WHERE ra.given_to = ?
-  `;
+  FROM report_assignment ra
+  JOIN report_definition rd ON ra.report_definition_id = rd.report_definition_id
+  JOIN report_type rt ON rd.report_type_id = rt.report_type_id
+  JOIN user_details ud ON ra.given_by = ud.user_id
+  JOIN user_details ud2 ON ra.given_to = ud2.user_id
+  JOIN year_and_quarter yq ON ra.quarter = yq.yr_and_qtr_id
+  JOIN school_year sy ON yq.year = sy.year_id
+  JOIN quarter_period qp ON yq.quarter = qp.quarter_period_id
+  WHERE ra.given_to = ?
+`;
 
   db.query(sql, [id], (err, results) => {
     if (err) return res.status(500).send('Database error: ' + err);
@@ -47,7 +48,7 @@ export const getReportsByUser = (req, res) => {
 
 // GET single report by ID
 export const getReport = (req, res) => {
-  const { id } = req.params; // id will now refer to "given_to"
+  const { id } = req.params; // id will "given_to"
 
   const sql = `
     SELECT 
@@ -69,7 +70,7 @@ export const getReport = (req, res) => {
 
 
 
-// POST new report (giveReport)
+// POST (giveReport)
 export const giveReport = (req, res) => {
   const {
     report_definition_id,
