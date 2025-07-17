@@ -3,12 +3,11 @@ import React from 'react'
 import { useState } from 'react'
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
-import DepedLogo from '../assets/deped-logo.png';
-import Logout from '../assets/logout.svg';
-import Submitted from '../assets/submitted.svg';
-import Pending from '../assets/pending.svg';
-import Approved from '../assets/approved.svg';
-import Notification from '../assets/notification.svg';
+import Header from '../shared/Header.jsx';
+import Sidebar from '../shared/Sidebar.jsx';
+import Submitted from '../../assets/submitted.svg';
+import Pending from '../../assets/pending.svg';
+import Approved from '../../assets/approved.svg';
 
 function Dashboard(){
     return (
@@ -67,43 +66,6 @@ function Dashboard(){
         </div>
         </>
         
-    )
-}
-
-function Header({userText}){
-    return (
-        <header>
-            <div className="header-left">
-                <img src={DepedLogo} alt="DepEd Logo" />
-                <h2 className="header-title">Teacher's Report Management System</h2>
-            </div>
-            <div className="header-right">
-                <h2 className="header-title">{userText}</h2>
-                <img src={Notification} alt="" />
-            </div>
-        </header>
-    )
-}
-
-function Sidebar({activeLink}){
-    return (
-        <>
-        <div className="sidebar">
-            <ul className="sidebar-menu">
-                <div className="sidebar-menu-container">
-                    <div>
-                        <li className={`sidebar-item ${activeLink === 'Dashboard' ? 'active' : ''}`}><a href="#">Dashboard</a></li>
-                        <li className={`sidebar-item ${activeLink === 'Assessments' ? 'active' : ''}`}><a href="#">Assessments</a></li>
-                        <li className={`sidebar-item ${activeLink === 'Classification of Grades' ? 'active' : ''}`}><a href="#">Classification of Grades</a></li>
-                        <li className={`sidebar-item ${activeLink === 'Enrollment' ? 'active' : ''}`}><a href="#">Enrollment</a></li>
-                    </div>
-                    <div className="sidebar-menu-logout">
-                        <li className="sidebar-item"><a href="#"><img src={Logout} alt="log out button" /></a></li>
-                    </div>
-                </div>
-            </ul>
-        </div>
-        </>
     )
 }
 

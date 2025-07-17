@@ -6,7 +6,8 @@ import EyeOffIcon from './assets/eye-close.svg'
 import UserIcon from './assets/user.svg'
 import PasswordIcon from './assets/password.svg'
 import React, { useState } from 'react'
-import Dashboard from './components/Dashboard.jsx'  
+import Dashboard from './components/Teacher/Dashboard.jsx'  
+import ViewReports from './components/Coordinator/ViewReports.jsx'
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
         <Routes>
           <Route path="/" element={<LoginForm />} />
           <Route path="/Dashboard" element={<Dashboard />} />
+          <Route path="/ViewReports" element={<ViewReports />} />
         </Routes>
       </main>
     </BrowserRouter>
@@ -34,6 +36,7 @@ function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
   const navigate = useNavigate();
 
   const togglePasswordVisibility = () => {
@@ -43,7 +46,18 @@ function LoginForm() {
   const handleLogin = (e) => {
     e.preventDefault();
 
-    navigate('/Dashboard');
+    if (username === '' || password === '') {
+      setError('Please fill in all fields');
+      return;
+    }
+
+    if (username === 'teacher' || password === 'password') {
+      navigate('/Dashboard');
+      return;
+    }else if(username === 'coordinator' || password === 'password123') {
+      navigate('/ViewReports');
+      return;
+    }
   }
 
   return (
