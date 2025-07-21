@@ -6,6 +6,8 @@ import Sidebar from '../shared/Sidebar.jsx';
 
 function ViewReports(){
     const [openPopup, setOpenPopup] = useState(false);
+    const [selectedCategory, setSelectedCategory] = useState('');
+    const [selectedSubCategory, setSelectedSubCategory] = useState('');
 
     return (
         <>
@@ -37,15 +39,46 @@ function ViewReports(){
 
                             <div className="form-row">
                                 <label>Category:</label>
-                                <select>
-                                <option>Select Category</option>
+                                <select
+                                    value={selectedCategory}
+                                    onChange={(e) => setSelectedCategory(e.target.value)}
+                                >
+                                    <option value="">Select Category</option>
+                                    <option value="student">Student Reports</option>
+                                    <option value="teacher">Teacher Reports</option>
                                 </select>
 
                                 <label>Select Teacher:</label>
                                 <select>
-                                <option>Select Teacher</option>
+                                    <option>Select Teacher</option>
                                 </select>
-                            </div>
+                                </div>
+
+                                {/* Sub-category shown in separate row */}
+                                {selectedCategory && (
+                                <div className="form-row">
+                                    <label>Sub-Category:</label>
+                                    <select
+                                    value={selectedSubCategory}
+                                    onChange={(e) => setSelectedSubCategory(e.target.value)}
+                                    >
+                                    <option value="">Select Sub-Category</option>
+                                    {selectedCategory === "student" && (
+                                        <>
+                                        <option value="attendance">Attendance</option>
+                                        <option value="grades">Grades</option>
+                                        </>
+                                    )}
+                                    {selectedCategory === "teacher" && (
+                                        <>
+                                        <option value="schedule">Class Schedule</option>
+                                        <option value="evaluation">Performance Evaluation</option>
+                                        </>
+                                    )}
+                                    </select>
+                                </div>
+                                )}
+
 
                             <div className="form-row">
                                 <label>Start Date:</label>
