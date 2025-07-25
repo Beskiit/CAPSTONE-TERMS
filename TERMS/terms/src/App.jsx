@@ -8,6 +8,8 @@ import PasswordIcon from './assets/password.svg'
 import React, { useState } from 'react'
 import Dashboard from './components/Teacher/Dashboard.jsx'  
 import ViewReports from './components/Coordinator/ViewReports.jsx'
+import ClassificationOfGrades from './components/Teacher/ClassificationOfGrades.jsx'
+import ClassificationOfGradesReport from './components/Teacher/ClassificationOfGradesReport.jsx'
 
 function App() {
   return (
@@ -17,6 +19,8 @@ function App() {
           <Route path="/" element={<LoginForm />} />
           <Route path="/Dashboard" element={<Dashboard />} />
           <Route path="/ViewReports" element={<ViewReports />} />
+          <Route path="/ClassificationOfGrades" element={<ClassificationOfGrades />} />
+          <Route path="/ClassificationOfGradesReport" element={<ClassificationOfGradesReport />} />
         </Routes>
       </main>
     </BrowserRouter>

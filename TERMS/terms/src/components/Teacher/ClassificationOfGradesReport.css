@@ -1,0 +1,9 @@
+.buttons{
+    margin-left: 2rem;
+}
+
+button{
+    margin-left: 10px;
+    border-radius: 10px;
+    cursor: pointer;
+}
