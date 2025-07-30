@@ -3,7 +3,7 @@ import { getReports, getReport, giveReport, deleteReport, patchReport, getReport
 
 const router = express.Router();
 
-// Routes handled
+// Routes 
 router.get('/', getReports);         // GET /reports
 router.get('/:id', getReport);       // GET /reports/:id
 router.post('/', giveReport);      // POST /reports
