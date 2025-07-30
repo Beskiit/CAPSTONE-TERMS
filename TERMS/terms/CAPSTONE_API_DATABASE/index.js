@@ -2,7 +2,9 @@ import express from 'express';
 import bodyParser from 'body-parser';
 import cors from 'cors';
 import usersRouter from './routes/users.js';
-import db from './db.js'; // ✅ imported but used only in routes
+import reportAssignmentRouter from './routes/reportAssignment.js';
+
+import db from './db.js'; 
 
 const app = express();
 const PORT = 5000;
@@ -10,8 +12,9 @@ const PORT = 5000;
 app.use(cors());
 app.use(express.json());
 
-// Routes
+// all routes
 app.use('/users', usersRouter);
+app.use('/reports', reportAssignmentRouter);
 
 app.get('/', (req, res) => {
   res.send('Welcome to the Capstone API');
