@@ -9,8 +9,7 @@ export const getReports = (req, res) => {
   });
 };
 
-// in controllers/reportAssignmentCon.js
-
+// GET reports by user (remove given_to logic)
 export const getReportsByUser = (req, res) => {
   const { id } = req.params;
 
@@ -18,7 +17,6 @@ export const getReportsByUser = (req, res) => {
   SELECT 
       rt.report_name,
       ud.name AS given_by_name,
-      ud2.name AS given_to_name,
       sy.school_year,     
       qp.quarter,                 
       DATE_FORMAT(ra.from_date, '%M %d, %Y %h:%i %p') AS from_date,
@@ -31,12 +29,11 @@ export const getReportsByUser = (req, res) => {
   JOIN report_definition rd ON ra.report_definition_id = rd.report_definition_id
   JOIN report_type rt ON rd.report_type_id = rt.report_type_id
   JOIN user_details ud ON ra.given_by = ud.user_id
-  JOIN user_details ud2 ON ra.given_to = ud2.user_id
   JOIN year_and_quarter yq ON ra.quarter = yq.yr_and_qtr_id
   JOIN school_year sy ON yq.year = sy.year_id
   JOIN quarter_period qp ON yq.quarter = qp.quarter_period_id
-  WHERE ra.given_to = ?
-`;
+  WHERE ra.given_by = ?
+  `;
 
   db.query(sql, [id], (err, results) => {
     if (err) return res.status(500).send('Database error: ' + err);
@@ -45,10 +42,9 @@ export const getReportsByUser = (req, res) => {
   });
 };
 
-
-// GET single report by ID
+// GET single report by ID (remove given_to logic)
 export const getReport = (req, res) => {
-  const { id } = req.params; // id will "given_to"
+  const { id } = req.params;
 
   const sql = `
     SELECT 
@@ -58,24 +54,21 @@ export const getReport = (req, res) => {
     FROM report_assignment ra
     JOIN report_definition rd ON ra.report_definition_id = rd.report_definition_id
     JOIN report_type rt ON rd.report_type_id = rt.report_type_id
-    WHERE ra.given_to = ?
+    WHERE ra.report_assignment_id = ?
   `;
 
   db.query(sql, [id], (err, results) => {
     if (err) return res.status(500).send('Database error: ' + err);
-    if (results.length === 0) return res.status(404).send('No reports found for the given user.');
-    res.json(results); // return array of results
+    if (results.length === 0) return res.status(404).send('No reports found for the given ID.');
+    res.json(results);
   });
 };
-
-
 
 // POST (giveReport)
 export const giveReport = (req, res) => {
   const {
     report_definition_id,
     given_by,
-    given_to,
     quarter,
     year,
     to_date,
@@ -89,14 +82,13 @@ export const giveReport = (req, res) => {
 
   const sql = `
     INSERT INTO report_assignment 
-    (report_definition_id, given_by, given_to, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late) 
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (report_definition_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late) 
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
   const values = [
     report_definition_id,
     given_by,
-    given_to,
     quarter,
     year,
     from_date,
@@ -113,14 +105,12 @@ export const giveReport = (req, res) => {
   });
 };
 
-
 // PATCH existing report
 export const patchReport = (req, res) => {
   const { id } = req.params;
   const {
     report_definition_id,
     given_by,
-    given_to,
     quarter,
     year,
     from_date,
@@ -141,10 +131,6 @@ export const patchReport = (req, res) => {
   if (given_by !== undefined) {
     updates.push('given_by = ?');
     values.push(given_by);
-  }
-  if (given_to !== undefined) {
-    updates.push('given_to = ?');
-    values.push(given_to);
   }
   if (quarter !== undefined) {
     updates.push('quarter = ?');
