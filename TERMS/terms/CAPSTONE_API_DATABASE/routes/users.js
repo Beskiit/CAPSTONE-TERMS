@@ -3,7 +3,7 @@ import { createUser, getUser, getUsers, deleteUser, patchUser } from '../control
 
 const router = express.Router();
 
-// Routes handled
+// Routes 
 router.get('/', getUsers);         // GET /users
 router.get('/:id', getUser);       // GET /users/:id
 router.post('/', createUser);      // POST /users
