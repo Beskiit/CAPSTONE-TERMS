@@ -1,0 +1,36 @@
+.report-table {
+  width: 100%;
+  border-collapse: separate; /* Important */
+  border-spacing: 0 2rem; /* optional row spacing */
+}
+
+.report-table th {
+  color: #2a3b5c; /* Similar to your screenshot */
+  font-size: 15px;
+  text-align: left;
+}
+
+.report-table th.first-th {
+  padding-right: 120px; /* Add spacing between first th and the second one */
+}
+
+.report-table td {
+  padding: 10px 20px; /* optional for spacing */
+  border-bottom: 1px solid #ddd; /* Optional for row separation */
+  height: 50px;
+  vertical-align: middle; /* Align text vertically in the middle */
+}
+
+.report-table td:first-child{
+    border-left: 1px solid #ddd;
+}
+
+.report-table thead th {
+  border-bottom: 3px solid black;
+  padding: 10px 20px; /* optional for spacing */
+}
+
+.report-table tr{
+    cursor: pointer;
+    height: 50px;
+}
