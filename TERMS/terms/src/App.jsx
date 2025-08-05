@@ -10,6 +10,7 @@ import Dashboard from './components/Teacher/Dashboard.jsx'
 import ViewReports from './components/Coordinator/ViewReports.jsx'
 import ClassificationOfGrades from './components/Teacher/ClassificationOfGrades.jsx'
 import ClassificationOfGradesReport from './components/Teacher/ClassificationOfGradesReport.jsx'
+import AccomplishmentReport from './components/Teacher/AccomplishmentReport.jsx'
 
 function App() {
   return (
@@ -21,6 +22,7 @@ function App() {
           <Route path="/ViewReports" element={<ViewReports />} />
           <Route path="/ClassificationOfGrades" element={<ClassificationOfGrades />} />
           <Route path="/ClassificationOfGradesReport" element={<ClassificationOfGradesReport />} />
+          <Route path="/AccomplishmentReport" element={<AccomplishmentReport />} />
         </Routes>
       </main>
     </BrowserRouter>
