@@ -9,30 +9,30 @@ export const getReports = (req, res) => {
   });
 };
 
-// GET reports by user (remove given_to logic)
+// GET reports by user (removing given_to logic)
 export const getReportsByUser = (req, res) => {
   const { id } = req.params;
 
   const sql = `
-  SELECT 
+    SELECT 
       rt.report_name,
       ud.name AS given_by_name,
       sy.school_year,     
       qp.quarter,                 
-      DATE_FORMAT(ra.from_date, '%M %d, %Y %h:%i %p') AS from_date,
-      DATE_FORMAT(ra.to_date, '%M %d, %Y %h:%i %p') AS to_date,
+      DATE_FORMAT(ra.from_date, '%m/%d/%Y') AS from_date,
+      DATE_FORMAT(ra.to_date, '%m/%d/%Y') AS to_date,
       ra.instruction,
       ra.is_given,
       ra.is_archived,
       ra.allow_late
-  FROM report_assignment ra
-  JOIN report_definition rd ON ra.report_definition_id = rd.report_definition_id
-  JOIN report_type rt ON rd.report_type_id = rt.report_type_id
-  JOIN user_details ud ON ra.given_by = ud.user_id
-  JOIN year_and_quarter yq ON ra.quarter = yq.yr_and_qtr_id
-  JOIN school_year sy ON yq.year = sy.year_id
-  JOIN quarter_period qp ON yq.quarter = qp.quarter_period_id
-  WHERE ra.given_by = ?
+    FROM report_assignment ra
+    JOIN category c ON ra.category_id = c.category_id
+    JOIN report_type rt ON c.report_type_id = rt.report_type_id
+    JOIN user_details ud ON ra.given_by = ud.user_id
+    JOIN year_and_quarter yq ON ra.quarter = yq.yr_and_qtr_id
+    JOIN school_year sy ON yq.year = sy.year_id
+    JOIN quarter_period qp ON yq.quarter = qp.quarter_period_id
+    WHERE ra.given_by = ?
   `;
 
   db.query(sql, [id], (err, results) => {
@@ -42,18 +42,18 @@ export const getReportsByUser = (req, res) => {
   });
 };
 
-// GET single report by ID (remove given_to logic)
+// GET single report by ID
 export const getReport = (req, res) => {
   const { id } = req.params;
 
   const sql = `
     SELECT 
       ra.*, 
-      rd.report_type_id,
+      c.report_type_id,
       rt.report_name
     FROM report_assignment ra
-    JOIN report_definition rd ON ra.report_definition_id = rd.report_definition_id
-    JOIN report_type rt ON rd.report_type_id = rt.report_type_id
+    JOIN category c ON ra.category_id = c.category_id
+    JOIN report_type rt ON c.report_type_id = rt.report_type_id
     WHERE ra.report_assignment_id = ?
   `;
 
@@ -64,11 +64,11 @@ export const getReport = (req, res) => {
   });
 };
 
-// POST (giveReport)
+// POST (Give Report)
 export const giveReport = (req, res) => {
   const {
-    report_definition_id,
-    given_by,
+    category_id,
+    given_by = 5, // Default to 5 if not provided
     quarter,
     year,
     to_date,
@@ -78,17 +78,17 @@ export const giveReport = (req, res) => {
     allow_late
   } = req.body;
 
-  const from_date = new Date().toISOString().slice(0, 10); // 'YYYY-MM-DD'
+  const from_date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
   const sql = `
     INSERT INTO report_assignment 
-    (report_definition_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late) 
+    (category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late) 
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
   const values = [
-    report_definition_id,
-    given_by,
+    category_id,
+    given_by, // will be 5 if not provided in the request
     quarter,
     year,
     from_date,
@@ -99,17 +99,17 @@ export const giveReport = (req, res) => {
     allow_late
   ];
 
-  db.query(sql, values, (err, result) => {
+  db.query(sql, values, (err) => {
     if (err) return res.status(500).send('Failed to insert report: ' + err);
     res.send('Report assignment created successfully.');
   });
 };
 
-// PATCH existing report
+// PATCH report
 export const patchReport = (req, res) => {
   const { id } = req.params;
   const {
-    report_definition_id,
+    category_id,
     given_by,
     quarter,
     year,
@@ -124,9 +124,9 @@ export const patchReport = (req, res) => {
   const updates = [];
   const values = [];
 
-  if (report_definition_id !== undefined) {
-    updates.push('report_definition_id = ?');
-    values.push(report_definition_id);
+  if (category_id !== undefined) {
+    updates.push('category_id = ?');
+    values.push(category_id);
   }
   if (given_by !== undefined) {
     updates.push('given_by = ?');
@@ -147,6 +147,7 @@ export const patchReport = (req, res) => {
   if (to_date !== undefined) {
     updates.push('to_date = ?');
     values.push(to_date);
+    console.log("Updating to_date:", to_date); // Debug
   }
   if (instruction !== undefined) {
     updates.push('instruction = ?');
@@ -172,7 +173,7 @@ export const patchReport = (req, res) => {
   const sql = `UPDATE report_assignment SET ${updates.join(', ')} WHERE report_assignment_id = ?`;
   values.push(id);
 
-  db.query(sql, values, (err, result) => {
+  db.query(sql, values, (err) => {
     if (err) return res.status(500).send('Update failed: ' + err);
     res.send(`Report with ID ${id} has been updated.`);
   });
@@ -182,7 +183,7 @@ export const patchReport = (req, res) => {
 export const deleteReport = (req, res) => {
   const { id } = req.params;
   const sql = 'DELETE FROM report_assignment WHERE report_assignment_id = ?';
-  db.query(sql, [id], (err, result) => {
+  db.query(sql, [id], (err) => {
     if (err) return res.status(500).send('Delete failed: ' + err);
     res.send(`Report with ID ${id} has been deleted.`);
   });
