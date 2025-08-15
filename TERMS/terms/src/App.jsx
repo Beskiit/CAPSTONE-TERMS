@@ -11,6 +11,7 @@ import ViewReports from './components/Coordinator/ViewReports.jsx'
 import ClassificationOfGrades from './components/Teacher/ClassificationOfGrades.jsx'
 import ClassificationOfGradesReport from './components/Teacher/ClassificationOfGradesReport.jsx'
 import AccomplishmentReport from './components/Teacher/AccomplishmentReport.jsx'
+import SetReport from './components/Coordinator/SetReport.jsx'
 
 function App() {
   return (
@@ -23,6 +24,7 @@ function App() {
           <Route path="/ClassificationOfGrades" element={<ClassificationOfGrades />} />
           <Route path="/ClassificationOfGradesReport" element={<ClassificationOfGradesReport />} />
           <Route path="/AccomplishmentReport" element={<AccomplishmentReport />} />
+          <Route path="/SetReport" element={<SetReport />} />
         </Routes>
       </main>
     </BrowserRouter>
