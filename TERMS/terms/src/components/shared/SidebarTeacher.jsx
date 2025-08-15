@@ -1,9 +1,15 @@
-import React from 'react';
+import React, {useState} from 'react';
 import './SharedComponents.css';
 import Logout from '../../assets/logout.svg';
 import { Link } from 'react-router-dom'; // Import Link
 
 function SidebarTeacher({ activeLink }) {
+    const [openMenu, setOpenMenu] = useState(null);
+
+    var toggleMenu = (menu) => {
+        setOpenMenu(openMenu === menu ? null : menu);
+    };
+
     return (
         <div className="sidebar">
             <ul className="sidebar-menu">
@@ -12,17 +18,18 @@ function SidebarTeacher({ activeLink }) {
                         <li className={`sidebar-item ${activeLink === 'Dashboard' ? 'active' : ''}`}>
                             <Link to="/DashboardTeacher">Dashboard</Link>
                         </li>
-                        <li className={`sidebar-item ${activeLink === 'Assessments' ? 'active' : ''}`}>
-                            <a href="#">Assessments</a>
-                        </li>
-                        <li className={`sidebar-item ${activeLink === 'Classification of Grades' ? 'active' : ''}`}>
-                            <Link to="/ClassificationOfGrades">Classification of Grades</Link>
-                        </li>
-                        <li className={`sidebar-item ${activeLink === 'Enrollment' ? 'active' : ''}`}>
-                            <a href="#">Enrollment</a>
-                        </li>
-                        <li className={`sidebar-item ${activeLink === 'Accomplishment Report' ? 'active' : ''}`}>
-                            <a href="/AccomplishmentReport">Accomplishment Report</a>
+                        <li className={`sidebar-item ${activeLink === 'Reports' ? 'active' : ''}`}>
+                                <a className={`dropdown-btn ${openMenu === "reports" ? "open" : ""}`} 
+                                onClick={() => toggleMenu('reports')}>
+                                    Reports <span className="arrow">{openMenu === "reports" ? "▲" : "▼"}</span>
+                                </a>
+                                {openMenu === "reports" && (
+                                    <ul className="dropdown-menu">
+                                    <li><a href="#">LAEMPL</a></li>
+                                    <li><a href="/AccomplishmentReport">Accomplishment Report</a></li>
+                                    <li><a href="/ClassificationOfGrades">Classification of Grades</a></li>
+                                    </ul>
+                                )}
                         </li>
                     </div>
                     <div className="sidebar-menu-logout">
