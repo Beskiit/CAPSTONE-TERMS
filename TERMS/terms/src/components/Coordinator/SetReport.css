@@ -1,0 +1,280 @@
+body {
+  background-color: #F1F1F1;
+  top: 0;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+
+.dashboard-container {
+  display: flex;
+  margin-top: 2.5rem;
+  height: 88vh;
+  width: 100vw;
+  color: black;
+  position: fixed;
+  overflow-y: auto;
+}
+
+.dashboard-content {
+  padding-left: 1rem;
+  width: 100%;
+}
+
+.report-schedule {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 1rem;
+  padding-left: 5rem;
+}
+
+.report-button {
+  background-color: #1E56A0;
+  color: white;
+  padding: 0.5rem;
+  border: none;
+  border-radius: 0.5rem;
+  margin-right: 5rem;
+  cursor: pointer;
+}
+
+.set-report-schedule-container {
+  display: flex;
+  justify-content: center;
+}
+
+.set-report-schedule {
+  z-index: 1000;
+  background-color: #dfdddd;
+  height: 100%;
+  width: 100%; /* full width */
+  max-width: none; /* remove clamp */
+  padding: 1rem;
+  border-radius: 8px;
+}
+
+.popup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-right: 1rem;
+}
+
+.close-button {
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 1.5rem;
+  color: black;
+}
+
+/* Updated form to full width grid */
+.schedule-form {
+  width: 100%;
+  display: grid;
+  row-gap: 16px;
+}
+
+/* Row 1: Title */
+.schedule-form .form-row:first-of-type {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 12px;
+}
+
+/* Row 2: Category + Teacher */
+.schedule-form .form-row:nth-of-type(2) {
+  display: grid;
+  grid-template-columns: auto 1fr auto 1fr;
+  align-items: center;
+  column-gap: 16px;
+}
+
+/* Row 3: Sub-category */
+.schedule-form .form-row:nth-of-type(3) {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 12px;
+}
+
+/* Row 4: Dates */
+.schedule-form .form-row:nth-of-type(4) {
+  display: grid;
+  grid-template-columns: auto 1fr auto 1fr;
+  align-items: center;
+  column-gap: 16px;
+}
+
+/* Row 5: Textarea */
+.schedule-form .textarea-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  column-gap: 12px;
+}
+
+.form-row label {
+  font-weight: bold;
+}
+
+.form-row input,
+.form-row select,
+.textarea-row textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  font-size: 16px;
+}
+
+.textarea-row textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+/* Actions row aligned left */
+.form-actions {
+  display: flex;
+  justify-content: center;
+}
+
+button {
+  padding: 10px 20px;
+  background-color: #0052cc;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* Preview panel */
+.template-preview-panel {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #d6d6d6;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.template-preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.template-preview-header small {
+  font-weight: 400;
+  color: #666;
+}
+
+/* Keeps image nicely contained and responsive */
+.template-preview-body {
+  position: relative;
+  width: 100%;
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px dashed #d0d0d0;
+}
+
+.template-preview-body img {
+  max-width: 100%;
+  max-height: 420px;
+  width: auto;
+  height: auto;
+  display: block;
+  object-fit: contain;
+}
+
+.template-preview-empty {
+  color: #777;
+  font-size: 0.95rem;
+}
+
+/* Simple skeleton while loading */
+.template-skeleton {
+  width: 100%;
+  height: 100%;
+  animation: pulse 1.4s ease-in-out infinite;
+  background: linear-gradient(
+    90deg,
+    #eee 25%,
+    #f5f5f5 37%,
+    #eee 63%
+  );
+  background-size: 400% 100%;
+  border-radius: 8px;
+}
+
+@keyframes pulse {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
+.hidden { display: none; }
+
+.template-preview-error {
+  color: #b00020;
+  font-size: 0.9rem;
+  text-align: center;
+  padding: 8px 0;
+}
+
+/* Make the preview image indicate it's clickable */
+.clickable-preview {
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+.clickable-preview:hover {
+  transform: scale(1.02);
+}
+
+/* Modal background */
+.image-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 2000;
+}
+
+/* Modal content */
+.image-modal-content {
+  position: relative;
+  max-width: 90%;
+  max-height: 90%;
+}
+
+.image-modal-content img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 8px;
+}
+
+/* Close button */
+.close-modal {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  background: white;
+  border: none;
+  border-radius: 50%;
+  font-size: 1.5rem;
+  line-height: 1rem;
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+}
