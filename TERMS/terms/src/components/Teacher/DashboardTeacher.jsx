@@ -1,10 +1,10 @@
-import "./Dashboard.css";
+import "./DashboardTeacher.css";
 import React from 'react'
 import { useState } from 'react'
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import Header from '../shared/Header.jsx';
-import Sidebar from '../shared/Sidebar.jsx';
+import Sidebar from '../shared/SidebarTeacher.jsx';
 import Submitted from '../../assets/submitted.svg';
 import Pending from '../../assets/pending.svg';
 import Approved from '../../assets/approved.svg';

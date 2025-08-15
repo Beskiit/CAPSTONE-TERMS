@@ -3,14 +3,14 @@ import './SharedComponents.css';
 import Logout from '../../assets/logout.svg';
 import { Link } from 'react-router-dom'; // Import Link
 
-function Sidebar({ activeLink }) {
+function SidebarTeacher({ activeLink }) {
     return (
         <div className="sidebar">
             <ul className="sidebar-menu">
                 <div className="sidebar-menu-container">
                     <div>
                         <li className={`sidebar-item ${activeLink === 'Dashboard' ? 'active' : ''}`}>
-                            <Link to="/Dashboard">Dashboard</Link>
+                            <Link to="/DashboardTeacher">Dashboard</Link>
                         </li>
                         <li className={`sidebar-item ${activeLink === 'Assessments' ? 'active' : ''}`}>
                             <a href="#">Assessments</a>
@@ -20,6 +20,9 @@ function Sidebar({ activeLink }) {
                         </li>
                         <li className={`sidebar-item ${activeLink === 'Enrollment' ? 'active' : ''}`}>
                             <a href="#">Enrollment</a>
+                        </li>
+                        <li className={`sidebar-item ${activeLink === 'Accomplishment Report' ? 'active' : ''}`}>
+                            <a href="/AccomplishmentReport">Accomplishment Report</a>
                         </li>
                     </div>
                     <div className="sidebar-menu-logout">
@@ -33,4 +36,4 @@ function Sidebar({ activeLink }) {
     );
 }
 
-export default Sidebar;
+export default SidebarTeacher;
