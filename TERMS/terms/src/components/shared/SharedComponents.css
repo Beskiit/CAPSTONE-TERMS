@@ -47,7 +47,6 @@ header img {
 
 /* Sidebar Styles */
 .sidebar {
-  position: fixed;
   height: 88vh;
   width: 200px;
   background-color: #1E56A0;
@@ -75,6 +74,10 @@ header img {
 
 .sidebar-item {
   width: 100%;
+}
+
+ul > li{
+  list-style-type: none;
 }
 
 .sidebar-item a {

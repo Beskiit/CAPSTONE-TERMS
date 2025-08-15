@@ -1,18 +1,26 @@
 import React, {useState} from "react";
 import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
 import Header from "../shared/Header.jsx";
-import Sidebar from "../shared/Sidebar.jsx";
+import Sidebar from "../shared/SidebarTeacher.jsx";
+import SidebarCoordinator from "../shared/SidebarCoordinator.jsx";
 import { Link } from "react-router-dom";
 import "./AccomplishmentReport.css";
 
 function AccomplishmentReport() {
     const [openPopup, setOpenPopup] = useState(false);
     const navigate = useNavigate();
+
+    const role = localStorage.getItem("role");
+
     return(
     <>
         <Header />
         <div className="dashboard-container">
-            <Sidebar activeLink="Accomplishment Report"/>
+            {role === 'teacher' ?(
+                <Sidebar activeLink="Accomplishment Report" />
+            ) : (
+                <SidebarCoordinator activeLink="Accomplishment Report" /> // Assuming Coordinator has similar sidebar for this page
+            )}
             <div className="dashboard-content">
                 <div className="dashboard-main">
                     <h2>Accomplishment Report</h2>

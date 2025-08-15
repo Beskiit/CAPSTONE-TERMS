@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from "react";
 import Header from '../shared/Header.jsx';
-import Sidebar from '../shared/Sidebar.jsx';
+import Sidebar from '../shared/SidebarCoordinator.jsx';
 import './SetReport.css';
 import Laempl from '../../assets/templates/LAEMPL.png';
 import AccomplishmentReport from '../../assets/templates/accomplishment-report.png';
+import SidebarCoordinator from "../shared/SidebarCoordinator.jsx";
 
 // Preview mapping (category_id → sub_category_id → image)
 const TEMPLATE_MAP = {
@@ -92,10 +93,10 @@ function SetReport() {
     <>
       <Header />
       <div className="dashboard-container">
-        <Sidebar activeLink="View Reports" />
+        <Sidebar activeLink="Set Report Schedule" />
         <div className="dashboard-content">
           <div className="dashboard-main">
-            <h2>View Reports</h2>
+            <h2>Set Reports</h2>
 
             <form className="schedule-form" onSubmit={handleSubmit}>
               <div className="form-row">
