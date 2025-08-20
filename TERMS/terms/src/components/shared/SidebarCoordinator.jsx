@@ -4,7 +4,7 @@ import Logout from '../../assets/logout.svg';
 import { Link } from 'react-router-dom'; // Import Link
 
 
-function SidebarCoordinator({ activeLink }) {
+function SidebarCoordinator({ activeLink, style }) {
     const [openMenu, setOpenMenu] = useState(null);
 
     var toggleMenu = (menu) => {
@@ -13,7 +13,7 @@ function SidebarCoordinator({ activeLink }) {
 
     return (
         <>
-            <div className="sidebar">
+            <div className="sidebar" style={style}>
                 <ul className="sidebar-menu">
                     <div className="sidebar-menu-container">
                         <div>
