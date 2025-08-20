@@ -12,8 +12,6 @@ body {
   height: 88vh;
   width: 100vw;
   color: black;
-  position: fixed;
-  overflow-y: auto;
 }
 
 .dashboard-content {

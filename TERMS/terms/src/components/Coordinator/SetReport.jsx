@@ -86,14 +86,13 @@ function SetReport() {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    // submit logic here
   };
 
   return (
     <>
       <Header />
-      <div className="dashboard-container">
-        <Sidebar activeLink="Set Report Schedule" />
+      <div className="dashboard-container" style={{ overflowY: 'auto' }}>
+        <Sidebar activeLink="Set Report Schedule" style={{ position: 'fixed' }} />
         <div className="dashboard-content">
           <div className="dashboard-main">
             <h2>Set Reports</h2>
@@ -101,7 +100,7 @@ function SetReport() {
             <form className="schedule-form" onSubmit={handleSubmit}>
               <div className="form-row">
                 <label>Title:</label>
-                <input type="text" placeholder="Enter report title"/>
+                <input type="text" placeholder="Enter report title" />
               </div>
 
               <div className="form-row">
