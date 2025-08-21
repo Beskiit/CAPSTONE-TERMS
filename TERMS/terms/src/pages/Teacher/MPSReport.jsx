@@ -59,7 +59,7 @@ function LAEMPLReport() {
         )}
         <div className="dashboard-content">
           <div className="dashboard-main">
-            <h2>LAEMPL</h2>
+            <h2>MPS</h2>
           </div>
 
           <div className="content">
