@@ -28,7 +28,7 @@ function SidebarCoordinator({ activeLink, style }) {
                                 {openMenu === "reports" && (
                                     <ul className="dropdown-menu">
                                     <li><a href="#">LAEMPL</a></li>
-                                    <li><a href="/AccomplishmentReport">Accomplishment Report</a></li>
+                                    <li><a href="/Accomplishment">Accomplishment Report</a></li>
                                     </ul>
                                 )}
                             </li>

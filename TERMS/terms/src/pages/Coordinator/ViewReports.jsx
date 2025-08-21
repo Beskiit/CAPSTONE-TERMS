@@ -1,7 +1,7 @@
 import "./ViewReports.css";
 import React, { useState, useEffect  } from 'react';
-import Header from '../shared/Header.jsx';
-import Sidebar from '../shared/SidebarTeacher.jsx';
+import Header from '../../components/shared/Header.jsx';
+import Sidebar from '../../components/shared/SidebarTeacher.jsx';
 import axios from 'axios';
 
 function ViewReports() {
