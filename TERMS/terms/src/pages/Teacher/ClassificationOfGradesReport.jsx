@@ -1,7 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
-import Header from '../shared/Header.jsx';
-import Sidebar from "../shared/SidebarTeacher.jsx";
+import Header from '../../components/shared/Header.jsx';
+import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import './ClassificationOfGradesReport.css';

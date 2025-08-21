@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo } from "react";
-import Header from '../shared/Header.jsx';
-import Sidebar from '../shared/SidebarCoordinator.jsx';
+import Header from '../../components/shared/Header.jsx';
+import Sidebar from '../../components/shared/SidebarCoordinator.jsx';
 import './SetReport.css';
 import Laempl from '../../assets/templates/LAEMPL.png';
 import AccomplishmentReport from '../../assets/templates/accomplishment-report.png';
-import SidebarCoordinator from "../shared/SidebarCoordinator.jsx";
+import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 
 // Preview mapping (category_id → sub_category_id → image)
 const TEMPLATE_MAP = {

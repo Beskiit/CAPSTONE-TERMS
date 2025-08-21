@@ -65,7 +65,7 @@ header img {
   flex-direction: column;
 }
 
-.sidebar-menu-container{
+.sidebar-menu-container {
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -76,31 +76,54 @@ header img {
   width: 100%;
 }
 
-ul > li{
+ul > li {
   list-style-type: none;
 }
 
-.sidebar-item a {
+/* Top-level links (Dashboard, Reports, etc.) */
+.sidebar-item > a,
+.sidebar-item > .dropdown-btn {
   margin-top: 2.5rem;
   display: block;
-  width: 83%;
+  width: 100%;
   padding: 0.75rem 1rem;
   color: white;
   text-decoration: none;
-  text-align: center;
+  text-align: center;       /* center text inside the link */
+  box-sizing: border-box;
 }
 
-.sidebar-item a:hover {
+.sidebar-item > a:hover,
+.sidebar-item.active > a,
+.sidebar-item > .dropdown-btn:hover {
   background-color: #163D75;
 }
 
-.sidebar-item.active a {
-  background-color: #163D75;
-}
-
-.sidebar-menu-logout{
+.sidebar-menu-logout {
   margin-top: auto;
   padding-bottom: 2rem;
+}
+
+/* Dropdown container */
+.dropdown-menu {
+  margin: 0;
+  padding: 0;
+}
+
+/* Dropdown items – same alignment as parent, no big gaps */
+.dropdown-menu li a {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 1rem;
+  color: white;
+  text-decoration: none;
+  text-align: center;      /* center dropdown text as well */
+  box-sizing: border-box;
+  margin-top: 0;
+}
+
+.dropdown-menu li a:hover {
+  background-color: #163D75;
 }
 
 /* End of Sidebar Styles */

@@ -6,13 +6,16 @@ import EyeOffIcon from './assets/eye-close.svg'
 import UserIcon from './assets/user.svg'
 import PasswordIcon from './assets/password.svg'
 import React, { useState } from 'react'
-import DashboardTeacher from './components/Teacher/DashboardTeacher.jsx'  
-import DashboardCoordinator from './components/Coordinator/DashboardCoordinator.jsx'  
-import ViewReports from './components/Coordinator/ViewReports.jsx'
-import ClassificationOfGrades from './components/Teacher/ClassificationOfGrades.jsx'
-import ClassificationOfGradesReport from './components/Teacher/ClassificationOfGradesReport.jsx'
-import AccomplishmentReport from './components/Teacher/AccomplishmentReport.jsx'
-import SetReport from './components/Coordinator/SetReport.jsx'
+import DashboardTeacher from './pages/Teacher/DashboardTeacher.jsx'  
+import DashboardCoordinator from './pages/Coordinator/DashboardCoordinator.jsx'  
+import ViewReports from './pages/Coordinator/ViewReports.jsx'
+import ClassificationOfGrades from './pages/Teacher/ClassificationOfGrades.jsx'
+import ClassificationOfGradesReport from './pages/Teacher/ClassificationOfGradesReport.jsx'
+import AccomplishmentReport from './pages/Teacher/AccomplishmentReport.jsx'
+import SetReport from './pages/Coordinator/SetReport.jsx'
+import Accomplishment from './pages/Teacher/Accomplishment.jsx'
+import LAEMPL from './pages/Teacher/LAEMPL.jsx'
+import LAEMPLReport from './pages/Teacher/LAEMPLReport.jsx'
 
 function App() {
   return (
@@ -27,6 +30,9 @@ function App() {
           <Route path="/ClassificationOfGradesReport" element={<ClassificationOfGradesReport />} />
           <Route path="/AccomplishmentReport" element={<AccomplishmentReport />} />
           <Route path="/SetReport" element={<SetReport />} />
+          <Route path="/Accomplishment" element={<Accomplishment />} />
+          <Route path="/LAEMPL" element={<LAEMPL />} />
+          <Route path="/LAEMPLReport" element={<LAEMPLReport />} />
         </Routes>
       </main>
     </BrowserRouter>
