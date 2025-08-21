@@ -16,6 +16,8 @@ import SetReport from './pages/Coordinator/SetReport.jsx'
 import Accomplishment from './pages/Teacher/Accomplishment.jsx'
 import LAEMPL from './pages/Teacher/LAEMPL.jsx'
 import LAEMPLReport from './pages/Teacher/LAEMPLReport.jsx'
+import MPS from './pages/Teacher/MPS.jsx'
+import MPSReport from './pages/Teacher/MPSReport.jsx'
 
 function App() {
   return (
@@ -33,6 +35,8 @@ function App() {
           <Route path="/Accomplishment" element={<Accomplishment />} />
           <Route path="/LAEMPL" element={<LAEMPL />} />
           <Route path="/LAEMPLReport" element={<LAEMPLReport />} />
+          <Route path="/MPS" element={<MPS />} />
+          <Route path="/MPSReport" element={<MPSReport />} />
         </Routes>
       </main>
     </BrowserRouter>
