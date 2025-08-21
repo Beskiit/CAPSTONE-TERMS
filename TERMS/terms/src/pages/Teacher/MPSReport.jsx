@@ -7,13 +7,17 @@ import "./LAEMPLReport.css";
 const TRAITS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
 
 const COLS = [
-  { key: "m",        label: "M" },
-  { key: "f",        label: "F" },
-  { key: "gmrc",     label: "GMRC (15 - 25 points)" },
-  { key: "math",     label: "Mathematics (15 - 25 points)" },
-  { key: "lang",     label: "Language (15 - 25 points)" },
-  { key: "read",     label: "Reading and Literacy (15 - 25 points)" },
-  { key: "makabasa", label: "MAKABASA (15 - 25 points)" },
+  { key: "m",        label: "Male" },
+  { key: "f",        label: "Female" },
+  { key: "total",     label: "Total no. of Pupils" },
+  { key: "mean",     label: "Mean" },
+  { key: "median",     label: "Median" },
+  { key: "pl",     label: "PL" },
+  { key: "mps", label: "MPS" },
+  { key: "sd", label: "SD" },
+  { key: "target", label: "Target" },
+  { key: "hs", label: "HS" },
+  { key: "ls", label: "LS" },
 ];
 
 function LAEMPLReport() {
@@ -49,9 +53,9 @@ function LAEMPLReport() {
       <Header />
       <div className="dashboard-container">
         {isTeacher ? (
-          <Sidebar activeLink="LAEMPL" />
+          <Sidebar activeLink="MPS" />
         ) : (
-          <SidebarCoordinator activeLink="LAEMPL" />
+          <SidebarCoordinator activeLink="MPS" />
         )}
         <div className="dashboard-content">
           <div className="dashboard-main">
@@ -87,7 +91,7 @@ function LAEMPLReport() {
             {/* DYNAMIC TABLE */}
             <div className="table-wrap">
               <table className="laempl-table">
-                <caption>Grade 1 - LAEMPL</caption>
+                <caption>Grade 1 - MPS</caption>
                 <thead>
                   <tr>
                     <th scope="col" className="row-head"> </th>

@@ -17,13 +17,13 @@ function LAEMPL() {
            <Header />
             <div className="dashboard-container">
                 {isTeacher ? (
-                    <Sidebar activeLink="LAEMPL" />
+                    <Sidebar activeLink="MPS" />
                 ) : (
-                    <SidebarCoordinator activeLink="LAEMPL" />
+                    <SidebarCoordinator activeLink="MPS" />
                 )}
                 <div className="dashboard-content">
                     <div className="dashboard-main">
-                        <h2>LAEMPL</h2>
+                        <h2>MPS</h2>
                     </div>
                     <div className="content">
                         <table className="report-table">
@@ -37,8 +37,8 @@ function LAEMPL() {
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr onClick={() => navigate('/LAEMPLReport')}>
-                                    <td className="first-td">Accomplishment Report</td>
+                                <tr onClick={() => navigate('/MPSReport')}>
+                                    <td className="first-td">MPS</td>
                                     <td>Teacher</td>
                                     <td>2023-10-01</td>
                                     <td>2023-10-15</td>
