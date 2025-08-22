@@ -4,13 +4,11 @@ import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import "./LAEMPLReport.css";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
-// Expect the page to be opened like: /your-page?id=<submission_id>
-// const SUBMISSION_ID = new URLSearchParams(window.location.search).get("id");
-// at the top of LAEMPLReport.jsx
+
+
 const SUBMISSION_ID =
   new URLSearchParams(window.location.search).get("id") ||
-  "7";  // 👈 hard-coded test id
+  "8";  
 
 
 const TRAITS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
@@ -74,10 +72,8 @@ function LAEMPLReport() {
     return acc;
   }, {});
 
-  // Convert table state to rows[] for backend
   const toRows = (obj) => TRAITS.map(trait => ({ trait, ...obj[trait] }));
 
-  // Submit to backend: PATCH /submissions/:id
   const canSubmit = !!SUBMISSION_ID && !saving;
   const onSubmit = async () => {
     if (!SUBMISSION_ID) {
@@ -123,13 +119,14 @@ function LAEMPLReport() {
 
   // Prefill from backend (optional): GET /reports/submissions/:id or /submission/:id
   useEffect(() => {
+    const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
     const load = async () => {
       if (!SUBMISSION_ID) return;
       setLoading(true);
       try {
         const tryUrls = [
           `${API_BASE}/submissions/laempl/${SUBMISSION_ID}`,
-          `${API_BASE}/submission/${SUBMISSION_ID}`,
+          `${API_BASE}/submissions/${SUBMISSION_ID}`,
         ];
         let json = null;
         for (const url of tryUrls) {

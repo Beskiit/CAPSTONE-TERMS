@@ -1,153 +1,116 @@
 import db from '../db.js';
 
-// GET all submissions
+export const createSubmission = (req, res) => {
+  const { category_id, submitted_by, status = 0, value = null, fields } = req.body;
+  if (category_id == null || submitted_by == null || fields == null) {
+    return res.status(400).send('category_id, submitted_by, and fields are required.');
+  }
+
+  const countSql = `
+    SELECT COALESCE(MAX(number_of_submission), 0) AS max_no
+    FROM submission
+    WHERE submitted_by = ? AND category_id = ?
+  `;
+  db.query(countSql, [submitted_by, category_id], (countErr, countRes) => {
+    if (countErr) return res.status(500).send('Database error (count): ' + countErr);
+
+    const number_of_submission = Number(countRes?.[0]?.max_no || 0) + 1;
+    const insertSql = `
+      INSERT INTO submission
+        (category_id, submitted_by, status, number_of_submission, value, date_submitted, fields)
+      VALUES
+        (?, ?, ?, ?, ?, NOW(), ?)
+    `;
+    const fieldsJson = typeof fields === 'string' ? fields : JSON.stringify(fields);
+
+    db.query(
+      insertSql,
+      [category_id, submitted_by, status, number_of_submission, value, fieldsJson],
+      (insErr, insRes) => {
+        if (insErr) return res.status(500).send('Failed to insert submission: ' + insErr);
+
+        const getSql = `
+          SELECT s.submission_id, s.category_id, s.submitted_by, s.status,
+                 s.number_of_submission, s.value,
+                 DATE_FORMAT(s.date_submitted, '%m/%d/%Y %H:%i:%s') AS date_submitted,
+                 s.fields
+          FROM submission s
+          WHERE s.submission_id = ?
+        `;
+        db.query(getSql, [insRes.insertId], (gErr, gRes) => {
+          if (gErr) return res.status(500).send('Database error: ' + gErr);
+          res.status(201).json(normalizeFields(gRes[0]));
+        });
+      }
+    );
+  });
+};
+
+
 export const getSubmissions = (req, res) => {
   const sql = `
-    SELECT 
-      s.submission_id,
-      s.category_id,
-      s.submitted_by,
-      s.status,
-      s.number_of_submission,
-      s.value,
-      DATE_FORMAT(s.date_submitted, '%m/%d/%Y %H:%i:%s') AS date_submitted,
-      s.fields
+    SELECT s.submission_id, s.category_id, s.submitted_by, s.status,
+           s.number_of_submission, s.value,
+           DATE_FORMAT(s.date_submitted, '%m/%d/%Y %H:%i:%s') AS date_submitted,
+           s.fields
     FROM submission s
     ORDER BY s.date_submitted DESC
   `;
   db.query(sql, (err, results) => {
     if (err) return res.status(500).send('Database error: ' + err);
-    res.json(results);
+    res.json(results.map(normalizeFields));
   });
 };
 
-// GET submissions by user
 export const getSubmissionsByUser = (req, res) => {
   const { id } = req.params;
   const sql = `
-    SELECT 
-      s.submission_id,
-      s.category_id,
-      s.submitted_by,
-      s.status,
-      s.number_of_submission,
-      s.value,
-      DATE_FORMAT(s.date_submitted, '%m/%d/%Y %H:%i:%s') AS date_submitted,
-      s.fields
+    SELECT s.submission_id, s.category_id, s.submitted_by, s.status,
+           s.number_of_submission, s.value,
+           DATE_FORMAT(s.date_submitted, '%m/%d/%Y %H:%i:%s') AS date_submitted,
+           s.fields
     FROM submission s
     WHERE s.submitted_by = ?
     ORDER BY s.date_submitted DESC
   `;
   db.query(sql, [id], (err, results) => {
     if (err) return res.status(500).send('Database error: ' + err);
-    if (results.length === 0) return res.status(404).send('No submissions found for this user.');
-    res.json(results);
+    res.json(results.map(normalizeFields)); // 200 with [] if none
   });
 };
 
-// GET single submission by ID
 export const getSubmission = (req, res) => {
   const { id } = req.params;
   const sql = `
-    SELECT 
-      s.submission_id,
-      s.category_id,
-      s.submitted_by,
-      s.status,
-      s.number_of_submission,
-      s.value,
-      DATE_FORMAT(s.date_submitted, '%m/%d/%Y %H:%i:%s') AS date_submitted,
-      s.fields
+    SELECT s.submission_id, s.category_id, s.submitted_by, s.status,
+           s.number_of_submission, s.value,
+           DATE_FORMAT(s.date_submitted, '%m/%d/%Y %H:%i:%s') AS date_submitted,
+           s.fields
     FROM submission s
     WHERE s.submission_id = ?
   `;
   db.query(sql, [id], (err, results) => {
     if (err) return res.status(500).send('Database error: ' + err);
-    if (results.length === 0) return res.status(404).send('No submission found for the given ID.');
-    res.json(results[0]);
+    if (!results.length) return res.status(404).send('No submission found for the given ID.');
+    res.json(normalizeFields(results[0]));
   });
 };
 
-// POST (Create Submission)
-// Body: { category_id, submitted_by, status?, value?, fields (JSON or object) }
-export const createSubmission = (req, res) => {
-  const { category_id, submitted_by, status = 0, value = null, fields } = req.body;
+// simple passthrough for React's /submissions/laempl/:id GET
+export const getLAEMPLBySubmissionId = (req, res) => getSubmission(req, res);
 
-  if (category_id == null || submitted_by == null || fields == null) {
-    return res.status(400).send('category_id, submitted_by, and fields are required.');
-  }
 
-  // Step 1: get current count to compute number_of_submission
-  const countSql = `
-    SELECT COUNT(*) AS cnt 
-    FROM submission 
-    WHERE submitted_by = ? AND category_id = ?
-  `;
-  db.query(countSql, [submitted_by, category_id], (countErr, countRes) => {
-    if (countErr) return res.status(500).send('Database error (count): ' + countErr);
-
-    const number_of_submission = Number(countRes?.[0]?.cnt || 0) + 1;
-
-    // Step 2: insert
-    const insertSql = `
-      INSERT INTO submission
-        (category_id, submitted_by, status, number_of_submission, value, date_submitted, fields)
-      VALUES
-        (?, ?, ?, ?, ?, NOW(), CAST(? AS JSON))
-    `;
-
-    // Ensure fields is a JSON string
-    const fieldsJson = typeof fields === 'string' ? fields : JSON.stringify(fields);
-
-    const values = [
-      category_id,
-      submitted_by,
-      status,
-      number_of_submission,
-      value,
-      fieldsJson,
-    ];
-
-    db.query(insertSql, values, (insErr, insRes) => {
-      if (insErr) return res.status(500).send('Failed to insert submission: ' + insErr);
-
-      const getSql = `
-        SELECT 
-          s.submission_id,
-          s.category_id,
-          s.submitted_by,
-          s.status,
-          s.number_of_submission,
-          s.value,
-          DATE_FORMAT(s.date_submitted, '%m/%d/%Y %H:%i:%s') AS date_submitted,
-          s.fields
-        FROM submission s
-        WHERE s.submission_id = ?
-      `;
-      db.query(getSql, [insRes.insertId], (gErr, gRes) => {
-        if (gErr) return res.status(500).send('Database error: ' + gErr);
-        res.status(201).json(gRes[0]);
-      });
-    });
-  });
-};
-
-// PATCH /submissions/:id  (user fills answers)
 export const submitAnswers = (req, res) => {
   const { id } = req.params;
-
-  // Guard against missing body / wrong content-type
   const body = req.body || {};
-  // accept status, or status_id/status_name if you later add FK lookup
-  const answersInput = body.answers ?? {};
-  const status = body.status; // if you keep direct numeric status
+  const status = body.status;
 
-  // Ensure answers is an object; if string, try to parse, else default to {}
   let answers = {};
-  if (typeof answersInput === 'string') {
-    try { answers = JSON.parse(answersInput); } catch { answers = {}; }
-  } else if (typeof answersInput === 'object' && answersInput !== null) {
-    answers = answersInput;
+  const input = body.answers ?? {};
+  if (typeof input === 'string') {
+    try { answers = JSON.parse(input); } catch { answers = {}; }
+  } else if (input && typeof input === 'object') {
+    answers = input;
   }
 
   const selectSql = `SELECT fields FROM submission WHERE submission_id = ?`;
@@ -155,26 +118,20 @@ export const submitAnswers = (req, res) => {
     if (selErr) return res.status(500).send('Database error: ' + selErr);
     if (!selRes.length) return res.status(404).send('Submission not found.');
 
-    // Parse existing JSON safely
     let current = {};
     try {
-      current = typeof selRes[0].fields === 'string'
-        ? JSON.parse(selRes[0].fields)
-        : (selRes[0].fields || {});
-    } catch {
-      current = {};
-    }
+      current = typeof selRes[0].fields === 'string' ? JSON.parse(selRes[0].fields) : (selRes[0].fields || {});
+    } catch { current = {}; }
 
     const next = {
       _form: current._form || { title: '', fields: [] },
-      _answers: { ...(current._answers || {}), ...answers }
+      _answers: { ...(current._answers || {}), ...answers },
     };
 
-    const sets = ['fields = ?'];            // no CAST for MariaDB
+    const sets = ['fields = ?'];
     const params = [JSON.stringify(next)];
 
-    // Optional: update status (ensure it’s a valid FK id)
-    if (typeof status === 'number') {
+    if (Number.isInteger(status)) { // <— ensure INT if schema expects it
       sets.push('status = ?');
       params.push(status);
     }
@@ -192,14 +149,12 @@ export const submitAnswers = (req, res) => {
       `;
       db.query(fetchSql, [id], (fErr, fRes) => {
         if (fErr) return res.status(500).send('Database error: ' + fErr);
-        res.json(fRes[0]);
+        res.json(normalizeFields(fRes[0]));
       });
     });
   });
 };
 
-// PATCH /reports/laempl/:id
-// Update the LAEMPL data for a specific submission created by "giveLAEMPLReport".
 export const patchLAEMPLBySubmissionId = (req, res) => {
   const { id } = req.params; // submission_id
 

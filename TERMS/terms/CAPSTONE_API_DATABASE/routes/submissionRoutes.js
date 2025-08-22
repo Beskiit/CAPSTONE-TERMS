@@ -1,35 +1,30 @@
-import express from 'express';
+import express from "express";
 import {
   getSubmissions,
   getSubmissionsByUser,
   getSubmission,
+  getLAEMPLBySubmissionId,   // <-- will add below
+  patchLAEMPLBySubmissionId,
   createSubmission,
   submitAnswers,
   deleteSubmission,
-  patchLAEMPLBySubmissionId,
-} from '../controllers/submissionController.js';
+} from "../controllers/submissionController.js";  // <-- FIXED path
+
 
 const router = express.Router();
+// routes/submissionRoutes.js
 
-// GET /api/submissions
-router.get('/', getSubmissions);
+router.get("/", getSubmissions);
+router.get("/user/:id", getSubmissionsByUser);
 
-// GET /api/submissions/user/:id
-router.get('/user/:id', getSubmissionsByUser);
+// ORDER MATTERS:
+router.get("/laempl/:id", getLAEMPLBySubmissionId);   // <-- put before
+router.patch("/laempl/:id", patchLAEMPLBySubmissionId);
 
-// GET /api/submissions/:id
-router.get('/:id', getSubmission);
-
-// POST /api/submissions
-router.post('/', createSubmission);
-
-// PATCH /api/submissions/:id
-router.patch('/:id', submitAnswers);
-
-// PATCH /api/submissions/laempl/:id
-router.patch('/laempl/:id', patchLAEMPLBySubmissionId);
-
-// DELETE /api/submissions/:id
-router.delete('/:id', deleteSubmission);
+router.get("/:id", getSubmission);
+router.patch("/:id/answers", submitAnswers);
+router.post("/", createSubmission);
+router.delete("/:id", deleteSubmission);
 
 export default router;
+
