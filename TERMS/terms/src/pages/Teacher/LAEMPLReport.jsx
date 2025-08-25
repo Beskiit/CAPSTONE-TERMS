@@ -1,8 +1,15 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Header from "../../components/shared/Header.jsx";
 import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import "./LAEMPLReport.css";
+
+
+
+const SUBMISSION_ID =
+  new URLSearchParams(window.location.search).get("id") ||
+  "8";  
+
 
 const TRAITS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
 
@@ -16,33 +23,184 @@ const COLS = [
   { key: "makabasa", label: "MAKABASA (15 - 25 points)" },
 ];
 
+// min/max rules for validation + clamping
+const COL_RULES = {
+  m: [0, 9999],
+  f: [0, 9999],
+  gmrc: [15, 25],
+  math: [15, 25],
+  lang: [15, 25],
+  read: [15, 25],
+  makabasa: [15, 25],
+};
+
+const clampVal = (k, v) => {
+  if (v === "" || v == null) return "";
+  const n = Number(v);
+  if (Number.isNaN(n)) return "";
+  const [min, max] = COL_RULES[k] || [Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER];
+  return Math.max(min, Math.min(max, n)).toString();
+};
+
 function LAEMPLReport() {
   const [openPopup, setOpenPopup] = useState(false);
-
   const role = (localStorage.getItem("role") || "").toLowerCase();
   const isTeacher = role === "teacher";
 
-  // initialize table data with zeros
+  // table state
   const [data, setData] = useState(() =>
     Object.fromEntries(
       TRAITS.map(t => [t, Object.fromEntries(COLS.map(c => [c.key, ""]))])
     )
   );
 
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+
   const handleChange = (trait, colKey, value) => {
+    const cleaned = value.replace(/[^\d.-]/g, "");
     setData(prev => ({
       ...prev,
-      [trait]: { ...prev[trait], [colKey]: value.replace(/[^\d.-]/g, "") },
+      [trait]: { ...prev[trait], [colKey]: clampVal(colKey, cleaned) },
     }));
   };
 
   const totals = COLS.reduce((acc, c) => {
-    acc[c.key] = TRAITS.reduce(
-      (sum, t) => sum + (Number(data[t][c.key]) || 0),
-      0
-    );
+    acc[c.key] = TRAITS.reduce((sum, t) => sum + (Number(data[t][c.key]) || 0), 0);
     return acc;
   }, {});
+
+  const toRows = (obj) => TRAITS.map(trait => ({ trait, ...obj[trait] }));
+
+  const canSubmit = !!SUBMISSION_ID && !saving;
+  const onSubmit = async () => {
+    if (!SUBMISSION_ID) {
+      setErr("Missing submission id. Open this page with ?id=<submission_id> from the assignment link.");
+      return;
+    }
+    setSaving(true); setMsg(""); setErr("");
+    try {
+      const payload = {
+        status: 2,  // adjust to your "submitted" status id
+        grade: 1,   // or drive from UI if needed
+        rows: toRows(data),
+      };
+      const res = await fetch(`${API_BASE}/submissions/laempl/${SUBMISSION_ID}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(t || `HTTP ${res.status}`);
+      }
+      const json = await res.json();
+      setMsg("Saved successfully.");
+      // optional rehydrate to reflect server-side clamping/merges
+      if (json?.fields?.rows) {
+        const next = Object.fromEntries(
+          TRAITS.map(t => [t, Object.fromEntries(COLS.map(c => [c.key, ""]))])
+        );
+        json.fields.rows.forEach(r => {
+          if (!r?.trait || !next[r.trait]) return;
+          COLS.forEach(c => { next[r.trait][c.key] = (r[c.key] ?? "").toString(); });
+        });
+        setData(next);
+      }
+    } catch (e) {
+      setErr(e.message || "Failed to save.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Prefill from backend (optional): GET /reports/submissions/:id or /submission/:id
+  useEffect(() => {
+    const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
+    const load = async () => {
+      if (!SUBMISSION_ID) return;
+      setLoading(true);
+      try {
+        const tryUrls = [
+          `${API_BASE}/submissions/laempl/${SUBMISSION_ID}`,
+          `${API_BASE}/submissions/${SUBMISSION_ID}`,
+        ];
+        let json = null;
+        for (const url of tryUrls) {
+          const r = await fetch(url, { credentials: "include" });
+          if (r.ok) { json = await r.json(); break; }
+        }
+        const rows = json?.fields?.rows;
+        if (Array.isArray(rows)) {
+          const next = Object.fromEntries(
+            TRAITS.map(t => [t, Object.fromEntries(COLS.map(c => [c.key, ""]))])
+          );
+          rows.forEach(r => {
+            if (!r?.trait || !next[r.trait]) return;
+            COLS.forEach(c => { next[r.trait][c.key] = (r[c.key] ?? "").toString(); });
+          });
+          setData(next);
+        }
+      } catch { /* ignore */ }
+      finally { setLoading(false); }
+    };
+    load();
+  }, []);
+
+  // Export CSV
+  const toCSV = () => {
+    const header = ["Trait", ...COLS.map(c => c.label)];
+    const rows = TRAITS.map(trait => [
+      trait,
+      ...COLS.map(c => data[trait][c.key] || "")
+    ]);
+    const totalRow = ["Total", ...COLS.map(c => totals[c.key])];
+
+    const lines = [header, ...rows, totalRow]
+      .map(r => r.map(x => `"${String(x).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+
+    const blob = new Blob([lines], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "LAEMPL_Grade1.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Import CSV (must match export shape)
+  const onImport = async (file) => {
+    try {
+      const text = await file.text();
+      const lines = text.trim().split(/\r?\n/).map(l =>
+        l.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(s => s.replace(/^"|"$/g, "").replace(/""/g, '"'))
+      );
+
+      const body = lines.slice(1, 1 + TRAITS.length); // header + 6 rows
+      const next = Object.fromEntries(
+        TRAITS.map(t => [t, Object.fromEntries(COLS.map(c => [c.key, ""]))])
+      );
+
+      body.forEach(row => {
+        const trait = row[0];
+        if (!TRAITS.includes(trait)) return;
+        COLS.forEach((c, i) => {
+          const raw = row[i + 1] ?? "";
+          next[trait][c.key] = clampVal(c.key, raw);
+        });
+      });
+
+      setData(next);
+      setMsg("Imported file successfully.");
+      setErr("");
+    } catch (e) {
+      setErr("Failed to import CSV. " + (e?.message || ""));
+    }
+  };
 
   return (
     <>
@@ -61,6 +219,8 @@ function LAEMPLReport() {
           <div className="content">
             <div className="buttons">
               <button>Generate Report</button>
+
+              {/* Import */}
               <button onClick={() => setOpenPopup(true)}>Import File</button>
               {openPopup && (
                 <div className="modal-overlay">
@@ -74,15 +234,35 @@ function LAEMPLReport() {
                       <label htmlFor="fileInput" className="file-upload-label">
                         Click here to upload a file
                       </label>
-                      <input id="fileInput" type="file" style={{ display: "none" }} />
+                      <input
+                        id="fileInput"
+                        type="file"
+                        accept=".csv"
+                        style={{ display: "none" }}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) onImport(f);
+                        }}
+                      />
                       <button type="submit">Upload</button>
                     </form>
                   </div>
                 </div>
               )}
-              <button>Export</button>
-              <button>Submit</button>
+
+              {/* Export */}
+              <button onClick={toCSV}>Export</button>
+
+              {/* Submit */}
+              <button onClick={onSubmit} disabled={!canSubmit}>
+                {saving ? "Saving..." : "Submit"}
+              </button>
             </div>
+
+            {/* status messages */}
+            {loading && <div className="ok-text" style={{ marginTop: 8 }}>Loading...</div>}
+            {!!msg && <div className="ok-text" style={{ marginTop: 8 }}>{msg}</div>}
+            {!!err && <div className="error-text" style={{ marginTop: 8 }}>{err}</div>}
 
             {/* DYNAMIC TABLE */}
             <div className="table-wrap">
@@ -90,7 +270,7 @@ function LAEMPLReport() {
                 <caption>Grade 1 - LAEMPL</caption>
                 <thead>
                   <tr>
-                    <th scope="col" className="row-head"> </th>
+                    <th scope="col" className="row-head">&nbsp;</th>
                     {COLS.map(col => (
                       <th key={col.key} scope="col">{col.label}</th>
                     ))}
@@ -105,6 +285,9 @@ function LAEMPLReport() {
                           <input
                             type="number"
                             inputMode="numeric"
+                            min={COL_RULES[col.key]?.[0]}
+                            max={COL_RULES[col.key]?.[1]}
+                            step="1"
                             value={data[trait][col.key]}
                             onChange={(e) => handleChange(trait, col.key, e.target.value)}
                             className="cell-input"
