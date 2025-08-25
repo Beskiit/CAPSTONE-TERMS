@@ -1,4 +1,19 @@
 import db from '../db.js';
+// --- helpers ---
+const safeParseJSON = (val, fallback = null) => {
+  try {
+    if (val == null) return fallback;
+    if (typeof val === "object") return val; // already parsed
+    return JSON.parse(val);
+  } catch {
+    return fallback;
+  }
+};
+
+const normalizeFields = (row) => {
+  if (!row) return row;
+  return { ...row, fields: safeParseJSON(row.fields, {}) };
+};
 
 export const createSubmission = (req, res) => {
   const { category_id, submitted_by, status = 0, value = null, fields } = req.body;

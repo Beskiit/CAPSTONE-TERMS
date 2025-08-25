@@ -14,6 +14,9 @@ const PORT = process.env.PORT || 5000;
 const ALLOWED_ORIGINS = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
+  // add others if you use them:
+  "http://localhost:5000",
+  "http://127.0.0.1:5000",
 ];
 
 app.use(
@@ -51,6 +54,7 @@ app.use("/categories", categoryRouter);
 app.use("/subcategories", subCategoryRouter);
 app.use("/submissions", submissionsRouter);
 
+app.get("/health", (req,res)=>res.send("ok"));
 app.use((req, res, _next) => {
   res.status(404).json({ error: "Not Found", path: req.originalUrl });
 });
