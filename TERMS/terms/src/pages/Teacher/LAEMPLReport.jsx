@@ -4,11 +4,12 @@ import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import "./LAEMPLReport.css";
 
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
 
 
 const SUBMISSION_ID =
   new URLSearchParams(window.location.search).get("id") ||
-  "8";  
+  "10";  
 
 
 const TRAITS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
@@ -83,7 +84,7 @@ function LAEMPLReport() {
     setSaving(true); setMsg(""); setErr("");
     try {
       const payload = {
-        status: 2,  // adjust to your "submitted" status id
+        status: 1,  // adjust to your "submitted" status id
         grade: 1,   // or drive from UI if needed
         rows: toRows(data),
       };
@@ -116,10 +117,9 @@ function LAEMPLReport() {
       setSaving(false);
     }
   };
-
   // Prefill from backend (optional): GET /reports/submissions/:id or /submission/:id
   useEffect(() => {
-    const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
+    
     const load = async () => {
       if (!SUBMISSION_ID) return;
       setLoading(true);
