@@ -202,6 +202,9 @@ function LAEMPLReport() {
     }
   };
 
+  const [open, setOpen] = useState(false);
+  const [openSec, setOpenSec] = useState(false);
+
   return (
     <>
       <Header />
@@ -218,7 +221,7 @@ function LAEMPLReport() {
 
           <div className="content">
             <div className="buttons">
-              <button>Generate Report</button>
+              <button>Generate Template</button>
 
               {/* Import */}
               <button onClick={() => setOpenPopup(true)}>Import File</button>
@@ -252,11 +255,41 @@ function LAEMPLReport() {
 
               {/* Export */}
               <button onClick={toCSV}>Export</button>
+            </div>
 
-              {/* Submit */}
-              <button onClick={onSubmit} disabled={!canSubmit}>
-                {saving ? "Saving..." : "Submit"}
-              </button>
+            {/* Drop down for qtr and section*/}
+            <div className="dropdown-container">
+              <div className="dropdown">
+                <button className="dropdown-btn" onClick={() => setOpen(!open)}>
+                  Select Quarter {open ? "▲" : "▼"}
+                </button>
+
+                {open && (
+                  <div className="dropdown-content">
+                    <button>1st Quarter</button>
+                    <button>2nd Quarter</button>
+                    <button>3rd Quarter</button>
+                    <button>4th Quarter</button>
+                  </div>
+                )}
+              </div>
+                
+                <div className="dropdown">
+                <button className="dropdown-btn" onClick={() => setOpenSec(!openSec)}>
+                  Select Section {openSec ? "▲" : "▼"}
+                </button>
+
+                {openSec && (
+                  <div className="dropdown-content">
+                    <button>Masipag</button>
+                    <button>Matulungin</button>
+                    <button>Masunurin</button>
+                    <button>Magalang</button>
+                    <button>Matapat</button>
+                    <button>Matiyaga</button>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* status messages */}
@@ -305,6 +338,12 @@ function LAEMPLReport() {
                   </tr>
                 </tbody>
               </table>
+            </div>
+
+            {/* Submit button */}
+            <div className="table-actions">
+              <button type="submit" onClick={onSubmit} disabled={!canSubmit}>
+                {saving ? "Saving..." : "Submit"}</button>
             </div>
 
           </div>

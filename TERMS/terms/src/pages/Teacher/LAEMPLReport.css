@@ -6,6 +6,7 @@ button{
     margin-left: 10px;
     border-radius: 10px;
     cursor: pointer;
+    background-color: #1E56A0;
 }
 
 .modal-overlay {
@@ -60,6 +61,42 @@ button{
     color: #333;
 }
 
+.dropdown-container{
+  display: flex;
+}
+
+.dropdown-content {
+  position: absolute;
+  background: #f9f9f9;
+  box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+  border-radius: 6px;
+  min-width: 160px;
+  z-index: 1;
+  margin-top: 5px;
+
+  display: flex;         /* add */
+  flex-direction: column; /* add → force column layout */
+}
+
+.dropdown-content a,
+.dropdown-content button {
+  display: block;       /* ensures full width */
+  width: 100%;          /* take full container width */
+  padding: 10px;
+  text-align: left;
+  text-decoration: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #000;
+}
+
+.dropdown-content a:hover,
+.dropdown-content button:hover {
+  background-color: #eee;
+}
+
+
 .laempl { width:100%; border-collapse:collapse; }
 .laempl th, .laempl td { border:1px solid #ccc; padding:.5rem; text-align:center; }
 .laempl th[scope="row"] { text-align:left; }
@@ -110,4 +147,15 @@ button{
 @media print {
   .cell-input { border: none; }
 }
+
+.table-actions {
+  text-align: right;
+  margin-top: 1rem;
+}
+.table-actions button {
+  background-color: #1E56A0;
+  border-radius: 6px;
+  padding: 8px 16px;
+}
+
 

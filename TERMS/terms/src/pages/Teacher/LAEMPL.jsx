@@ -38,7 +38,7 @@ function LAEMPL() {
                             </thead>
                             <tbody>
                                 <tr onClick={() => navigate('/LAEMPLReport')}>
-                                    <td className="first-td">Accomplishment Report</td>
+                                    <td className="first-td">LAEMPL</td>
                                     <td>Teacher</td>
                                     <td>2023-10-01</td>
                                     <td>2023-10-15</td>
