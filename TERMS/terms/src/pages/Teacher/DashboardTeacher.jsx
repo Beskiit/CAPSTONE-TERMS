@@ -44,7 +44,7 @@ function Dashboard(){
                     <div className="submitted-reports">
                         <h2>Submitted Reports</h2>
                         <hr />
-                        <div className="submitted-reports-container">
+                        <div className="submitted-reports-container" clickable>
                             <div className="submitted-report-title">
                                 <h4>Quarterly Assessment Report</h4>
                                 <p>Intervention Report</p>
@@ -109,12 +109,12 @@ function DeadlineComponent(){
             <hr />
             <div className="deadline-container">
                 {deadlines.map((deadline) => (
-                    <div key={deadline.id} className="deadline-item">
+                    <a key={deadline.id} className="deadline-item">
                         <p className="deadline-title">{deadline.title}</p>
                         <div className="deadline-details">
                             <p>Due: {deadline.dueDate} <span>{deadline.dueTime}</span></p>
                         </div>
-                    </div>
+                    </a>
                 ))}
             </div>
         </div>

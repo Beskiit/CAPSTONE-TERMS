@@ -19,7 +19,7 @@ function ClassificationOfGradesReport() {
                 </div>
                 <div className="content">
                     <div className="buttons">
-                        <button>Generate Report</button>
+                        <button>Generate Template</button>
                         <button onClick={() => setOpenPopup(true)}>Import File</button>
                         {openPopup && (
                             <div className="modal-overlay">

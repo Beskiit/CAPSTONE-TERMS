@@ -1,0 +1,15 @@
+.dashboard-sidebar{
+    height: 100vh;
+    position: sticky;
+    top: 0;
+    padding-right: 2rem;
+    padding-top: 2rem;
+}
+
+.report-card{
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+    background-color: #F1F1F1;
+}

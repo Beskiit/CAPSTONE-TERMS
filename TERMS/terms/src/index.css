@@ -24,3 +24,91 @@ html, body {
 #root {
   min-height: 100vh;
 }
+
+p, h3{
+  color: black;
+}
+
+
+
+/* Loading spinner styles */
+.loading-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f7fafc;
+}
+
+.loading-spinner {
+  text-align: center;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid #e2e8f0;
+  border-top: 4px solid #3182ce;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 0 auto 1rem auto;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.loading-spinner p {
+  color: #4a5568;
+  font-size: 1rem;
+  margin: 0;
+}
+
+/* Access denied styles */
+.access-denied {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f7fafc;
+  padding: 20px;
+}
+
+.access-denied-content {
+  background: white;
+  padding: 3rem;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+  text-align: center;
+  max-width: 400px;
+  width: 100%;
+}
+
+.access-denied-content h2 {
+  color: #e53e3e;
+  margin: 0 0 1rem 0;
+  font-size: 1.5rem;
+}
+
+.access-denied-content p {
+  color: #4a5568;
+  margin: 0.5rem 0;
+  line-height: 1.6;
+}
+
+.access-denied-content button {
+  background: #3182ce;
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1rem;
+  margin-top: 1.5rem;
+  transition: background 0.2s ease;
+}
+
+.access-denied-content button:hover {
+  background: #2c5aa0;
+}

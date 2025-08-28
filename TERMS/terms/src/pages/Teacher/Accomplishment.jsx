@@ -27,7 +27,7 @@ function Accomplishment() {
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr onClick={() => navigate('/AccomplishmentReport')}>
+                                <tr onClick={() => navigate('/AccomplishmentReportInstruction')}>
                                     <td className="first-td">Accomplishment Report</td>
                                     <td>Teacher</td>
                                     <td>2023-10-01</td>

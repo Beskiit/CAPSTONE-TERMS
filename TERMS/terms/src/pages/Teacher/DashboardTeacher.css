@@ -53,6 +53,12 @@ body{
   display: flex;
   flex-direction: row;
   justify-content: space-between;
+  cursor: pointer;              /* show hand cursor */
+  transition: background 0.2s;
+}
+
+.submitted-reports-container:hover{
+  background: #f5f5f5;
 }
 
 .submitted-reports{

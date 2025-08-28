@@ -27,7 +27,7 @@ function ClassificationOfGrades() {
                             </tr>
                         </thead>
                         <tbody>
-                            <tr onClick={() => navigate('/ClassificationOfGradesReport')}>
+                            <tr onClick={() => navigate('/ClassificationOfGradesInstruction')}>
                                 <td className="first-td">Classified Grades</td>
                                 <td>Teacher</td>
                                 <td>2023-10-01</td>

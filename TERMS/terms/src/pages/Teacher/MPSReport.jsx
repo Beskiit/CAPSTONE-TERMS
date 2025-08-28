@@ -173,6 +173,19 @@ function LAEMPLReport() {
 
           </div>
         </div>
+        <div className="dashboard-sidebar">
+          <div className="report-card">
+              <h3 className="report-card-header">This is where the name of the report go</h3>
+              <p className="report-card-text">Start Date</p>
+              <p className="report-card-text">Due Date</p>
+          </div>
+          <div className="report-card">
+              <h3 className="report-card-header">Submission</h3>
+              <p className="report-card-text">Submissions: "Number of submission"</p>
+              <p className="report-card-text">Max. Attempts: "Number of Maximum Attempts"</p>
+              <p className="report-card-text">Allow late submissions: "logiccc"</p>
+          </div>
+        </div> 
       </div>
     </>
   );

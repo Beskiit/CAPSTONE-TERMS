@@ -1,11 +1,14 @@
 // db.js
 import mysql from 'mysql';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const database = mysql.createConnection({
-  host: 'localhost',
-  user: 'root',
-  password: '',
-  database: 'capstone_database',
+  host: process.env.DB_HOST || 'localhost',
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || '',
+  database: process.env.DB_NAME || 'capstone_database',
 });
 
 database.connect((err) => {

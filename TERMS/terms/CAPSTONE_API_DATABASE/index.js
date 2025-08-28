@@ -7,6 +7,7 @@ import reportAssignmentRouter from "./routes/reportAssignment.js";
 import categoryRouter from "./routes/categoryRouter.js";
 import subCategoryRouter from "./routes/subCategoryRouter.js";
 import submissionsRouter from "./routes/submissionRoutes.js";
+import tempAuthRouter from "./routes/tempAuth.js";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -48,6 +49,7 @@ app.get("/", (_req, res) => {
   res.send("Welcome to the Capstone API");
 });
 
+app.use("/temp-auth", tempAuthRouter);
 app.use("/users", usersRouter);
 app.use("/reports", reportAssignmentRouter);
 app.use("/categories", categoryRouter);

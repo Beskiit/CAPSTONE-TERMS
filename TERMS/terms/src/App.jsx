@@ -6,8 +6,12 @@ import EyeOffIcon from './assets/eye-close.svg'
 import UserIcon from './assets/user.svg'
 import PasswordIcon from './assets/password.svg'
 import React, { useState } from 'react'
+
+// Dashboard components
 import DashboardTeacher from './pages/Teacher/DashboardTeacher.jsx'  
 import DashboardCoordinator from './pages/Coordinator/DashboardCoordinator.jsx'  
+
+// Page components
 import ViewReports from './pages/Coordinator/ViewReports.jsx'
 import ClassificationOfGrades from './pages/Teacher/ClassificationOfGrades.jsx'
 import ClassificationOfGradesReport from './pages/Teacher/ClassificationOfGradesReport.jsx'
@@ -18,6 +22,10 @@ import LAEMPL from './pages/Teacher/LAEMPL.jsx'
 import LAEMPLReport from './pages/Teacher/LAEMPLReport.jsx'
 import MPS from './pages/Teacher/MPS.jsx'
 import MPSReport from './pages/Teacher/MPSReport.jsx'
+import LAEMPLInstruction from './pages/Teacher/LAEMPLInstruction.jsx'
+import MPSInstruction from './pages/Teacher/MPSInstruction.jsx'
+import AccomplishmentReportInstruction from './pages/Teacher/AccomplishmentReportInstruction.jsx'
+import ClassificationOfGradesInstruction from './pages/Teacher/ClassificationOfGradesInstruction.jsx'
 
 function App() {
   return (
@@ -37,18 +45,13 @@ function App() {
           <Route path="/LAEMPLReport" element={<LAEMPLReport />} />
           <Route path="/MPS" element={<MPS />} />
           <Route path="/MPSReport" element={<MPSReport />} />
+          <Route path="/LAEMPLInstruction" element={<LAEMPLInstruction />} />
+          <Route path="/MPSInstruction" element={<MPSInstruction />} />
+          <Route path="/AccomplishmentReportInstruction" element={<AccomplishmentReportInstruction />} />
+          <Route path="/ClassificationOfGradesInstruction" element={<ClassificationOfGradesInstruction />} />
         </Routes>
       </main>
     </BrowserRouter>
-  )
-}
-
-function Header() {
-  return (
-    <header>
-      <img src={depedLogo} alt="DepEd Logo" />
-      <h4 className='header-title'>Teacher's Management Report System</h4>
-    </header>
   )
 }
 
@@ -57,38 +60,85 @@ function LoginForm() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const togglePasswordVisibility = () => {
     setShowPassword(!showPassword);
   };
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
+    setLoading(true);
+    setError('');
 
     if (username === '' || password === '') {
       setError('Please fill in all fields');
+      setLoading(false);
       return;
     }
 
-    if (username === 'teacher' && password === 'password') {
-      navigate('/DashboardTeacher');
-      localStorage.setItem('role', 'teacher');
-      return;
-    } else if (username === 'coordinator' && password === 'password123') {
-      navigate('/DashboardCoordinator');
-      localStorage.setItem('role', 'coordinator');
-      return;
-    } else {
-      setError('Invalid username or password');
+    try {
+      const response = await fetch('http://localhost:5000/temp-auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ username, password }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        // Store user info and token
+        localStorage.setItem('user', JSON.stringify(data.user));
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('role', data.user.role);
+        
+        // Navigate based on role
+        switch (data.user.role) {
+          case 'teacher':
+            navigate('/DashboardTeacher');
+            break;
+          case 'coordinator':
+          case 'principal':
+          case 'admin':
+            navigate('/DashboardCoordinator');
+            break;
+          default:
+            navigate('/DashboardTeacher');
+        }
+      } else {
+        setError(data.error || 'Login failed');
+      }
+    } catch (error) {
+      setError('Connection error. Please try again.');
+    } finally {
+      setLoading(false);
     }
-  }
+  };
 
   return (
     <div className="login-container">
       <form onSubmit={handleLogin}>
         <img className='deped-logo' src={depedLogo} alt="DepEd Logo" />
+        
+        <div className="test-accounts" style={{ 
+          background: '#f0f8ff', 
+          padding: '1rem', 
+          margin: '1rem 0', 
+          borderRadius: '8px',
+          fontSize: '0.85rem' 
+        }}>
+          <h3>Test Accounts:</h3>
+          <div><p>👨‍🏫 Teacher: teacher1 / teacher123</p></div>
+          <div><p>👥 Coordinator: coordinator1 / coord123</p></div>
+          <div><p>🏫 Principal: principal1 / principal123</p></div>
+          <div><p>⚙️ Admin: admin1 / admin123</p></div>
+        </div>
+        
         {error && <div className="error-message" style={{ color: '#ff4444', marginBottom: '1em', textAlign: 'center' }}>{error}</div>}
+        
         <div className="input-container">
           <div className="input-wrapper">
             <span className="input-icon"><img src={UserIcon} alt="User" /></span>
@@ -97,6 +147,7 @@ function LoginForm() {
               placeholder="Username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
+              disabled={loading}
             />
           </div>
         </div>
@@ -109,25 +160,29 @@ function LoginForm() {
               placeholder="Password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              disabled={loading}
             />
             <button
               type="button"
               className="password-toggle"
               onClick={togglePasswordVisibility}
+              disabled={loading}
             >
               {showPassword ? <img style={{ height: "1em" }} src={EyeOffIcon} alt="Hide password" /> : <img style={{ height: "1em", paddingLeft: "1em" }} src={EyeIcon} alt="Show password" />}
             </button>
           </div>
-          <div className="forgot-password">
-            <a href="/forgot-password">Forgot Password?</a>
-          </div>
         </div>
+        
         <div className='login-button-container'>
-          <button type="submit" className='login-button'>Login</button>
+          <button type="submit" className='login-button' disabled={loading}>
+            {loading ? 'Logging in...' : 'Login'}
+          </button>
         </div>
       </form>
     </div>
   );
 }
+
+
 
 export default App
