@@ -44,3 +44,4 @@ const ProtectedRoute = ({ children, requiredRoles = [] }) => {
 };
 
 export default ProtectedRoute;
+
