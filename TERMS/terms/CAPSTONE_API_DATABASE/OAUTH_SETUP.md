@@ -3,11 +3,13 @@
 ## Google Cloud Console Setup
 
 ### 1. Create Google Cloud Project
+
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a new project or select an existing one
 3. Enable the Google+ API (now called Google People API)
 
 ### 2. Create OAuth 2.0 Credentials
+
 1. Go to "APIs & Services" > "Credentials"
 2. Click "Create Credentials" > "OAuth 2.0 Client ID"
 3. Choose "Web application"
@@ -17,6 +19,7 @@
 5. Save and copy the Client ID and Client Secret
 
 ### 3. Update .env File
+
 Replace the placeholder values in your `.env` file:
 
 ```env
@@ -26,9 +29,11 @@ SESSION_SECRET=generate_a_strong_random_string_here
 ```
 
 ### 4. Generate Session Secret
+
 You can generate a secure session secret using Node.js:
+
 ```javascript
-require('crypto').randomBytes(64).toString('hex')
+require("crypto").randomBytes(64).toString("hex");
 ```
 
 ## Database Setup
@@ -46,18 +51,23 @@ CREATE TABLE users (
 );
 ```
 
+## Adding the email manually into the database
+
+INSERT INTO users (google_id, email, name, role)
+VALUES (NULL, 'teacher1@myschool.ph', 'Teacher One', 'teacher');
+
 ## Role Assignment Logic
 
 The system includes automatic role assignment based on email domains. You can customize this in `/config/passport.js`:
 
 ```javascript
 // Example: Admin logic based on email domain or specific emails
-if (email.endsWith('@admin.yourschool.edu')) {
-  role = 'admin';
-} else if (email.endsWith('@principal.yourschool.edu')) {
-  role = 'principal';
-} else if (email.endsWith('@coordinator.yourschool.edu')) {
-  role = 'coordinator';
+if (email.endsWith("@admin.yourschool.edu")) {
+  role = "admin";
+} else if (email.endsWith("@principal.yourschool.edu")) {
+  role = "principal";
+} else if (email.endsWith("@coordinator.yourschool.edu")) {
+  role = "coordinator";
 }
 ```
 
@@ -85,13 +95,14 @@ Use these middleware functions to protect your routes:
 - `requireAuth` - Require any authenticated user
 - `requireRole(['teacher'])` - Require specific role(s)
 - `requireTeacher` - Require teacher or higher
-- `requireCoordinator` - Require coordinator or higher  
+- `requireCoordinator` - Require coordinator or higher
 - `requirePrincipal` - Require principal or higher
 - `requireAdmin` - Require admin only
 
 ## Frontend Integration
 
 The frontend includes:
+
 - `AuthContext` - React context for authentication state
 - `ProtectedRoute` - Component to protect routes by role
 - `useAuth()` - Hook to access auth state and functions
@@ -100,17 +111,21 @@ The frontend includes:
 ## Troubleshooting
 
 ### Common Issues:
+
 1. **CORS errors**: Make sure your frontend URL is in `ALLOWED_ORIGINS`
 2. **Session not persisting**: Check that cookies are enabled and `credentials: 'include'` is set
 3. **OAuth redirect errors**: Verify callback URLs in Google Cloud Console
 4. **Database connection**: Ensure MySQL is running and credentials are correct
 
 ### Debug Mode:
-Add this to see detailed OAuth flow:
-```javascript
-app.use(session({
-  // ... existing config
-  debug: true
-}));
-```
 
+Add this to see detailed OAuth flow:
+
+```javascript
+app.use(
+  session({
+    // ... existing config
+    debug: true,
+  })
+);
+```
