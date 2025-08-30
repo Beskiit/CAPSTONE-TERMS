@@ -45,8 +45,6 @@ const clampVal = (k, v) => {
 
 function LAEMPLReport() {
   const [openPopup, setOpenPopup] = useState(false);
-  const role = (localStorage.getItem("role") || "").toLowerCase();
-  const isTeacher = role === "teacher";
 
   // table state
   const [data, setData] = useState(() =>
@@ -205,9 +203,31 @@ function LAEMPLReport() {
   const [open, setOpen] = useState(false);
   const [openSec, setOpenSec] = useState(false);
 
-  return (
-    <>
-      <Header />
+  const [user, setUser] = useState(null);
+
+  const role = (user?.role || "").toLowerCase();
+  const isTeacher = role === "teacher";
+
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const res = await fetch("http://localhost:5000/auth/me", {
+          credentials: "include", // important so session cookie is sent
+        });
+        if (!res.ok) return; // not logged in
+        const data = await res.json();
+        setUser(data);
+      } catch (err) {
+        console.error("Failed to fetch user:", err);
+      }
+    };
+    fetchUser();
+  }, []);
+
+    return (
+        <>
+        <Header userText={user ? user.name : "Guest"} />
       <div className="dashboard-container">
         {isTeacher ? (
           <Sidebar activeLink="LAEMPL" />

@@ -94,9 +94,25 @@ function ViewReports() {
         }
     };
 
+    useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const res = await fetch("http://localhost:5000/auth/me", {
+          credentials: "include", // important so session cookie is sent
+        });
+        if (!res.ok) return; // not logged in
+        const data = await res.json();
+        setUser(data);
+      } catch (err) {
+        console.error("Failed to fetch user:", err);
+      }
+    };
+    fetchUser();
+  }, []);
+
     return (
         <>
-            <Header />
+        <Header userText={user ? user.name : "Guest"} />
             <div className="dashboard-container">
                 <Sidebar activeLink="View Reports" />
                 <div className="dashboard-content">

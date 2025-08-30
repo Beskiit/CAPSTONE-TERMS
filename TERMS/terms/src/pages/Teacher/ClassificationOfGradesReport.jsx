@@ -2,17 +2,45 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import Header from '../../components/shared/Header.jsx';
 import Sidebar from "../../components/shared/SidebarTeacher.jsx";
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import './ClassificationOfGradesReport.css';
 
 function ClassificationOfGradesReport() {
     const [openPopup, setOpenPopup] = useState(false);
-    return(
+
+    const [user, setUser] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+    const role = (user?.role || "").toLowerCase();
+    const isTeacher = role === "teacher";
+
+    
+    useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const res = await fetch("http://localhost:5000/auth/me", {
+          credentials: "include", // important so session cookie is sent
+        });
+        if (!res.ok) return; // not logged in
+        const data = await res.json();
+        setUser(data);
+      } catch (err) {
+        console.error("Failed to fetch user:", err);
+      }
+    };
+    fetchUser();
+  }, []);
+
+    return (
         <>
-        <Header />
+        <Header userText={user ? user.name : "Guest"} />
         <div className="dashboard-container">
-            <Sidebar activeLink="Classification of Grades"/>
+            {isTeacher ? (
+                    <Sidebar activeLink="Classification of Grades" />
+                ) : (
+                    <SidebarCoordinator activeLink="Classification of Grades" />
+                )}
             <div className="dashboard-content">
                 <div className="dashboard-main">
                     <h2>Classification Of Grades</h2>

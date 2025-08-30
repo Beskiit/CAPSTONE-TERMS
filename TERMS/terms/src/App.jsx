@@ -26,13 +26,14 @@ import LAEMPLInstruction from './pages/Teacher/LAEMPLInstruction.jsx'
 import MPSInstruction from './pages/Teacher/MPSInstruction.jsx'
 import AccomplishmentReportInstruction from './pages/Teacher/AccomplishmentReportInstruction.jsx'
 import ClassificationOfGradesInstruction from './pages/Teacher/ClassificationOfGradesInstruction.jsx'
+import Login from './pages/Login.jsx'
 
 function App() {
   return (
     <BrowserRouter>
       <main>
         <Routes>
-          <Route path="/" element={<LoginForm />} />
+          <Route path="/" element={<Login />} />
           <Route path="/DashboardTeacher" element={<DashboardTeacher />} />
           <Route path="/DashboardCoordinator" element={<DashboardCoordinator />} />
           <Route path="/ViewReports" element={<ViewReports />} />

@@ -1,4 +1,4 @@
-import React from "react";
+import React, {useEffect, useState} from "react";
 import { Link } from "react-router-dom";
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import './Instruction.css';
@@ -9,12 +9,32 @@ import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 function ClassificationOfGradesInstruction() {
     const navigate = useNavigate();
 
-    const role = (localStorage.getItem("role") || "").toLowerCase();
+    const [user, setUser] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+
+    const role = (user?.role || "").toLowerCase();
     const isTeacher = role === "teacher";
 
-    return(
+    useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const res = await fetch("http://localhost:5000/auth/me", {
+          credentials: "include", // important so session cookie is sent
+        });
+        if (!res.ok) return; // not logged in
+        const data = await res.json();
+        setUser(data);
+      } catch (err) {
+        console.error("Failed to fetch user:", err);
+      }
+    };
+    fetchUser();
+  }, []);
+
+    return (
         <>
-           <Header />
+        <Header userText={user ? user.name : "Guest"} />
             <div className="dashboard-container">
                 {isTeacher ? (
                     <Sidebar activeLink="Classification of Grades" />

@@ -1,56 +1,82 @@
-import React from "react";
-import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
-import Header from '../../components/shared/Header.jsx';
-import Sidebar from '../../components/shared/SidebarTeacher.jsx';
-import SidebarCoordinator from '../../components/shared/SidebarCoordinator.jsx';
-import './Accomplishment.css';
+import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import Header from "../../components/shared/Header.jsx";
+import Sidebar from "../../components/shared/SidebarTeacher.jsx";
+import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
+import "./Accomplishment.css";
 
 function LAEMPL() {
+  const navigate = useNavigate();
 
-    const navigate = useNavigate();
+  // ✅ define user state BEFORE you use it
+  const [user, setUser] = useState(null);
 
-    const role = (localStorage.getItem("role") || "").toLowerCase();
-    const isTeacher = role === "teacher";
+  // fallback role from LS until server responds
+  const roleLS = (localStorage.getItem("role") || "").toLowerCase();
 
-    return(
-        <>
-           <Header />
-            <div className="dashboard-container">
-                {isTeacher ? (
-                    <Sidebar activeLink="LAEMPL" />
-                ) : (
-                    <SidebarCoordinator activeLink="LAEMPL" />
-                )}
-                <div className="dashboard-content">
-                    <div className="dashboard-main">
-                        <h2>LAEMPL</h2>
-                    </div>
-                    <div className="content">
-                        <table className="report-table">
-                            <thead>
-                                <tr>
-                                    <th className="first-th">Reports</th>
-                                    <th>Type</th>
-                                    <th>Start Date</th>
-                                    <th>Due Date</th>
-                                    <th>Submitted</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr onClick={() => navigate('/LAEMPLInstruction')}>
-                                    <td className="first-td">LAEMPL</td>
-                                    <td>Teacher</td>
-                                    <td>2023-10-01</td>
-                                    <td>2023-10-15</td>
-                                    <td>Yes</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div> 
-        </>
-    )
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const res = await fetch("http://localhost:5000/auth/me", {
+          credentials: "include",
+        });
+        if (res.status === 401) {
+          navigate("/"); // not logged in
+          return;
+        }
+        if (!res.ok) return;
+        const data = await res.json();
+        setUser(data);
+      } catch (err) {
+        console.error("Failed to fetch user:", err);
+      }
+    };
+    fetchUser();
+  }, [navigate]);
+
+  // prefer role from server, fallback to LS
+  const role = (user?.role || roleLS).toLowerCase();
+  const isTeacher = role === "teacher";
+
+  return (
+    <>
+      <Header userText={user ? user.name : "Guest"} />
+      <div className="dashboard-container">
+        {isTeacher ? (
+          <Sidebar activeLink="MPS" />
+        ) : (
+          <SidebarCoordinator activeLink="LAEMPL" />
+        )}
+        <div className="dashboard-content">
+          <div className="dashboard-main">
+            <h2>LAEMPL</h2>
+          </div>
+          <div className="content">
+            <table className="report-table">
+              <thead>
+                <tr>
+                  <th className="first-th">Reports</th>
+                  <th>Type</th>
+                  <th>Start Date</th>
+                  <th>Due Date</th>
+                  <th>Submitted</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr onClick={() => navigate("/LAEMPLInstruction")}>
+                  <td className="first-td">LAEMPL</td>
+                  <td>Teacher</td>
+                  <td>2023-10-01</td>
+                  <td>2023-10-15</td>
+                  <td>Yes</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </>
+  );
 }
 
 export default LAEMPL;

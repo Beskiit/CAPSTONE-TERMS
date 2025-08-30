@@ -1,6 +1,6 @@
 import "./DashboardTeacher.css";
 import React from 'react'
-import { useState } from 'react'
+import {useEffect, useState } from 'react'
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import Header from '../../components/shared/Header.jsx';
@@ -10,9 +10,27 @@ import Pending from '../../assets/pending.svg';
 import Approved from '../../assets/approved.svg';
 
 function Dashboard(){
+    const [user, setUser] = useState(null);
+
+    useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const res = await fetch("http://localhost:5000/auth/me", {
+          credentials: "include", // important so session cookie is sent
+        });
+        if (!res.ok) return; // not logged in
+        const data = await res.json();
+        setUser(data);
+      } catch (err) {
+        console.error("Failed to fetch user:", err);
+      }
+    };
+    fetchUser();
+  }, []);
+
     return (
         <>
-        <Header />
+        <Header userText={user ? user.name : "Guest"} />
         <div className="dashboard-container">
             <Sidebar activeLink="Dashboard"/>
             <div className="dashboard-content">
