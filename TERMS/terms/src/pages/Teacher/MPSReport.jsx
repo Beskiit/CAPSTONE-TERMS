@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Header from "../../components/shared/Header.jsx";
 import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
@@ -23,7 +23,10 @@ const COLS = [
   { key: "ls",     label: "LS" },
 ];
 
-function LAEMPLReport() {
+// statuses that lock the UI
+const LOCK_STATUSES = new Set([1]); // add 2 if "approved" should also lock
+
+function MPSReport() {
   const [openPopup, setOpenPopup] = useState(false);
 
   const [data, setData] = useState(() =>
@@ -32,7 +35,21 @@ function LAEMPLReport() {
     )
   );
 
+  // tracks whether the user already edited or cleared the form
+  const touchedRef = useRef(false);
+
+  // backend status + lock
+  const [status, setStatus] = useState(null);
+  const locked = LOCK_STATUSES.has(Number(status));
+
+  // FRONT-END override: allow editing after Clear
+  const [editOverride, setEditOverride] = useState(false);
+
+  // single disabled flag for inputs/actions
+  const isDisabled = locked && !editOverride;
+
   const handleChange = (trait, colKey, value) => {
+    touchedRef.current = true;
     setData(prev => ({
       ...prev,
       [trait]: { ...prev[trait], [colKey]: value.replace(/[^\d.-]/g, "") },
@@ -63,6 +80,38 @@ function LAEMPLReport() {
     })();
   }, []);
 
+  // load current submission to get status and hydrate fields (if present)
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(`${API_BASE}/mps/submissions/${SUBMISSION_ID}`, {
+          credentials: "include",
+        });
+        if (!r.ok) return;
+        const json = await r.json();
+
+        if (typeof json?.status !== "undefined") setStatus(json.status);
+
+        const rows = json?.fields?.rows;
+        if (Array.isArray(rows)) {
+          // if user already edited/cleared, don't overwrite their changes
+          if (touchedRef.current) return;
+
+          const next = Object.fromEntries(
+            TRAITS.map(t => [t, Object.fromEntries(COLS.map(c => [c.key, ""]))])
+          );
+          rows.forEach(rw => {
+            if (!rw?.trait || !next[rw.trait]) return;
+            COLS.forEach(c => {
+              next[rw.trait][c.key] = (rw[c.key] ?? "").toString();
+            });
+          });
+          setData(next);
+        }
+      } catch {}
+    })();
+  }, []);
+
   // ---- serialize payload helpers
   const toRows = () =>
     TRAITS.map(trait => {
@@ -77,11 +126,15 @@ function LAEMPLReport() {
   const toTotals = () =>
     Object.fromEntries(COLS.map(col => [col.key, Number(totals[col.key] || 0)]));
 
-  // ---- save/submit (status removed on server, so we just send fields)
+  // ---- save/submit (status handled server-side; this just sends fields)
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState(null);
 
   const submitMPS = async () => {
+    if (isDisabled) {
+      setSaveMsg("This submission is locked and cannot be changed.");
+      return;
+    }
     setSaving(true);
     setSaveMsg(null);
     try {
@@ -96,7 +149,14 @@ function LAEMPLReport() {
         const txt = await res.text();
         throw new Error(txt || `HTTP ${res.status}`);
       }
+      const json = await res.json();
       setSaveMsg("Saved successfully.");
+
+      // if server returns updated status after save/submit, reflect it
+      if (typeof json?.status !== "undefined") setStatus(json.status);
+
+      // RE-LOCK after successful save/submit
+      setEditOverride(false);
     } catch (err) {
       setSaveMsg(`Error: ${err.message}`);
     } finally {
@@ -104,7 +164,7 @@ function LAEMPLReport() {
     }
   };
 
-  // ---- EXPORT: CSV (works offline, no libs)
+  // ---- EXPORT: CSV
   const downloadBlob = (blob, filename) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -119,7 +179,6 @@ function LAEMPLReport() {
   const toCSV = () => {
     const esc = (val) => {
       const s = (val ?? "").toString();
-      // wrap if contains comma, quote, or newline
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
 
@@ -143,7 +202,7 @@ function LAEMPLReport() {
     downloadBlob(blob, fname);
   };
 
-  // ---- optional: blank template export
+  // blank template export
   const handleGenerateTemplate = () => {
     const blank = Object.fromEntries(
       TRAITS.map(t => [t, Object.fromEntries(COLS.map(c => [c.key, ""]))])
@@ -153,6 +212,16 @@ function LAEMPLReport() {
     const csv = [header, ...rows].map(r => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     downloadBlob(blob, "MPS_Template.csv");
+  };
+
+  // CLEAR TABLE — also enable edit override
+  const handleClear = () => {
+    touchedRef.current = true;     // prevent late hydration overwrites
+    setEditOverride(true);         // allow editing even if locked
+    const blank = Object.fromEntries(
+      TRAITS.map(t => [t, Object.fromEntries(COLS.map(c => [c.key, ""]))])
+    );
+    setData(blank);
   };
 
   const role = (user?.role || "").toLowerCase();
@@ -171,7 +240,12 @@ function LAEMPLReport() {
           <div className="content">
             <div className="buttons">
               <button onClick={handleGenerateTemplate}>Generate Template</button>
-              <button onClick={() => setOpenPopup(true)}>Import File</button>
+
+              {/* Import is disabled when inputs are disabled */}
+              <button onClick={() => setOpenPopup(true)} disabled={isDisabled}>
+                Import File
+              </button>
+
               {openPopup && (
                 <div className="modal-overlay">
                   <div className="import-popup">
@@ -190,6 +264,7 @@ function LAEMPLReport() {
                   </div>
                 </div>
               )}
+
               <button onClick={handleExport}>Export</button>
             </div>
 
@@ -246,9 +321,11 @@ function LAEMPLReport() {
                           <input
                             type="number"
                             inputMode="numeric"
-                            value={data[trait][col.key]}
+                            step="any"
+                            value={data[trait][col.key] ?? ""}
                             onChange={(e) => handleChange(trait, col.key, e.target.value)}
                             className="cell-input"
+                            disabled={isDisabled}
                           />
                         </td>
                       ))}
@@ -267,13 +344,15 @@ function LAEMPLReport() {
 
             {/* Actions */}
             <div className="table-actions">
-              <button type="button" disabled={saving} onClick={submitMPS}>
+              <button type="button" disabled={saving || isDisabled} onClick={submitMPS}>
                 {saving ? "Saving..." : "Save as Draft"}
               </button>
-              <button type="button" disabled={saving} onClick={submitMPS}>
+              <button type="button" disabled={saving || isDisabled} onClick={submitMPS}>
                 {saving ? "Submitting..." : "Submit"}
               </button>
-              {saveMsg && <p className="save-message">{saveMsg}</p>}
+              <button type="button" onClick={handleClear}>
+                Clear Table
+              </button>
             </div>
           </div>
         </div>
@@ -296,4 +375,4 @@ function LAEMPLReport() {
   );
 }
 
-export default LAEMPLReport;
+export default MPSReport;

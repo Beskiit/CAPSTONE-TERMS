@@ -229,6 +229,8 @@ function AccomplishmentReport() {
           </div>
 
           <div className="content">
+            {isTeacher ? (
+              <>
             <div className="buttons">
               <button onClick={onGenerate}>Generate Report</button>
 
@@ -271,6 +273,52 @@ function AccomplishmentReport() {
                 {saving ? "Saving…" : "Submit"}
               </button>
             </div>
+            </>
+            ):
+            (
+              <>
+                <div className="buttons">
+                  <button onClick={onGenerate}>Generate Report</button>
+                  {openPopup && (
+                    <div className="modal-overlay">
+                      <div className="import-popup">
+                        <div className="popup-header">
+                          <h2>Import File</h2>
+                          <button
+                            className="close-button"
+                            onClick={() => setOpenPopup(false)}
+                          >
+                            X
+                          </button>
+                        </div>
+                        <hr />
+                        <form className="import-form" onSubmit={(e) => e.preventDefault()}>
+                          <label htmlFor="fileInput" className="file-upload-label">
+                            Click here to upload a file
+                          </label>
+                          <input
+                            id="fileInput"
+                            type="file"
+                            multiple
+                            accept="image/*"
+                            style={{ display: "none" }}
+                            onChange={handleFiles}
+                          />
+                          <button type="submit">Upload</button>
+                        </form>
+                      </div>
+                    </div>
+                  )}
+
+                  <button onClick={onExport}>Export</button>
+                  <button onClick={onSubmitFinal} disabled={saving}>
+                    {saving ? "Saving…" : "Submit"}
+                  </button>
+                  <button>Consolidate</button>
+                </div>
+              </>
+            )
+          }
 
             <div className="accomplishment-report-container">
               <h3>Activity Completion Report</h3>
