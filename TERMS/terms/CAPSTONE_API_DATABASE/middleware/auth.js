@@ -44,7 +44,7 @@ export const requireOwnershipOrRole = (roles) => {
     }
 
     const userRole = req.user.role;
-    const userId = req.user.id;
+    const userId = req.user.user_id;
     const resourceUserId = req.params.userId || req.body.userId;
 
     // If roles is a string, convert to array

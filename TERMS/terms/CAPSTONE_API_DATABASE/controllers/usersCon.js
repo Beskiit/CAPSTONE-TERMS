@@ -16,7 +16,7 @@ export const createUser = async (req, res) => {
   }
 
   try {
-    const sql = 'INSERT INTO users (google_id, email, name, role) VALUES (?, ?, ?, ?)';
+    const sql = 'INSERT INTO user_details (google_id, email, name, role) VALUES (?, ?, ?, ?)';
     db.query(sql, [google_id, email, name, role || 'teacher'], (err, result) => {
       if (err) {
         if (err.code === 'ER_DUP_ENTRY') {
@@ -36,7 +36,7 @@ export const createUser = async (req, res) => {
 
 // READ all users (Admin/Principal only)
 export const getUsers = (req, res) => {
-  const sql = 'SELECT id, google_id, email, name, role, created_at FROM users';
+  const sql = 'SELECT id, google_id, email, name, role, created_at FROM user_details';
 
   db.query(sql, (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -47,7 +47,7 @@ export const getUsers = (req, res) => {
 // READ single user
 export const getUser = (req, res) => {
   const { id } = req.params;
-  const sql = 'SELECT id, google_id, email, name, role, created_at FROM users WHERE id = ?';
+  const sql = 'SELECT id, google_id, email, name, role, created_at FROM user_details WHERE id = ?';
 
   db.query(sql, [id], (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -67,7 +67,7 @@ export const patchUser = async (req, res) => {
     return res.status(400).json({ error: 'Invalid role. Must be one of: ' + validRoles.join(', ') });
   }
 
-  db.query('SELECT * FROM users WHERE id = ?', [id], async (err, results) => {
+  db.query('SELECT * FROM user_details WHERE id = ?', [id], async (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
     if (results.length === 0) return res.status(404).json({ error: 'User not found' });
 
@@ -86,7 +86,7 @@ export const patchUser = async (req, res) => {
 
     if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
     
-    const sql = `UPDATE users SET ${updates.join(', ')} WHERE id = ?`;
+    const sql = `UPDATE user_details SET ${updates.join(', ')} WHERE id = ?`;
     values.push(id);
 
     db.query(sql, values, (err, result) => {
@@ -99,7 +99,7 @@ export const patchUser = async (req, res) => {
 // DELETE user (Admin only)
 export const deleteUser = (req, res) => {
   const { id } = req.params;
-  const sql = 'DELETE FROM users WHERE id = ?';
+  const sql = 'DELETE FROM user_details WHERE id = ?';
 
   db.query(sql, [id], (err, result) => {
     if (err) return res.status(500).json({ error: err.message });

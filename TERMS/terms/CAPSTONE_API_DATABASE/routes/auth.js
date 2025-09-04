@@ -20,7 +20,7 @@ router.get('/google/callback',
     
     // Redirect to frontend with user role to determine which dashboard to show
     res.redirect(`${frontendURL}/dashboard?role=${user.role}&user=${encodeURIComponent(JSON.stringify({
-      id: user.id,
+      user_id: user.user_id,
       name: user.name,
       email: user.email,
       role: user.role
@@ -50,7 +50,7 @@ router.get('/status', (req, res) => {
     res.json({
       authenticated: true,
       user: {
-        id: req.user.id,
+        user_id: req.user.user_id,
         name: req.user.name,
         email: req.user.email,
         role: req.user.role
@@ -65,7 +65,7 @@ router.get('/status', (req, res) => {
 router.get('/me', (req, res) => {
   if (req.isAuthenticated()) {
     res.json({
-      id: req.user.id,
+      user_id: req.user.user_id,
       name: req.user.name,
       email: req.user.email,
       role: req.user.role

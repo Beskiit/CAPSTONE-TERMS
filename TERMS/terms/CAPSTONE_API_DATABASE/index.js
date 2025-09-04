@@ -103,7 +103,7 @@ passport.use(
         if (err) return done(err);
 
         conn.query(
-          `SELECT id, email, name, role, google_id FROM users WHERE email = ? LIMIT 1`,
+          `SELECT user_id, email, name, role, google_id FROM user_details WHERE email = ? LIMIT 1`,
           [email],
           (err1, rows) => {
             if (err1) {
@@ -120,7 +120,7 @@ passport.use(
 
             const finish = () => {
               const sessionUser = {
-                id: dbUser.id,
+                user_id: dbUser.user_id,
                 name: dbUser.name || name,
                 email: dbUser.email,
                 role: dbUser.role,
@@ -131,8 +131,8 @@ passport.use(
 
             if (!dbUser.google_id) {
               conn.query(
-                `UPDATE users SET google_id = ? WHERE id = ?`,
-                [googleId, dbUser.id],
+                `UPDATE user_details SET google_id = ? WHERE user_id = ?`,
+                [googleId, dbUser.user_id],
                 (err2) => {
                   if (err2) {
                     conn.release();

@@ -38,11 +38,11 @@ require("crypto").randomBytes(64).toString("hex");
 
 ## Database Setup
 
-Make sure your MySQL database has the `users` table created:
+Make sure your MySQL database has the `user_details` table created:
 
 ```sql
-CREATE TABLE users (
-  id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+CREATE TABLE user_details (
+  user_id      BIGINT AUTO_INCREMENT PRIMARY KEY,
   google_id    VARCHAR(64) UNIQUE NOT NULL,
   email        VARCHAR(255) UNIQUE NOT NULL,
   name         VARCHAR(255) NOT NULL,
@@ -53,7 +53,7 @@ CREATE TABLE users (
 
 ## Adding the email manually into the database
 
-INSERT INTO users (google_id, email, name, role)
+INSERT INTO user_details (google_id, email, name, role)
 VALUES (NULL, 'teacher1@myschool.ph', 'Teacher One', 'teacher');
 
 ## Role Assignment Logic
