@@ -5,6 +5,8 @@ import session from "express-session";
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import mysql from "mysql";
+import fs from "fs";
+import path from "path";
 
 // Routers
 import usersRouter from "./routes/users.js";
@@ -12,6 +14,8 @@ import reportAssignmentRouter from "./routes/reportAssignment.js";
 import categoryRouter from "./routes/categoryRouter.js";
 import subCategoryRouter from "./routes/subCategoryRouter.js";
 import submissionsRouter from "./routes/submissionRoutes.js";
+import mpsRoutes from "./routes/mpsRoutes.js";
+import accomplishmentRouter from "./routes/accomplishmentRoutes.js"
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -181,6 +185,7 @@ app.get(
   (_req, res) => res.redirect("/")
 );
 
+
 app.get("/auth/me", (req, res) => {
   if (!req.isAuthenticated || !req.isAuthenticated()) {
     return res.status(401).json({ error: "Not authenticated" });
@@ -201,7 +206,10 @@ app.use("/reports", reportAssignmentRouter);
 app.use("/categories", categoryRouter);
 app.use("/subcategories", subCategoryRouter);
 app.use("/submissions", submissionsRouter);
-
+app.use("/mps", mpsRoutes);
+app.use("/reports/accomplishment", accomplishmentRouter)
+app.use("/uploads", express.static(path.resolve("uploads")));
+fs.mkdirSync(path.resolve("uploads/accomplishments"), { recursive: true });
 app.get("/health", (_req, res) => res.send("ok"));
 
 // 404

@@ -4,26 +4,28 @@ import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import "./LAEMPLReport.css";
 
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
+const SUBMISSION_ID = 12; // hardcoded
+
 const TRAITS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
 
 const COLS = [
-  { key: "m",        label: "Male" },
-  { key: "f",        label: "Female" },
-  { key: "total",     label: "Total no. of Pupils" },
-  { key: "mean",     label: "Mean" },
-  { key: "median",     label: "Median" },
+  { key: "m",      label: "Male" },
+  { key: "f",      label: "Female" },
+  { key: "total",  label: "Total no. of Pupils" },
+  { key: "mean",   label: "Mean" },
+  { key: "median", label: "Median" },
   { key: "pl",     label: "PL" },
-  { key: "mps", label: "MPS" },
-  { key: "sd", label: "SD" },
+  { key: "mps",    label: "MPS" },
+  { key: "sd",     label: "SD" },
   { key: "target", label: "Target" },
-  { key: "hs", label: "HS" },
-  { key: "ls", label: "LS" },
+  { key: "hs",     label: "HS" },
+  { key: "ls",     label: "LS" },
 ];
 
 function LAEMPLReport() {
   const [openPopup, setOpenPopup] = useState(false);
 
-  // initialize table data with zeros
   const [data, setData] = useState(() =>
     Object.fromEntries(
       TRAITS.map(t => [t, Object.fromEntries(COLS.map(c => [c.key, ""]))])
@@ -49,36 +51,118 @@ function LAEMPLReport() {
   const [openSec, setOpenSec] = useState(false);
 
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchUser = async () => {
+    (async () => {
       try {
-        const res = await fetch("http://localhost:5000/auth/me", {
-          credentials: "include", // important so session cookie is sent
-        });
-        if (!res.ok) return; // not logged in
-        const data = await res.json();
-        setUser(data);
-      } catch (err) {
-        console.error("Failed to fetch user:", err);
-      }
-    };
-    fetchUser();
+        const res = await fetch(`${API_BASE}/auth/me`, { credentials: "include" });
+        if (!res.ok) return;
+        const u = await res.json();
+        setUser(u);
+      } catch {}
+    })();
   }, []);
+
+  // ---- serialize payload helpers
+  const toRows = () =>
+    TRAITS.map(trait => {
+      const row = { trait };
+      COLS.forEach(col => {
+        const v = data[trait][col.key];
+        row[col.key] = (v === "" || v == null) ? null : Number(v);
+      });
+      return row;
+    });
+
+  const toTotals = () =>
+    Object.fromEntries(COLS.map(col => [col.key, Number(totals[col.key] || 0)]));
+
+  // ---- save/submit (status removed on server, so we just send fields)
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState(null);
+
+  const submitMPS = async () => {
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const body = { rows: toRows(), totals: toTotals() };
+      const res = await fetch(`${API_BASE}/mps/submissions/${SUBMISSION_ID}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || `HTTP ${res.status}`);
+      }
+      setSaveMsg("Saved successfully.");
+    } catch (err) {
+      setSaveMsg(`Error: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ---- EXPORT: CSV (works offline, no libs)
+  const downloadBlob = (blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const toCSV = () => {
+    const esc = (val) => {
+      const s = (val ?? "").toString();
+      // wrap if contains comma, quote, or newline
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+
+    const header = ["Trait", ...COLS.map(c => c.label)];
+    const rows = TRAITS.map(trait => [
+      trait,
+      ...COLS.map(c => data[trait][c.key] === "" ? "" : data[trait][c.key])
+    ]);
+    const totalRow = ["Total", ...COLS.map(c => totals[c.key])];
+
+    const lines = [header, ...rows, totalRow].map(r => r.map(esc).join(",")).join("\n");
+    return lines;
+  };
+
+  const handleExport = () => {
+    const csv = toCSV();
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const ts = new Date();
+    const pad = (n)=>String(n).padStart(2,"0");
+    const fname = `MPS_Grade1_${ts.getFullYear()}-${pad(ts.getMonth()+1)}-${pad(ts.getDate())}_${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}.csv`;
+    downloadBlob(blob, fname);
+  };
+
+  // ---- optional: blank template export
+  const handleGenerateTemplate = () => {
+    const blank = Object.fromEntries(
+      TRAITS.map(t => [t, Object.fromEntries(COLS.map(c => [c.key, ""]))])
+    );
+    const header = ["Trait", ...COLS.map(c => c.label)];
+    const rows = TRAITS.map(trait => [trait, ...COLS.map(c => blank[trait][c.key])]);
+    const csv = [header, ...rows].map(r => r.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    downloadBlob(blob, "MPS_Template.csv");
+  };
 
   const role = (user?.role || "").toLowerCase();
   const isTeacher = role === "teacher";
 
-    return (
-        <>
-        <Header userText={user ? user.name : "Guest"} />
+  return (
+    <>
+      <Header userText={user ? user.name : "Guest"} />
       <div className="dashboard-container">
-        {isTeacher ? (
-          <Sidebar activeLink="MPS" />
-        ) : (
-          <SidebarCoordinator activeLink="MPS" />
-        )}
+        {isTeacher ? <Sidebar activeLink="MPS" /> : <SidebarCoordinator activeLink="MPS" />}
         <div className="dashboard-content">
           <div className="dashboard-main">
             <h2>MPS</h2>
@@ -86,7 +170,7 @@ function LAEMPLReport() {
 
           <div className="content">
             <div className="buttons">
-              <button>Generate Template</button>
+              <button onClick={handleGenerateTemplate}>Generate Template</button>
               <button onClick={() => setOpenPopup(true)}>Import File</button>
               {openPopup && (
                 <div className="modal-overlay">
@@ -106,16 +190,15 @@ function LAEMPLReport() {
                   </div>
                 </div>
               )}
-              <button>Export</button>
+              <button onClick={handleExport}>Export</button>
             </div>
 
-            {/* Drop down for qtr and section*/}
+            {/* Drop downs */}
             <div className="dropdown-container">
               <div className="dropdown">
                 <button className="dropdown-btn" onClick={() => setOpen(!open)}>
                   Select Quarter {open ? "▲" : "▼"}
                 </button>
-
                 {open && (
                   <div className="dropdown-content">
                     <button>1st Quarter</button>
@@ -125,12 +208,10 @@ function LAEMPLReport() {
                   </div>
                 )}
               </div>
-                
-                <div className="dropdown">
+              <div className="dropdown">
                 <button className="dropdown-btn" onClick={() => setOpenSec(!openSec)}>
                   Select Section {openSec ? "▲" : "▼"}
                 </button>
-
                 {openSec && (
                   <div className="dropdown-content">
                     <button>Masipag</button>
@@ -144,13 +225,13 @@ function LAEMPLReport() {
               </div>
             </div>
 
-            {/* DYNAMIC TABLE */}
+            {/* Table */}
             <div className="table-wrap">
               <table className="laempl-table">
                 <caption>Grade 1 - MPS</caption>
                 <thead>
                   <tr>
-                    <th scope="col" className="row-head"> </th>
+                    <th scope="col" className="row-head"> </th>
                     {COLS.map(col => (
                       <th key={col.key} scope="col">{col.label}</th>
                     ))}
@@ -184,27 +265,32 @@ function LAEMPLReport() {
               </table>
             </div>
 
-            {/* Submit button */}
+            {/* Actions */}
             <div className="table-actions">
-              <button type="submit">
-                Submit</button>
+              <button type="button" disabled={saving} onClick={submitMPS}>
+                {saving ? "Saving..." : "Save as Draft"}
+              </button>
+              <button type="button" disabled={saving} onClick={submitMPS}>
+                {saving ? "Submitting..." : "Submit"}
+              </button>
+              {saveMsg && <p className="save-message">{saveMsg}</p>}
             </div>
-
           </div>
         </div>
+
         <div className="dashboard-sidebar">
           <div className="report-card">
-              <h3 className="report-card-header">This is where the name of the report go</h3>
-              <p className="report-card-text">Start Date</p>
-              <p className="report-card-text">Due Date</p>
+            <h3 className="report-card-header">This is where the name of the report go</h3>
+            <p className="report-card-text">Start Date</p>
+            <p className="report-card-text">Due Date</p>
           </div>
           <div className="report-card">
-              <h3 className="report-card-header">Submission</h3>
-              <p className="report-card-text">Submissions: "Number of submission"</p>
-              <p className="report-card-text">Max. Attempts: "Number of Maximum Attempts"</p>
-              <p className="report-card-text">Allow late submissions: "logiccc"</p>
+            <h3 className="report-card-header">Submission</h3>
+            <p className="report-card-text">Submissions: "Number of submission"</p>
+            <p className="report-card-text">Max. Attempts: "Number of Maximum Attempts"</p>
+            <p className="report-card-text">Allow late submissions: "logiccc"</p>
           </div>
-        </div> 
+        </div>
       </div>
     </>
   );
