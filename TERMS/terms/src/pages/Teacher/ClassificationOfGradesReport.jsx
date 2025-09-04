@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import Header from '../../components/shared/Header.jsx';
 import Sidebar from "../../components/shared/SidebarTeacher.jsx";
+import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import './ClassificationOfGradesReport.css';

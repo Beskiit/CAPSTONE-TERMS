@@ -27,6 +27,9 @@ import MPSInstruction from './pages/Teacher/MPSInstruction.jsx'
 import AccomplishmentReportInstruction from './pages/Teacher/AccomplishmentReportInstruction.jsx'
 import ClassificationOfGradesInstruction from './pages/Teacher/ClassificationOfGradesInstruction.jsx'
 import Login from './pages/Login.jsx'
+import DashboardPrincipal from './pages/Principal/DashboardPrincipal.jsx'
+import ViewSubmission from './pages/Principal/ViewSubmission.jsx'
+
 
 function App() {
   return (
@@ -50,6 +53,8 @@ function App() {
           <Route path="/MPSInstruction" element={<MPSInstruction />} />
           <Route path="/AccomplishmentReportInstruction" element={<AccomplishmentReportInstruction />} />
           <Route path="/ClassificationOfGradesInstruction" element={<ClassificationOfGradesInstruction />} />
+          <Route path="/DashboardPrincipal" element={<DashboardPrincipal />} />
+          <Route path="/ViewSubmission" element={<ViewSubmission />} />
         </Routes>
       </main>
     </BrowserRouter>

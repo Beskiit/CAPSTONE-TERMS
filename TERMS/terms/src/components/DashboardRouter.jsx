@@ -2,6 +2,7 @@ import React from 'react';
 import { useAuth } from '../context/AuthContext';
 import DashboardTeacher from '../pages/Teacher/DashboardTeacher';
 import DashboardCoordinator from '../pages/Coordinator/DashboardCoordinator';
+import DashboardPrincipal from '../pages/Principal/DashboardPrincipal';
 
 const DashboardRouter = () => {
   const { user } = useAuth();
@@ -17,7 +18,7 @@ const DashboardRouter = () => {
     case 'coordinator':
       return <DashboardCoordinator />;
     case 'principal':
-      return <DashboardCoordinator />; // Principal can use coordinator dashboard
+      return <DashboardPrincipal />; // Principal can use coordinator dashboard
     case 'admin':
       return <DashboardCoordinator />; // Admin can use coordinator dashboard
     default:

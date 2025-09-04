@@ -1,15 +1,15 @@
 import React, { useState, useEffect, useMemo } from "react";
-import Header from '../../components/shared/Header.jsx';
-import Sidebar from '../../components/shared/SidebarCoordinator.jsx';
-import './SetReport.css';
-import Laempl from '../../assets/templates/LAEMPL.png';
-import AccomplishmentReport from '../../assets/templates/accomplishment-report.png';
-import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
+import Header from "../../components/shared/Header.jsx";
+import Sidebar from "../../components/shared/SidebarCoordinator.jsx"; // ✅ single import
+import SidebarPrincipal from "../../components/shared/SidebarPrincipal.jsx";
+import "./SetReport.css";
+import Laempl from "../../assets/templates/LAEMPL.png";
+import AccomplishmentReport from "../../assets/templates/accomplishment-report.png";
 
 // Preview mapping (category_id → sub_category_id → image)
 const TEMPLATE_MAP = {
   "1": { "10": AccomplishmentReport },
-  "2": { "20": Laempl }
+  "2": { "20": Laempl },
 };
 
 // --- Sample static data (no API needed) ---
@@ -24,15 +24,21 @@ const sampleSubCategories = {
 };
 
 function SetReport() {
+  // ✅ add user state
+  const [user, setUser] = useState(null);
+
+  const role = (user?.role || "").toLowerCase();
+  const isCoordinator = role === "coordinator";
+
   const [users, setUsers] = useState([]);
-  const [selectedCategory, setSelectedCategory] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState("");
   const [categories, setCategories] = useState([]);
-  const [selectedTeacher, setSelectedTeacher] = useState('');
+  const [selectedTeacher, setSelectedTeacher] = useState("");
   const [subCategories, setSubCategories] = useState([]);
-  const [selectedSubCategory, setSelectedSubCategory] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [dueDate, setDueDate] = useState('');
-  const [instruction, setInstruction] = useState('');
+  const [selectedSubCategory, setSelectedSubCategory] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [dueDate, setDueDate] = useState("");
+  const [instruction, setInstruction] = useState("");
 
   // Preview states
   const [imgLoading, setImgLoading] = useState(false);
@@ -43,9 +49,9 @@ function SetReport() {
 
   // Resolve preview image URL
   const previewSrc = useMemo(() => {
-    if (!selectedCategory || !selectedSubCategory) return '';
+    if (!selectedCategory || !selectedSubCategory) return "";
     const cat = TEMPLATE_MAP[String(selectedCategory)];
-    return cat ? cat[String(selectedSubCategory)] || '' : '';
+    return cat ? cat[String(selectedSubCategory)] || "" : "";
   }, [selectedCategory, selectedSubCategory]);
 
   useEffect(() => {
@@ -53,7 +59,7 @@ function SetReport() {
     setCategories(sampleCategories);
     setUsers([
       { user_id: "t1", name: "Mr. Smith" },
-      { user_id: "t2", name: "Ms. Johnson" }
+      { user_id: "t2", name: "Ms. Johnson" },
     ]);
   }, []);
 
@@ -78,37 +84,44 @@ function SetReport() {
   // Close modal on ESC
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (e.key === 'Escape') setShowModal(false);
+      if (e.key === "Escape") setShowModal(false);
     };
-    if (showModal) document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
+    if (showModal) document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
   }, [showModal]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    // optional: console.log current form payload
+    // console.log({ selectedCategory, selectedSubCategory, selectedTeacher, startDate, dueDate, instruction });
   };
 
   useEffect(() => {
-    const fetchUser = async () => {
-      try {
-        const res = await fetch("http://localhost:5000/auth/me", {
-          credentials: "include", // important so session cookie is sent
-        });
-        if (!res.ok) return; // not logged in
-        const data = await res.json();
-        setUser(data);
-      } catch (err) {
-        console.error("Failed to fetch user:", err);
-      }
-    };
-    fetchUser();
-  }, []);
+      const fetchUser = async () => {
+        try {
+          const res = await fetch("http://localhost:5000/auth/me", {
+            credentials: "include", // important so session cookie is sent
+          });
+          if (!res.ok) return; // not logged in
+          const data = await res.json();
+          setUser(data);
+        } catch (err) {
+          console.error("Failed to fetch user:", err);
+        }
+      };
+      fetchUser();
+    }, []);
+    
 
-    return (
-        <>
-        <Header userText={user ? user.name : "Guest"} />
-      <div className="dashboard-container" style={{ overflowY: 'auto' }}>
-        <Sidebar activeLink="Set Report Schedule" style={{ position: 'fixed' }} />
+  return (
+    <>
+      <Header userText={user ? user.name : "Guest"} />
+      <div className="dashboard-container" style={{ overflowY: "auto" }}>
+        {isCoordinator ? (
+          <Sidebar activeLink="Set Report Schedule" />
+          ) : (
+          <SidebarPrincipal activeLink="Set Report Schedule" />
+          )}
         <div className="dashboard-content">
           <div className="dashboard-main">
             <h2>Set Reports</h2>
@@ -125,7 +138,7 @@ function SetReport() {
                   value={selectedCategory}
                   onChange={(e) => {
                     setSelectedCategory(e.target.value);
-                    setSelectedSubCategory('');
+                    setSelectedSubCategory("");
                   }}
                 >
                   <option value="">Select Category</option>
@@ -137,14 +150,11 @@ function SetReport() {
                 </select>
 
                 <label>Select Teacher:</label>
-                <select
-                  value={selectedTeacher}
-                  onChange={(e) => setSelectedTeacher(e.target.value)}
-                >
+                <select value={selectedTeacher} onChange={(e) => setSelectedTeacher(e.target.value)}>
                   <option value="">Select Teacher</option>
-                  {users.map(user => (
-                    <option key={user.user_id} value={user.user_id}>
-                      {user.name}
+                  {users.map((u) => (
+                    <option key={u.user_id} value={u.user_id}>
+                      {u.name}
                     </option>
                   ))}
                 </select>
@@ -169,7 +179,11 @@ function SetReport() {
 
               <div className="form-row">
                 <label>Start Date:</label>
-                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                />
 
                 <label>Due Date:</label>
                 <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
@@ -184,13 +198,11 @@ function SetReport() {
                 ></textarea>
               </div>
 
-              {(selectedCategory && selectedSubCategory) && (
+              {selectedCategory && selectedSubCategory && (
                 <div className="template-preview-panel">
                   <div className="template-preview-header">
                     <span>Template Preview</span>
-                    <small>
-                      {previewSrc ? 'Click the image to enlarge' : 'No preview available'}
-                    </small>
+                    <small>{previewSrc ? "Click the image to enlarge" : "No preview available"}</small>
                   </div>
 
                   <div className="template-preview-body">
@@ -205,10 +217,13 @@ function SetReport() {
                           key={previewSrc}
                           src={previewSrc}
                           alt="Template preview"
-                          onClick={() => setShowModal(true)}      // << open modal
+                          onClick={() => setShowModal(true)}
                           onLoad={() => setImgLoading(false)}
-                          onError={() => { setImgLoading(false); setImgError(true); }}
-                          className={imgLoading ? 'hidden' : 'clickable-preview'}
+                          onError={() => {
+                            setImgLoading(false);
+                            setImgError(true);
+                          }}
+                          className={imgLoading ? "hidden" : "clickable-preview"}
                         />
                         {imgError && (
                           <div className="template-preview-error">
@@ -238,16 +253,9 @@ function SetReport() {
           aria-label="Template full view"
           onClick={() => setShowModal(false)}
         >
-          <div
-            className="image-modal-content"
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div className="image-modal-content" onClick={(e) => e.stopPropagation()}>
             <img src={previewSrc} alt="Template full view" />
-            <button
-              className="close-modal"
-              onClick={() => setShowModal(false)}
-              aria-label="Close"
-            >
+            <button className="close-modal" onClick={() => setShowModal(false)} aria-label="Close">
               ×
             </button>
           </div>

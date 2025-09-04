@@ -1,0 +1,132 @@
+body{
+  background-color: #F1F1F1;
+  top: 0;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+
+.dashboard-container {
+  display: flex;
+  margin-top: 2.5rem;
+  height: 88vh;
+  width: 100vw;
+  color: black;
+  position: fixed;
+}
+
+.dashboard-content{
+  padding-left: 1rem;
+  width: 100%;
+}
+
+.dashboard-card{
+  background-color: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.dashboard-cards{
+  display: flex;
+  gap: 7rem;
+  flex-direction: row;
+  padding: 1rem;
+  height: 195px;
+  width: 100%;
+}
+
+.dashboard-sidebar{
+  padding-left: 1rem;
+}
+
+.title-container {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem; /* Space between image and text */
+}
+
+.submitted-reports-container{
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+}
+
+.submitted-reports{
+  padding: 1rem 1.5rem 1rem 1.5rem;
+  background-color: white;
+  border-radius: 1.5rem;
+}
+
+.calendar-container {
+  padding: 1rem;
+  background-color: white;
+  border-radius: 1.5rem;
+  width: 100%;
+}
+
+.deadline-item{
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  border-radius: 1rem;
+  padding: 0 .5rem 0 .5rem;
+  background-color: #FF8686;
+  margin-top: 0.25rem;
+}
+
+.deadline-details{
+  font-size: 13px;
+}
+
+.deadline-title{
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.deadline-component{
+  margin-top: 1rem;
+  padding: 1rem;
+  background-color: white;
+  border-radius: .5rem;
+}
+
+/* React Calendar Customization */
+.react-calendar {
+  background: #fff;
+  border-radius: 1rem;
+  border: 2px solid #1E56A0;
+  box-shadow: 0 2px 8px rgba(30,86,160,0.08);
+  font-family: inherit;
+}
+
+.react-calendar__navigation {
+  color: #fff;
+  border-radius: 1rem 1rem 0 0;
+}
+
+.react-calendar__month-view__weekdays {
+  background: #f0f4fa;
+  color: #1E56A0;
+  font-weight: bold;
+}
+
+.react-calendar__tile {
+  background: none;
+  color: #223861;
+  border-radius: 0.5rem;
+}
+
+.react-calendar__tile--active {
+  background: #1E56A0;
+  color: #fff;
+}
+
+.react-calendar__tile--now {
+  background: #FF8686;
+  color: #fff;
+}
+
