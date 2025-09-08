@@ -29,6 +29,10 @@ import ClassificationOfGradesInstruction from './pages/Teacher/ClassificationOfG
 import Login from './pages/Login.jsx'
 import DashboardPrincipal from './pages/Principal/DashboardPrincipal.jsx'
 import ViewSubmission from './pages/Principal/ViewSubmission.jsx'
+import SubmittedReport from './pages/Teacher/SubmittedReport.jsx'
+import AssignedReport from './pages/Coordinator/AssignedReport.jsx'
+import ForApproval from './pages/Principal/ForApproval.jsx'
+import UserManagement from './pages/Principal/UserManagement.jsx'
 
 
 function App() {
@@ -55,6 +59,10 @@ function App() {
           <Route path="/ClassificationOfGradesInstruction" element={<ClassificationOfGradesInstruction />} />
           <Route path="/DashboardPrincipal" element={<DashboardPrincipal />} />
           <Route path="/ViewSubmission" element={<ViewSubmission />} />
+          <Route path="/SubmittedReport" element={<SubmittedReport />} />
+          <Route path="/AssignedReport" element={<AssignedReport />} />
+          <Route path="/ForApproval" element={<ForApproval />} />
+          <Route path="/UserManagement" element={<UserManagement />} />
         </Routes>
       </main>
     </BrowserRouter>

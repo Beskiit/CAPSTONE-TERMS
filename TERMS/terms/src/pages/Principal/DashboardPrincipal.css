@@ -18,6 +18,17 @@ body{
 .dashboard-content{
   padding-left: 1rem;
   width: 100%;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+}
+
+.dashboard-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.dashboard-content::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 10px;
 }
 
 .dashboard-card{
@@ -49,17 +60,37 @@ body{
   gap: 0.5rem; /* Space between image and text */
 }
 
-.submitted-reports-container{
-  display: flex;
-  flex-direction: row;
-  justify-content: space-between;
-}
-
-.submitted-reports{
-  padding: 1rem 1.5rem 1rem 1.5rem;
+.submitted-reports,
+.submitted-reports-upon-approval {
+  padding: 1rem 1.5rem;
   background-color: white;
   border-radius: 1.5rem;
+  margin-top: 2rem;
 }
+
+/* scroll wrapper */
+.reports-list {
+  max-height: 250px;     /* adjust to your layout */
+  overflow-y: auto;      /* vertical scroll */
+  margin-top: 1rem;
+  padding-right: 0.5rem; /* space for scrollbar */
+}
+
+/* report item card */
+.submitted-reports-container {
+  display: flex;
+  justify-content: space-between;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  background: #f9f9f9;
+  margin-bottom: 0.75rem;
+  transition: background 0.2s;
+}
+
+.submitted-reports-container:hover {
+  background: #f1f5ff; /* highlight on hover */
+}
+
 
 .calendar-container {
   padding: 1rem;

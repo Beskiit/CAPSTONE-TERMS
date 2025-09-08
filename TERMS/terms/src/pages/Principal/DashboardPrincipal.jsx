@@ -56,7 +56,8 @@ function DashboardPrincipal(){
                     <div className="submitted-reports">
                         <h2>Submitted Reports</h2>
                         <hr />
-                        <div className="submitted-reports-container">
+                        <div className="reports-list">
+                            <div className="submitted-reports-container">
                             <div className="submitted-report-title">
                                 <h4>Quarterly Assessment Report</h4>
                                 <p>Intervention Report</p>
@@ -67,6 +68,30 @@ function DashboardPrincipal(){
                                 <p>Date Given: May 06, 2025</p>
                                 <p>May 06, 2025</p>
                             </div>
+                            </div>
+
+                            {/* more items can go here */}
+                        </div>
+                        </div>
+
+                    <div className="submitted-reports-upon-approval">
+                        <h2>Submitted Reports Upon Approval</h2>
+                        <hr />
+                        <div className="reports-list">
+                            <div className="submitted-reports-container">
+                            <div className="submitted-report-title">
+                                <h4>Quarterly Assessment Report</h4>
+                                <p>Intervention Report</p>
+                                <p>1st Quarter</p>
+                            </div>
+                            <div className="submitted-report-date">
+                                <p>SY: 2025-2026</p>
+                                <p>Date Given: May 06, 2025</p>
+                                <p>May 06, 2025</p>
+                            </div>
+                            </div>
+
+                            {/* more items can go here */}
                         </div>
                     </div>
                 </div>

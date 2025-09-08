@@ -29,6 +29,12 @@ function SidebarCoordinator({ activeLink, style }) {
                             <li className={`sidebar-item ${activeLink === 'User Management' ? 'active' : ''}`}>
                                 <Link to="/UserManagement">User Management</Link>
                             </li>
+                            <li className={`sidebar-item ${activeLink === 'Assigned Report' ? 'active' : ''}`}>
+                                <Link to="/AssignedReport">Assigned Reports</Link>
+                            </li>
+                            <li className={`sidebar-item ${activeLink === 'For Approval' ? 'active' : ''}`}>
+                                <Link to="/ForApproval">For Approval</Link>
+                            </li>
                         </div>
                         <div className="sidebar-menu-logout">
                         <li className="sidebar-item">

@@ -32,6 +32,9 @@ function SidebarTeacher({ activeLink }) {
                                     </ul>
                                 )}
                         </li>
+                        <li className={`sidebar-item ${activeLink === 'Submitted Report' ? 'active' : ''}`}>
+                                <Link to="/SubmittedReport">Submitted Reports</Link>
+                        </li>
                     </div>
                     <div className="sidebar-menu-logout">
                         <li className="sidebar-item">
