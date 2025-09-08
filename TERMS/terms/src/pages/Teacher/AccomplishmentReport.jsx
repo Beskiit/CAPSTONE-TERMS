@@ -35,7 +35,7 @@ function AccomplishmentReport() {
   const [sp] = useSearchParams();
   const idFromQuery = sp.get("id");
   const submissionId = useMemo(
-    () => idFromRoute || idFromQuery || "17",
+    () => idFromRoute || idFromQuery || "18",
     [idFromRoute, idFromQuery]
   );
 

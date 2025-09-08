@@ -36,7 +36,7 @@ export const createUser = async (req, res) => {
 
 // READ all users (Admin/Principal only)
 export const getUsers = (req, res) => {
-  const sql = 'SELECT id, google_id, email, name, role, created_at FROM user_details';
+  const sql = 'SELECT user_id, google_id, email, name, role, created_at FROM user_details';
 
   db.query(sql, (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -47,7 +47,7 @@ export const getUsers = (req, res) => {
 // READ single user
 export const getUser = (req, res) => {
   const { id } = req.params;
-  const sql = 'SELECT id, google_id, email, name, role, created_at FROM user_details WHERE id = ?';
+  const sql = 'SELECT user_id, google_id, email, name, role, created_at FROM user_details WHERE id = ?';
 
   db.query(sql, [id], (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
