@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useMemo } from "react";
 import Header from "../../components/shared/Header.jsx";
-import Sidebar from "../../components/shared/SidebarCoordinator.jsx"; // ✅ single import
+import Sidebar from "../../components/shared/SidebarCoordinator.jsx";
 import SidebarPrincipal from "../../components/shared/SidebarPrincipal.jsx";
 import "./SetReport.css";
 import Laempl from "../../assets/templates/LAEMPL.png";
 import AccomplishmentReport from "../../assets/templates/accomplishment-report.png";
+
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
 
 // Preview mapping (category_id → sub_category_id → image)
 const TEMPLATE_MAP = {
@@ -12,106 +14,149 @@ const TEMPLATE_MAP = {
   "2": { "20": Laempl },
 };
 
-// --- Sample static data (no API needed) ---
-const sampleCategories = [
-  { category_id: "1", category_name: "Accomplishment Report" },
-  { category_id: "2", category_name: "LAEMPL" },
-];
-
-const sampleSubCategories = {
-  "1": [{ sub_category_id: "10", sub_category_name: "Default Accomplishment" }],
-  "2": [{ sub_category_id: "20", sub_category_name: "Default LAEMPL" }],
-};
-
 function SetReport() {
-  // ✅ add user state
   const [user, setUser] = useState(null);
-
   const role = (user?.role || "").toLowerCase();
   const isCoordinator = role === "coordinator";
 
   const [users, setUsers] = useState([]);
-  const [selectedCategory, setSelectedCategory] = useState("");
   const [categories, setCategories] = useState([]);
-  const [selectedTeacher, setSelectedTeacher] = useState("");
   const [subCategories, setSubCategories] = useState([]);
+
+  const [selectedCategory, setSelectedCategory] = useState("");
   const [selectedSubCategory, setSelectedSubCategory] = useState("");
+  const [selectedTeacher, setSelectedTeacher] = useState("");
+
   const [startDate, setStartDate] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [instruction, setInstruction] = useState("");
+  const [title, setTitle] = useState("");
 
-  // Preview states
   const [imgLoading, setImgLoading] = useState(false);
   const [imgError, setImgError] = useState(false);
-
-  // Modal state
   const [showModal, setShowModal] = useState(false);
 
-  // Resolve preview image URL
+  // Preview image resolver
   const previewSrc = useMemo(() => {
     if (!selectedCategory || !selectedSubCategory) return "";
     const cat = TEMPLATE_MAP[String(selectedCategory)];
     return cat ? cat[String(selectedSubCategory)] || "" : "";
   }, [selectedCategory, selectedSubCategory]);
 
+  // ✅ Load logged-in user
   useEffect(() => {
-    // Load static sample data
-    setCategories(sampleCategories);
-    setUsers([
-      { user_id: "t1", name: "Mr. Smith" },
-      { user_id: "t2", name: "Ms. Johnson" },
-    ]);
+    const fetchUser = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/auth/me`, {
+          credentials: "include",
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        setUser(data);
+      } catch (err) {
+        console.error("Failed to fetch user:", err);
+      }
+    };
+    fetchUser();
   }, []);
 
+  // ✅ Load teachers (users)
   useEffect(() => {
-    if (selectedCategory) {
-      setSubCategories(sampleSubCategories[selectedCategory] || []);
-    } else {
-      setSubCategories([]);
-    }
-  }, [selectedCategory]);
-
-  useEffect(() => {
-    if (previewSrc) {
-      setImgLoading(true);
-      setImgError(false);
-    } else {
-      setImgLoading(false);
-      setImgError(false);
-    }
-  }, [previewSrc]);
-
-  // Close modal on ESC
-  useEffect(() => {
-    const onKeyDown = (e) => {
-      if (e.key === "Escape") setShowModal(false);
+    const fetchUsers = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/users`, { credentials: "include" });
+        if (!res.ok) return;
+        const data = await res.json();
+        // filter only teachers
+        setUsers(data.filter((u) => u.role === "teacher"));
+      } catch (err) {
+        console.error("Failed to fetch users:", err);
+      }
     };
-    if (showModal) document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [showModal]);
+    fetchUsers();
+  }, []);
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    // optional: console.log current form payload
-    // console.log({ selectedCategory, selectedSubCategory, selectedTeacher, startDate, dueDate, instruction });
-  };
-
+  // ✅ Load categories
   useEffect(() => {
-      const fetchUser = async () => {
-        try {
-          const res = await fetch("http://localhost:5000/auth/me", {
-            credentials: "include", // important so session cookie is sent
-          });
-          if (!res.ok) return; // not logged in
-          const data = await res.json();
-          setUser(data);
-        } catch (err) {
-          console.error("Failed to fetch user:", err);
-        }
-      };
-      fetchUser();
-    }, []);
-    
+    const fetchCategories = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/categories`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setCategories(data);
+      } catch (err) {
+        console.error("Failed to fetch categories:", err);
+      }
+    };
+    fetchCategories();
+  }, []);
+
+  // ✅ Load subcategories whenever category changes
+  // load subcategories whenever selectedCategory changes
+useEffect(() => {
+  if (!selectedCategory) {
+    setSubCategories([]);
+    return;
+  }
+  const fetchSubCategories = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/subcategories/${selectedCategory}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setSubCategories(data); // ✅ data must be [{sub_category_id, sub_category_name}, ...]
+    } catch (err) {
+      console.error("Failed to fetch subcategories:", err);
+    }
+  };
+  fetchSubCategories();
+}, [selectedCategory]);
+
+
+  // Handle form submit → connect to giveReport
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    const payload = {
+      category_id: selectedCategory,
+      sub_category_id: selectedSubCategory,
+      submitted_by: Number(selectedTeacher),
+      quarter: 1,
+      year: new Date().getFullYear(),
+      from_date: startDate,
+      to_date: dueDate,
+      instruction,
+      title,
+      is_given: 1,
+      is_archived: 0,
+      allow_late: 0,
+    };
+
+    try {
+      const endpoint =
+        selectedCategory === "2"
+          ? `${API_BASE}/reports/laempl`
+          : `${API_BASE}/reports/give`;
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        alert("Failed to set report: " + errText);
+        return;
+      }
+
+      const data = await res.json();
+      alert("Report assigned successfully! ID: " + data.report_assignment_id);
+    } catch (err) {
+      console.error("Error submitting report:", err);
+      alert("Error submitting report. Check console.");
+    }
+  };
 
   return (
     <>
@@ -119,9 +164,10 @@ function SetReport() {
       <div className="dashboard-container" style={{ overflowY: "auto" }}>
         {isCoordinator ? (
           <Sidebar activeLink="Set Report Schedule" />
-          ) : (
+        ) : (
           <SidebarPrincipal activeLink="Set Report Schedule" />
-          )}
+        )}
+
         <div className="dashboard-content">
           <div className="dashboard-main">
             <h2>Set Reports</h2>
@@ -129,7 +175,12 @@ function SetReport() {
             <form className="schedule-form" onSubmit={handleSubmit}>
               <div className="form-row">
                 <label>Title:</label>
-                <input type="text" placeholder="Enter report title" />
+                <input
+                  type="text"
+                  placeholder="Enter report title"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
               </div>
 
               <div className="form-row">
@@ -150,14 +201,20 @@ function SetReport() {
                 </select>
 
                 <label>Select Teacher:</label>
-                <select value={selectedTeacher} onChange={(e) => setSelectedTeacher(e.target.value)}>
-                  <option value="">Select Teacher</option>
-                  {users.map((u) => (
-                    <option key={u.user_id} value={u.user_id}>
-                      {u.name}
-                    </option>
-                  ))}
-                </select>
+                  <select
+                    value={selectedTeacher}
+                    onChange={(e) => setSelectedTeacher(e.target.value)}
+                  >
+                    <option value="">Select Teacher</option>
+                    {users
+                      .filter((u) => u.role === "teacher") // only teachers
+                      .map((u) => (
+                        <option key={u.user_id} value={u.user_id}>
+                          {u.name}   {/* 👈 this is what will show */}
+                        </option>
+                      ))}
+                  </select>
+
               </div>
 
               {selectedCategory && (
@@ -177,6 +234,7 @@ function SetReport() {
                 </div>
               )}
 
+
               <div className="form-row">
                 <label>Start Date:</label>
                 <input
@@ -186,7 +244,11 @@ function SetReport() {
                 />
 
                 <label>Due Date:</label>
-                <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+                <input
+                  type="date"
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                />
               </div>
 
               <div className="form-row-ins textarea-row">
@@ -198,44 +260,6 @@ function SetReport() {
                 ></textarea>
               </div>
 
-              {selectedCategory && selectedSubCategory && (
-                <div className="template-preview-panel">
-                  <div className="template-preview-header">
-                    <span>Template Preview</span>
-                    <small>{previewSrc ? "Click the image to enlarge" : "No preview available"}</small>
-                  </div>
-
-                  <div className="template-preview-body">
-                    {!previewSrc && (
-                      <div className="template-preview-empty">No preview for this selection.</div>
-                    )}
-
-                    {previewSrc && (
-                      <>
-                        {imgLoading && <div className="template-skeleton" />}
-                        <img
-                          key={previewSrc}
-                          src={previewSrc}
-                          alt="Template preview"
-                          onClick={() => setShowModal(true)}
-                          onLoad={() => setImgLoading(false)}
-                          onError={() => {
-                            setImgLoading(false);
-                            setImgError(true);
-                          }}
-                          className={imgLoading ? "hidden" : "clickable-preview"}
-                        />
-                        {imgError && (
-                          <div className="template-preview-error">
-                            Couldn’t load the image. Check the path: <code>{previewSrc}</code>
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-
               <div className="form-actions">
                 <button type="submit">Set Schedule</button>
               </div>
@@ -243,25 +267,6 @@ function SetReport() {
           </div>
         </div>
       </div>
-
-      {/* ===== Image Modal (Lightbox) ===== */}
-      {showModal && previewSrc && (
-        <div
-          className="image-modal-overlay"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Template full view"
-          onClick={() => setShowModal(false)}
-        >
-          <div className="image-modal-content" onClick={(e) => e.stopPropagation()}>
-            <img src={previewSrc} alt="Template full view" />
-            <button className="close-modal" onClick={() => setShowModal(false)} aria-label="Close">
-              ×
-            </button>
-          </div>
-        </div>
-      )}
-      {/* ===== End Modal ===== */}
     </>
   );
 }
