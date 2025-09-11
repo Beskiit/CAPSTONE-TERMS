@@ -6,7 +6,7 @@ const router = express.Router();
 // Routes 
 router.get('/', getReports);         // GET /reports
 router.get('/:id', getReport);       // GET /reports/:id
-router.post('/', giveReport);      // POST /reports
+router.post('/give', giveReport);      // POST /reports/give
 router.post('/laempl', giveLAEMPLReport);      // POST /reports/laempl
 router.delete('/:id', deleteReport); // DELETE /reports/:id
 router.patch('/:id', patchReport);   // PATCH /reports/:id

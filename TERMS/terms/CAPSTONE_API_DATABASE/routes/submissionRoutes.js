@@ -8,6 +8,7 @@ import {
   createSubmission,
   submitAnswers,
   deleteSubmission,
+  getMySubmissions,
 } from "../controllers/submissionController.js";  // <-- FIXED path
 
 
@@ -25,6 +26,9 @@ router.get("/:id", getSubmission);
 router.patch("/:id/answers", submitAnswers);
 router.post("/", createSubmission);
 router.delete("/:id", deleteSubmission);
+
+router.get("/my/:id", getMySubmissions);
+
 
 export default router;
 
