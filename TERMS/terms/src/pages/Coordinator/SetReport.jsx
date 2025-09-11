@@ -22,6 +22,8 @@ function SetReport() {
   const [users, setUsers] = useState([]);
   const [categories, setCategories] = useState([]);
   const [subCategories, setSubCategories] = useState([]);
+  const [attempts, setAttempts] = useState("");
+const [allowLate, setAllowLate] = useState(false);
 
   const [selectedCategory, setSelectedCategory] = useState("");
   const [selectedSubCategory, setSelectedSubCategory] = useState("");
@@ -173,15 +175,6 @@ useEffect(() => {
             <h2>Set Reports</h2>
 
             <form className="schedule-form" onSubmit={handleSubmit}>
-              <div className="form-row">
-                <label>Title:</label>
-                <input
-                  type="text"
-                  placeholder="Enter report title"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                />
-              </div>
 
               <div className="form-row">
                 <label>Category:</label>
@@ -251,7 +244,32 @@ useEffect(() => {
                 />
               </div>
 
-              <div className="form-row-ins textarea-row">
+              <div className="form-row allow-late-row">
+                <label>Allow Late:</label>
+                <input
+                  type="checkbox"
+                  checked={allowLate}
+                  onChange={(e) => setAllowLate(e.target.checked)}
+                />
+
+                <label>Number of Attempts:</label>
+                <select
+                  className="attempts-select"
+                  value={attempts}
+                  onChange={(e) => setAttempts(e.target.value)}
+                >
+                  <option value="" disabled>Select Number of Attempts</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                  <option value="5">5</option>
+                  <option value="unlimited">Unlimited</option>
+                </select>
+              </div>
+
+
+              <div className="form-row-ins form-row textarea-row">
                 <label>Instructions:</label>
                 <textarea
                   placeholder="Enter instructions for the report"
