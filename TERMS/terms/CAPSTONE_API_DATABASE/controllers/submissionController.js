@@ -1,4 +1,5 @@
 import db from '../db.js';
+import pool from '../db.js';
 // --- helpers ---
 const safeParseJSON = (val, fallback = null) => {
   try {
@@ -167,6 +168,36 @@ export const submitAnswers = (req, res) => {
         res.json(normalizeFields(fRes[0]));
       });
     });
+  });
+};
+
+export const getMySubmissions = (req, res) => {
+  const userId = req.user?.user_id || req.params.id || req.query.user_id;
+  if (!userId) return res.status(400).json({ error: "User ID is required." });
+
+  const sql = `
+    SELECT
+      s.submission_id,
+      s.category_id,
+      s.submitted_by,
+      s.status,
+      s.number_of_submission,
+      s.value,
+      s.date_submitted,
+      s.fields,
+      c.category_name
+    FROM submission s
+    LEFT JOIN category c ON s.category_id = c.category_id
+    WHERE s.submitted_by = ?
+    ORDER BY s.date_submitted DESC
+  `;
+
+  pool.query(sql, [userId], (err, results) => {
+    if (err) {
+      console.error("DB error fetching submissions:", err);
+      return res.status(500).json({ error: "Database error." });
+    }
+    return res.json(results);
   });
 };
 
