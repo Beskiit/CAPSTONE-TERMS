@@ -42,7 +42,7 @@ const clampVal = (k, v) => {
 };
 
 // statuses that lock the UI (adjust as needed)
-const LOCK_STATUSES = new Set([1]); // e.g., 1=submitted, add 2 if approved should also lock
+const LOCK_STATUSES = new Set([1]); // e.g., 1=submitted
 
 function LAEMPLReport() {
   const [openPopup, setOpenPopup] = useState(false);
@@ -71,6 +71,7 @@ function LAEMPLReport() {
 
   // prevent late hydration from overwriting local edits/clears
   const touchedRef = useRef(false);
+  const fileInput = useRef(null);
 
   const handleChange = (trait, colKey, value) => {
     touchedRef.current = true;
@@ -95,9 +96,7 @@ function LAEMPLReport() {
 
   const onSubmit = async () => {
     if (!SUBMISSION_ID) {
-      setErr(
-        "Missing submission id. Open this page with ?id=<submission_id> from the assignment link."
-      );
+      setErr("Missing submission id. Open this page with ?id=<submission_id> from the assignment link.");
       return;
     }
     if (isDisabled) {
@@ -130,10 +129,8 @@ function LAEMPLReport() {
       const json = await res.json();
       setMsg("Saved successfully.");
 
-      // reflect server-side status if provided
       if (typeof json?.status !== "undefined") setStatus(json.status);
 
-      // optional rehydrate to reflect server-side clamping/merges
       if (json?.fields?.rows) {
         const next = Object.fromEntries(
           TRAITS.map((t) => [
@@ -150,8 +147,7 @@ function LAEMPLReport() {
         setData(next);
       }
 
-      // RE-LOCK after successful submit/save
-      setEditOverride(false);
+      setEditOverride(false); // re-lock after save
     } catch (e) {
       setErr(e.message || "Failed to save.");
     } finally {
@@ -182,8 +178,7 @@ function LAEMPLReport() {
 
         const rows = json?.fields?.rows;
         if (Array.isArray(rows)) {
-          // don't overwrite if user already edited/cleared/imported
-          if (touchedRef.current) return;
+          if (touchedRef.current) return; // don't overwrite local edits
 
           const next = Object.fromEntries(
             TRAITS.map((t) => [
@@ -252,13 +247,12 @@ function LAEMPLReport() {
         .trim()
         .split(/\r?\n/)
         .map((l) =>
-          // split by commas outside quotes
           l
-            .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
+            .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)     // split by commas outside quotes
             .map((s) => s.replace(/^"|"$/g, "").replace(/""/g, '"'))
         );
 
-      const body = lines.slice(1, 1 + TRAITS.length); // header + rows
+      const body = lines.slice(1, 1 + TRAITS.length); // skip header
       const next = Object.fromEntries(
         TRAITS.map((t) => [
           t,
@@ -280,6 +274,7 @@ function LAEMPLReport() {
       setData(next);
       setMsg("Imported file successfully.");
       setErr("");
+      setOpenPopup(false);       // close modal after success (optional)
     } catch (e) {
       setErr("Failed to import CSV. " + (e?.message || ""));
     }
@@ -287,8 +282,8 @@ function LAEMPLReport() {
 
   // CLEAR TABLE — also enable edit override
   const handleClear = () => {
-    touchedRef.current = true; // prevent late hydration overwrite
-    setEditOverride(true);     // unlock locally
+    touchedRef.current = true;
+    setEditOverride(true);
     const blank = Object.fromEntries(
       TRAITS.map((t) => [
         t,
@@ -343,6 +338,7 @@ function LAEMPLReport() {
               <button onClick={() => setOpenPopup(true)} disabled={isDisabled}>
                 Import File
               </button>
+
               {openPopup && (
                 <div className="modal-overlay">
                   <div className="import-popup">
@@ -356,24 +352,42 @@ function LAEMPLReport() {
                       </button>
                     </div>
                     <hr />
-                    <form
-                      className="import-form"
-                      onSubmit={(e) => e.preventDefault()}
-                    >
-                      <label htmlFor="fileInput" className="file-upload-label">
+                    <form className="import-form" onSubmit={(e) => e.preventDefault()}>
+                      {/* Clickable label opens file picker */}
+                      <label
+                        htmlFor="fileInput"
+                        className="file-upload-label"
+                        onClick={(e) => {
+                          e.preventDefault();           // avoid submitting
+                          fileInput.current?.click();   // open system dialog
+                        }}
+                      >
                         Click here to upload a file
                       </label>
+
+                      {/* Hidden file input (the "destination") */}
                       <input
                         id="fileInput"
+                        ref={fileInput}
                         type="file"
                         accept=".csv"
                         style={{ display: "none" }}
                         onChange={(e) => {
                           const f = e.target.files?.[0];
-                          if (f) onImport(f);
+                          if (f) {
+                            onImport(f);
+                            e.target.value = ""; // allow re-selecting same file
+                          }
                         }}
                       />
-                      <button type="submit">Upload</button>
+
+                      {/* Upload button also opens file picker */}
+                      <button
+                        type="button"
+                        onClick={() => fileInput.current?.click()}
+                      >
+                        Upload
+                      </button>
                     </form>
                   </div>
                 </div>
@@ -385,7 +399,7 @@ function LAEMPLReport() {
               <button onClick={handleClear}>Clear Table</button>
             </div>
 
-            {/* Drop down for qtr and section*/}
+            {/* Drop down for qtr and section */}
             <div className="dropdown-container">
               <div className="dropdown">
                 <button
@@ -427,21 +441,9 @@ function LAEMPLReport() {
             </div>
 
             {/* status messages */}
-            {loading && (
-              <div className="ok-text" style={{ marginTop: 8 }}>
-                Loading...
-              </div>
-            )}
-            {!!msg && (
-              <div className="ok-text" style={{ marginTop: 8 }}>
-                {msg}
-              </div>
-            )}
-            {!!err && (
-              <div className="error-text" style={{ marginTop: 8 }}>
-                {err}
-              </div>
-            )}
+            {loading && <div className="ok-text" style={{ marginTop: 8 }}>Loading...</div>}
+            {!!msg && <div className="ok-text" style={{ marginTop: 8 }}>{msg}</div>}
+            {!!err && <div className="error-text" style={{ marginTop: 8 }}>{err}</div>}
 
             {/* DYNAMIC TABLE */}
             <div className="table-wrap">
@@ -449,22 +451,16 @@ function LAEMPLReport() {
                 <caption>Grade 1 - LAEMPL</caption>
                 <thead>
                   <tr>
-                    <th scope="col" className="row-head">
-                      &nbsp;
-                    </th>
+                    <th scope="col" className="row-head">&nbsp;</th>
                     {COLS.map((col) => (
-                      <th key={col.key} scope="col">
-                        {col.label}
-                      </th>
+                      <th key={col.key} scope="col">{col.label}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {TRAITS.map((trait) => (
                     <tr key={trait}>
-                      <th scope="row" className="row-head">
-                        {trait}
-                      </th>
+                      <th scope="row" className="row-head">{trait}</th>
                       {COLS.map((col) => (
                         <td key={col.key}>
                           <input
@@ -474,9 +470,7 @@ function LAEMPLReport() {
                             max={COL_RULES[col.key]?.[1]}
                             step="1"
                             value={data[trait][col.key]}
-                            onChange={(e) =>
-                              handleChange(trait, col.key, e.target.value)
-                            }
+                            onChange={(e) => handleChange(trait, col.key, e.target.value)}
                             className="cell-input"
                             disabled={isDisabled}
                           />
@@ -486,13 +480,9 @@ function LAEMPLReport() {
                   ))}
 
                   <tr className="total-row">
-                    <th scope="row" className="row-head">
-                      Total
-                    </th>
+                    <th scope="row" className="row-head">Total</th>
                     {COLS.map((col) => (
-                      <td key={col.key} className="total-cell">
-                        {totals[col.key]}
-                      </td>
+                      <td key={col.key} className="total-cell">{totals[col.key]}</td>
                     ))}
                   </tr>
                 </tbody>
@@ -511,25 +501,18 @@ function LAEMPLReport() {
             </div>
           </div>
         </div>
+
         <div className="dashboard-sidebar">
           <div className="report-card">
-            <h3 className="report-card-header">
-              This is where the name of the report go
-            </h3>
+            <h3 className="report-card-header">This is where the name of the report go</h3>
             <p className="report-card-text">Start Date</p>
             <p className="report-card-text">Due Date</p>
           </div>
           <div className="report-card">
             <h3 className="report-card-header">Submission</h3>
-            <p className="report-card-text">
-              Submissions: "Number of submission"
-            </p>
-            <p className="report-card-text">
-              Max. Attempts: "Number of Maximum Attempts"
-            </p>
-            <p className="report-card-text">
-              Allow late submissions: "logiccc"
-            </p>
+            <p className="report-card-text">Submissions: "Number of submission"</p>
+            <p className="report-card-text">Max. Attempts: "Number of Maximum Attempts"</p>
+            <p className="report-card-text">Allow late submissions: "logiccc"</p>
           </div>
         </div>
       </div>
