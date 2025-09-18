@@ -332,6 +332,10 @@ function AccomplishmentReport() {
                   <>
                     {/* TEACHER VIEW */}
                     <div className="form-row">
+                      <label htmlFor="teacherTitle">Title:</label>
+                      <input type="text" required />
+                    </div>
+                    <div className="form-row">
                       <label htmlFor="teacherPictures">Upload Image(s):</label>
                       <input
                         type="file"

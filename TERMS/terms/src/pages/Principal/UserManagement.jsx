@@ -9,9 +9,9 @@ import Modal from "react-modal";
 
 function UserManagement() {
   const navigate = useNavigate();
-  const [openPopup, setOpenPopup] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
   const [openPopupAdd, setOpenPopupAdd] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [openPopupAssign, setOpenPopupAssign] = useState(false);
   const [user, setUser] = useState(null);
 
   useEffect(() => {
@@ -52,8 +52,11 @@ function UserManagement() {
           </div>
 
           <div className="add-user-container">
+            <button className="add-user-btn" type="button" onClick={() => setOpenPopupAssign(true)}>
+              <span className="add-user-text">Assign Teacher</span>
+            </button>
             <button className="add-user-btn" type="button" onClick={() => setOpenPopupAdd(true)}>
-              <span className="add-user-text">Add User</span>
+              <span className="add-user-text">Add School</span>
             </button>
           </div>
 
@@ -61,9 +64,7 @@ function UserManagement() {
             <table className="report-table">
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Role</th>
-                  <th>Creation Date</th>
+                  <th>School</th>
                   <th>Action</th>
                 </tr>
               </thead>
@@ -71,20 +72,9 @@ function UserManagement() {
               <tbody>
                 <tr>
                   <td className="file-cell">
-                    <span className="file-name">Tristan Labjata</span>
+                    <span className="file-name">Tuktukan Elementary School</span>
                   </td>
-                  <td>Coordinator</td>
-                  <td>May 06, 2026</td>
                   <td>
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      onClick={() => setOpenPopup(true)}
-                      title="Edit user"
-                    >
-                      <img src={Edit} alt="Edit" />
-                    </button>
-
                     <button
                       type="button"
                       className="icon-btn"
@@ -116,31 +106,23 @@ function UserManagement() {
           </Modal>
 
           {/* Edit user (your custom overlay) */}
-          {openPopup && (
-            <div className="edit-user-overlay" onClick={() => setOpenPopup(false)}>
-              <div className="edit-user-modal" onClick={(e) => e.stopPropagation()}>
+          {openPopupAdd && (
+            <div className="add-user-overlay add-school" onClick={() => setOpenPopupAdd(false)}>
+              <div className="add-user-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="popup-header">
-                  <h2>Edit User</h2>
-                  <button className="close-button" onClick={() => setOpenPopup(false)} aria-label="Close">
+                  <h2>Add School</h2>
+                  <button className="close-button" onClick={() => setOpenPopupAdd(false)} aria-label="Close">
                     ×
                   </button>
                 </div>
                 <hr />
                 <form className="user-form">
                   <div className="form-row">
-                        <label>Name:</label>
+                        <label>School Name:</label>
                         <input type="text" placeholder="Full name" />
                     </div>
-                    <div className="form-row">
-                        <label>Role:</label>
-                        <select>
-                            <option value="" disabled selected>Select role</option>
-                            <option value="teacher">Teacher</option>
-                            <option value="coordinator">Coordinator</option>
-                        </select>
-                    </div>
                     <button className="action-btn">
-                        Add User
+                        Add School
                     </button>
                 </form>
               </div>
@@ -148,33 +130,41 @@ function UserManagement() {
           )}
 
           {/* Add user (your custom overlay) */}
-          {openPopupAdd && (
-            <div className="edit-user-overlay" onClick={() => setOpenPopupAdd(false)}>
+          {openPopupAssign && (
+            <div className="edit-user-overlay" onClick={() => setOpenPopupAssign(false)}>
               <div className="edit-user-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="popup-header">
-                  <h2>Add User</h2>
-                  <button className="close-button" onClick={() => setOpenPopupAdd(false)} aria-label="Close">
+                  <h2>Assign Teacher</h2>
+                  <button className="close-button" onClick={() => setOpenPopupAssign(false)} aria-label="Close">
                     ×
                   </button>
                 </div>
                 <hr />
-                <form className="user-form">
-                    <div className="form-row">
-                        <label>Name:</label>
-                        <input type="text" placeholder="Full name" />
-                    </div>
-                    <div className="form-row">
-                        <label>Role:</label>
-                        <select>
-                            <option value="" disabled selected>Select role</option>
-                            <option value="teacher">Teacher</option>
-                            <option value="coordinator">Coordinator</option>
-                        </select>
-                    </div>
-                    <button className="action-btn">
-                        Add User
-                    </button>
-                </form>
+                <div className="content">
+                  <table className="report-table">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      <tr>
+                        <td className="file-cell">
+                          <span className="file-name">Airone Gamil</span>
+                        </td>
+                        <td>
+                          <span className="status-txt">Unassigned</span>
+                        </td>
+                        <td>
+                          <button className="btn-action">Assign</button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}

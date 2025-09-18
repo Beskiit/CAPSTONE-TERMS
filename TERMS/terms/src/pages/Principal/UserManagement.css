@@ -75,11 +75,43 @@
 }
 
 .edit-user-modal {
+  width: min(820px, 90vw);
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px 18px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+}
+
+.edit-user-modal form {
+  display: flex;
+  flex-direction: column; 
+  align-items: center; 
+  gap: 12px;  
+}
+
+.add-user-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.add-user-modal {
   width: min(520px, 90vw);
   background: #fff;
   border-radius: 12px;
   padding: 16px 18px;
   box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+}
+
+.add-user-modal form {
+  display: flex;
+  flex-direction: column; 
+  align-items: center; 
+  gap: 12px;  
 }
 
 .popup-header {
@@ -106,9 +138,8 @@
   padding: 10px 16px;
   border-radius: 6px;
   cursor: pointer;
-  transition: background 0.2s;
   margin-bottom: 16px;
-  width: 120px;
+  width: 140px;
 }
 
 .add-user-container{
@@ -164,4 +195,11 @@
 
 .action-btn{
   align-self: center;
+}
+
+.status-txt{
+  padding: 2px 12px;
+  background-color: #e53935;
+  border-radius: 2rem;
+  color: white;
 }
