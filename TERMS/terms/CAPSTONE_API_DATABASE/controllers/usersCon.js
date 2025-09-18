@@ -1,6 +1,18 @@
 import db from '../db.js'; // shared MySQL connection
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
-
+// List TEACHERS only (for the dropdown)
+export const getTeachers = (req, res) => {
+  const sql = `
+    SELECT user_id, name
+    FROM user_details
+    WHERE LOWER(role) = 'teacher'
+    ORDER BY name ASC
+  `;
+  db.query(sql, (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(results);
+  });
+};
 // CREATE user (Admin only - for manual user creation)
 export const createUser = async (req, res) => {
   const { google_id, email, name, role } = req.body;
@@ -34,6 +46,7 @@ export const createUser = async (req, res) => {
   }
 };
 
+
 // READ all users (Admin/Principal only)
 export const getUsers = (req, res) => {
   const sql = 'SELECT user_id, google_id, email, name, role, created_at FROM user_details';
@@ -47,7 +60,7 @@ export const getUsers = (req, res) => {
 // READ single user
 export const getUser = (req, res) => {
   const { id } = req.params;
-  const sql = 'SELECT user_id, google_id, email, name, role, created_at FROM user_details WHERE id = ?';
+  const sql = 'SELECT user_id, google_id, email, name, role, created_at FROM user_details WHERE user_id = ?';
 
   db.query(sql, [id], (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -86,7 +99,7 @@ export const patchUser = async (req, res) => {
 
     if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
     
-    const sql = `UPDATE user_details SET ${updates.join(', ')} WHERE id = ?`;
+    const sql = `UPDATE user_details SET ${updates.join(', ')} WHERE user_id = ?`;
     values.push(id);
 
     db.query(sql, values, (err, result) => {
@@ -99,7 +112,7 @@ export const patchUser = async (req, res) => {
 // DELETE user (Admin only)
 export const deleteUser = (req, res) => {
   const { id } = req.params;
-  const sql = 'DELETE FROM user_details WHERE id = ?';
+  const sql = 'DELETE FROM user_details WHERE user_id = ?';
 
   db.query(sql, [id], (err, result) => {
     if (err) return res.status(500).json({ error: err.message });
