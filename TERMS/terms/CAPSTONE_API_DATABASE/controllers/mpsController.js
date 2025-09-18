@@ -20,6 +20,7 @@ function buildInitialMpsFields(grade=1) {
  * POST /reports/mps/give
  * Create a report_assignment and seed 1 blank submission per assignee/teacher.
  */
+// POST /mps/assign  (Give MPS Report)
 export const giveMPSReport = (req, res) => {
   const {
     category_id,                     // required
@@ -33,15 +34,20 @@ export const giveMPSReport = (req, res) => {
     is_archived = 0,
     allow_late = 0,
 
-    // recipients: either submitted_by (single) or assignees (array)
+    // recipients
     submitted_by,
     assignees,
 
     // MPS metadata
     title,                           // required (e.g., "MPS - Grade 1")
-    grade = 1
+    grade = 1,
+
+    // number-of-submission picker
+    number_of_submission,            // single value or "unlimited"/"auto"
+    number_of_submissions            // array aligned with assignees
   } = req.body || {};
 
+  // ---- Validation ----
   if (category_id == null || quarter == null || year == null || !to_date) {
     return res.status(400).send("category_id, quarter, year, and to_date are required.");
   }
@@ -58,19 +64,54 @@ export const giveMPSReport = (req, res) => {
     return res.status(400).send("Provide submitted_by or a non-empty assignees array.");
   }
 
+  // Accept number_of_submissions array; lengths must match
+  const hasPerRecipientNos = Array.isArray(number_of_submissions);
+  if (hasPerRecipientNos && number_of_submissions.length !== recipients.length) {
+    return res.status(400).send("number_of_submissions length must match assignees length.");
+  }
+
+  // If UI accidentally sends number_of_submission as [3], unwrap it
+  let _number_of_submission = number_of_submission;
+  if (Array.isArray(_number_of_submission)) {
+    _number_of_submission = _number_of_submission.length ? _number_of_submission[0] : undefined;
+  }
+
   const fromDateVal = from_date
     ? new Date(from_date).toISOString().slice(0,10)
     : new Date().toISOString().slice(0,10);
 
+  // ---- Build initial MPS fields (your existing helper) ----
   const initialFields = buildInitialMpsFields(grade);
+
+  // Helper: next available slot for (submitted_by, category_id)
+  const computeNextNum = (userId, cb) => {
+    const nextNumSql = `
+      SELECT COALESCE(MAX(number_of_submission), 0) + 1 AS next_num
+      FROM submission
+      WHERE submitted_by = ? AND category_id = ?
+    `;
+    db.query(nextNumSql, [userId, category_id], (err, rows) => {
+      if (err) return cb(err);
+      cb(null, rows?.[0]?.next_num || 1);
+    });
+  };
+
+  // Treat null/empty/"unlimited"/"auto" as auto-next
+  const isAutoLike = (v) => {
+    if (v == null || v === '') return true;
+    const s = String(v).toLowerCase();
+    return s === 'unlimited' || s === 'auto';
+  };
+
+  const assigned = []; // [{ user_id, number_of_submission }]
 
   db.query("START TRANSACTION", (txErr) => {
     if (txErr) return res.status(500).send("Failed to start transaction: " + txErr);
 
     const insertReportSql = `
       INSERT INTO report_assignment
-        (category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     const reportVals = [
       category_id, given_by, quarter, year, fromDateVal, to_date,
@@ -84,7 +125,7 @@ export const giveMPSReport = (req, res) => {
         );
       }
 
-      const report_assignment_id = insRes.insertId;
+      const report_assignment_id = insRes.insertId; // not stored in submission (by your current schema)
 
       const insertForIdx = (i) => {
         if (i >= recipients.length) {
@@ -96,28 +137,20 @@ export const giveMPSReport = (req, res) => {
             }
             return res.status(201).json({
               report_assignment_id,
-              submissions_created: recipients.length
+              submissions_created: recipients.length,
+              assigned
             });
           });
         }
 
         const teacherId = recipients[i];
 
-        // Next number_of_submission for this teacher/category
-        const nextNumSql = `
-          SELECT COALESCE(MAX(number_of_submission), 0) + 1 AS next_num
-          FROM submission
-          WHERE submitted_by = ? AND category_id = ?
-        `;
-        db.query(nextNumSql, [teacherId, category_id], (numErr, numRes) => {
-          if (numErr) {
-            return db.query("ROLLBACK", () =>
-              res.status(500).send("Failed to compute next submission number: " + numErr)
-            );
-          }
+        // Decide slot: per-recipient array → single value → auto
+        const desiredRaw = hasPerRecipientNos
+          ? number_of_submissions[i]
+          : _number_of_submission;
 
-          const nextNum = numRes?.[0]?.next_num || 1;
-
+        const proceedInsert = (finalNo) => {
           const insertSubmissionSql = `
             INSERT INTO submission
               (category_id, submitted_by, status, number_of_submission, value, date_submitted, fields)
@@ -125,24 +158,47 @@ export const giveMPSReport = (req, res) => {
               (?, ?, 1, ?, ?, NOW(), ?)
           `;
           const subVals = [
-            category_id, teacherId, nextNum, title, initialFields
+            category_id, teacherId, finalNo, title, initialFields
           ];
 
           db.query(insertSubmissionSql, subVals, (subErr) => {
             if (subErr) {
+              // If you add UNIQUE(submitted_by, category_id, number_of_submission), you can map ER_DUP_ENTRY → 409
               return db.query("ROLLBACK", () =>
                 res.status(500).send("Failed to insert submission: " + subErr)
               );
             }
+            assigned.push({ user_id: teacherId, number_of_submission: finalNo });
             insertForIdx(i + 1);
           });
-        });
+        };
+
+        if (isAutoLike(desiredRaw)) {
+          computeNextNum(teacherId, (nErr, nextNum) => {
+            if (nErr) {
+              return db.query("ROLLBACK", () =>
+                res.status(500).send("Failed to compute next submission number: " + nErr)
+              );
+            }
+            proceedInsert(nextNum);
+          });
+        } else {
+          const n = Number(desiredRaw);
+          if (Number.isFinite(n) && n > 0) {
+            proceedInsert(n);
+          } else {
+            return db.query("ROLLBACK", () =>
+              res.status(400).send("Invalid number_of_submission value.")
+            );
+          }
+        }
       };
 
       insertForIdx(0);
     });
   });
 };
+
 
 /**
  * GET /submissions/mps/:id
