@@ -16,6 +16,8 @@ import subCategoryRouter from "./routes/subCategoryRouter.js";
 import submissionsRouter from "./routes/submissionRoutes.js";
 import mpsRoutes from "./routes/mpsRoutes.js";
 import accomplishmentRouter from "./routes/accomplishmentRoutes.js"
+import reportStatus from "./routes/reportStatusRoutes.js"
+import { report } from "process";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -212,6 +214,7 @@ app.use("/uploads", express.static(path.resolve("uploads")));
 fs.mkdirSync(path.resolve("uploads/accomplishments"), { recursive: true });
 app.get("/health", (_req, res) => res.send("ok"));
 
+app.use('/reports/status', reportStatus);
 // 404
 app.use((req, res, _next) => {
   res.status(404).json({ error: "Not Found", path: req.originalUrl });
