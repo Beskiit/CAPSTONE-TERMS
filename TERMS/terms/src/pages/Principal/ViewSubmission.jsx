@@ -56,7 +56,7 @@ function ViewSubmission() {
                         </tr>
                       </thead>
                       <tbody>
-                          <tr onClick={() => navigate("/AssignedReportData")}>
+                          <tr onClick={() => navigate("/SubmissionData")}>
                             <td className="file-cell">
                               <span className="file-name">MPS</span>
                             </td>

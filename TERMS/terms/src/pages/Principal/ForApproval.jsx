@@ -43,7 +43,7 @@ function ForApproval() {
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr onClick={() => navigate("/")}>
+                                <tr onClick={() => navigate("/ForApprovalData")}>
                                     <td className="file-cell">
                                     <span className="file-name">Accomplishment Report</span>
                                     </td>

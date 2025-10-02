@@ -34,6 +34,8 @@ import AssignedReport from './pages/Coordinator/AssignedReport.jsx'
 import ForApproval from './pages/Principal/ForApproval.jsx'
 import UserManagement from './pages/Principal/UserManagement.jsx'
 import AssignedReportData from './pages/Coordinator/AssignedReportData.jsx'
+import SubmissionData from './pages/Principal/SubmissionData.jsx'
+import ForApprovalData from './pages/Principal/ForApprovalData.jsx'
 
 
 function App() {
@@ -65,6 +67,8 @@ function App() {
           <Route path="/ForApproval" element={<ForApproval />} />
           <Route path="/UserManagement" element={<UserManagement />} />
           <Route path="/AssignedReportData" element={<AssignedReportData />} />
+          <Route path="/SubmissionData" element={<SubmissionData />} />
+          <Route path="/ForApprovalData" element={<ForApprovalData />} />
         </Routes>
       </main>
     </BrowserRouter>
