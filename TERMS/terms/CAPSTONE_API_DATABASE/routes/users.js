@@ -10,6 +10,7 @@ const requireAnyRole = (roles) => (req, res, next) => {
 };
 // Routes with proper authentication and authorization
 router.get('/', requireAuth, requirePrincipal, getUsers);         // GET /users (Principal/Admin only)
+
 router.get('/list/teachers', requireAuth, requireAnyRole(['principal','coordinator','admin']), getTeachers);
 
 router.get('/:id', requireAuth, getUser);                        // GET /users/:id (Authenticated users)

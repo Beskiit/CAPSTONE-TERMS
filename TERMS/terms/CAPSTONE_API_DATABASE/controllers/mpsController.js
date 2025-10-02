@@ -17,13 +17,14 @@ function buildInitialMpsFields(grade=1) {
 }
 
 /**
- * POST /reports/mps/give
- * Create a report_assignment and seed 1 blank submission per assignee/teacher.
+ * POST /mps/assign  (Give MPS Report) — FIXED
+ * Creates a report_assignment and seeds 1 blank submission per assignee/teacher,
+ * linking each submission via report_assignment_id (FK).
  */
-// POST /mps/assign  (Give MPS Report)
 export const giveMPSReport = (req, res) => {
   const {
     category_id,                     // required
+    sub_category_id,                 // optional (keep if your UI/categories use it)
     given_by = 5,
     quarter,                         // required
     year,                            // required
@@ -80,17 +81,22 @@ export const giveMPSReport = (req, res) => {
     ? new Date(from_date).toISOString().slice(0,10)
     : new Date().toISOString().slice(0,10);
 
-  // ---- Build initial MPS fields (your existing helper) ----
+  // Normalize booleans to 0/1 to avoid NULL/boolean issues
+  const _is_given    = Number(Boolean(is_given));
+  const _is_archived = Number(Boolean(is_archived));
+  const _allow_late  = Number(Boolean(allow_late));
+
+  // ---- Build initial MPS fields ----
   const initialFields = buildInitialMpsFields(grade);
 
-  // Helper: next available slot for (submitted_by, category_id)
-  const computeNextNum = (userId, cb) => {
+  // Helper: next available slot PER (submitted_by, report_assignment_id)
+  const computeNextNum = (userId, reportAssignmentId, cb) => {
     const nextNumSql = `
       SELECT COALESCE(MAX(number_of_submission), 0) + 1 AS next_num
       FROM submission
-      WHERE submitted_by = ? AND category_id = ?
+      WHERE submitted_by = ? AND report_assignment_id = ?
     `;
-    db.query(nextNumSql, [userId, category_id], (err, rows) => {
+    db.query(nextNumSql, [userId, reportAssignmentId], (err, rows) => {
       if (err) return cb(err);
       cb(null, rows?.[0]?.next_num || 1);
     });
@@ -108,14 +114,25 @@ export const giveMPSReport = (req, res) => {
   db.query("START TRANSACTION", (txErr) => {
     if (txErr) return res.status(500).send("Failed to start transaction: " + txErr);
 
+    // 1) Insert the assignment (include sub_category_id if you use it)
     const insertReportSql = `
       INSERT INTO report_assignment
-        (category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (category_id, sub_category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     const reportVals = [
-      category_id, given_by, quarter, year, fromDateVal, to_date,
-      instruction, is_given, is_archived, allow_late
+      category_id,
+      sub_category_id ?? null,
+      given_by,
+      quarter,
+      year,
+      fromDateVal,
+      to_date,
+      instruction,
+      _is_given,
+      _is_archived,
+      _allow_late,
+      title
     ];
 
     db.query(insertReportSql, reportVals, (insErr, insRes) => {
@@ -125,8 +142,9 @@ export const giveMPSReport = (req, res) => {
         );
       }
 
-      const report_assignment_id = insRes.insertId; // not stored in submission (by your current schema)
+      const report_assignment_id = insRes.insertId;
 
+      // 2) Insert one blank submission per recipient — with FK
       const insertForIdx = (i) => {
         if (i >= recipients.length) {
           return db.query("COMMIT", (cErr) => {
@@ -153,17 +171,21 @@ export const giveMPSReport = (req, res) => {
         const proceedInsert = (finalNo) => {
           const insertSubmissionSql = `
             INSERT INTO submission
-              (category_id, submitted_by, status, number_of_submission, value, date_submitted, fields)
+              (report_assignment_id, category_id, submitted_by, status, number_of_submission, value, date_submitted, fields)
             VALUES
-              (?, ?, 1, ?, ?, NOW(), ?)
+              (?, ?, ?, 1, ?, ?, NOW(), ?)
           `;
           const subVals = [
-            category_id, teacherId, finalNo, title, initialFields
+            report_assignment_id, // ✅ real FK
+            category_id,
+            teacherId,
+            finalNo,
+            title,
+            initialFields
           ];
 
           db.query(insertSubmissionSql, subVals, (subErr) => {
             if (subErr) {
-              // If you add UNIQUE(submitted_by, category_id, number_of_submission), you can map ER_DUP_ENTRY → 409
               return db.query("ROLLBACK", () =>
                 res.status(500).send("Failed to insert submission: " + subErr)
               );
@@ -174,7 +196,7 @@ export const giveMPSReport = (req, res) => {
         };
 
         if (isAutoLike(desiredRaw)) {
-          computeNextNum(teacherId, (nErr, nextNum) => {
+          computeNextNum(teacherId, report_assignment_id, (nErr, nextNum) => {
             if (nErr) {
               return db.query("ROLLBACK", () =>
                 res.status(500).send("Failed to compute next submission number: " + nErr)
@@ -207,7 +229,7 @@ export const giveMPSReport = (req, res) => {
 export const getMPSSubmission = (req, res) => {
   const { id } = req.params;
   const sql = `
-    SELECT submission_id, category_id, submitted_by, status, number_of_submission,
+    SELECT submission_id, report_assignment_id, category_id, submitted_by, status, number_of_submission,
            value, DATE_FORMAT(date_submitted,'%Y-%m-%d %H:%i:%s') AS date_submitted,
            fields
     FROM submission
@@ -225,23 +247,25 @@ export const getMPSSubmission = (req, res) => {
 
 export const patchMPSSubmission = (req, res) => {
   const { id } = req.params;
-  const { rows, totals } = req.body || {};  // 👈 removed status
+  const { rows, totals } = req.body || {};  // editing only the form data
 
   if (!Array.isArray(rows) || !rows.length) {
     return res.status(400).send("rows array is required.");
   }
 
-  // Validate rows
+  // Validate/normalize rows
   const traitNames = new Set(TRAITS);
-  for (const r of rows) {
+  const normRows = rows.map((r) => {
     if (!r || !r.trait || !traitNames.has(r.trait)) {
-      return res.status(400).send("Invalid rows format (unknown trait).");
+      throw new Error("Invalid rows format (unknown trait).");
     }
+    const copy = { trait: r.trait };
     COLS.forEach(k => {
-      if (r[k] == null || r[k] === "") r[k] = null;
-      else r[k] = Number(r[k]);
+      const v = r[k];
+      copy[k] = (v == null || v === "") ? null : Number(v);
     });
-  }
+    return copy;
+  });
 
   const safeTotals = COLS.reduce((o, k) => {
     const v = totals?.[k];
@@ -260,7 +284,7 @@ export const patchMPSSubmission = (req, res) => {
     const next = {
       ...(current || {}),
       type: "MPS",
-      rows,
+      rows: normRows,
       totals: safeTotals,
       meta: {
         ...(current?.meta || {}),

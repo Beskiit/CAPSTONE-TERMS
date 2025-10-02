@@ -25,35 +25,52 @@ export const getReportsByUser = (req, res) => {
   const { id } = req.params;
 
   const sql = `
-    SELECT 
-      COALESCE(sc.sub_category_name, c.category_name) AS report_name,
-      ud.name AS given_by_name,
-      -- If you use lookup tables, keep these LEFT JOINs; otherwise swap to raw ra.year/ra.quarter:
-      sy.school_year,     
-      ra.title,
-      qp.quarter,                 
-      DATE_FORMAT(ra.from_date, '%m/%d/%Y') AS from_date,
-      DATE_FORMAT(ra.to_date,   '%m/%d/%Y') AS to_date,
-      ra.instruction,
-      ra.is_given,
-      ra.is_archived,
-      ra.allow_late
-    FROM report_assignment ra
-    JOIN category c            ON ra.category_id = c.category_id
-    LEFT JOIN sub_category sc  ON ra.sub_category_id = sc.sub_category_id
-    JOIN user_details ud       ON ra.given_by = ud.user_id
-    LEFT JOIN school_year sy   ON sy.year_id = ra.year
-    LEFT JOIN quarter_period qp ON qp.quarter_period_id = ra.quarter
-    WHERE ra.given_by = ?
-    ORDER BY ra.to_date DESC, ra.report_assignment_id DESC
-  `;
+  SELECT
+    s.submission_id,
+    s.report_assignment_id,                    -- NEW: expose FK
+    s.category_id,
+    s.submitted_by,
+    s.number_of_submission,
+    s.status,
+    s.value AS submission_title,
+    DATE_FORMAT(s.date_submitted, '%m/%d/%Y') AS date_submitted,
 
-  db.query(sql, [id], (err, results) => {
+    -- assignment via real FK (no more title/category guessing)
+    ra.report_assignment_id,
+    ra.title AS assignment_title,
+    DATE_FORMAT(ra.from_date, '%m/%d/%Y') AS from_date,
+    DATE_FORMAT(ra.to_date,   '%m/%d/%Y') AS to_date,
+    ra.instruction,
+    ra.allow_late,
+    ra.is_given,
+    ra.is_archived,
+    qp.quarter,
+    sy.school_year,
+
+    c.category_name,
+    sc.sub_category_name,
+    COALESCE(sc.sub_category_name, c.category_name) AS report_name,
+
+    ud.name AS given_by_name
+  FROM submission s
+  JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id   -- CHANGED
+  JOIN category c           ON ra.category_id = c.category_id
+  LEFT JOIN sub_category sc ON ra.sub_category_id = sc.sub_category_id
+  LEFT JOIN user_details ud ON ra.given_by = ud.user_id
+  LEFT JOIN school_year sy  ON sy.year_id = ra.year
+  LEFT JOIN quarter_period qp ON qp.quarter_period_id = ra.quarter
+  WHERE s.submitted_by = ?
+  ORDER BY ra.to_date DESC, ra.report_assignment_id DESC, s.number_of_submission DESC
+`;
+
+
+  db.query(sql, [id], (err, rows) => {
     if (err) return res.status(500).send('Database error: ' + err);
-    if (results.length === 0) return res.status(404).send('No reports found for the given user.');
-    res.json(results);
+    if (!rows.length) return res.status(404).send('No assigned reports found for this user.');
+    res.json(rows);
   });
 };
+
 // GET single report by ID
 export const getReport = (req, res) => {
   const { id } = req.params;
@@ -80,16 +97,16 @@ export const getReport = (req, res) => {
 export const giveReport = (req, res) => {
   const {
     category_id,
-    sub_category_id,            // optional
+    sub_category_id,                 // optional
     given_by = 5,
     quarter,
     year,
-    from_date,                  // optional override
+    from_date,                       // optional override
     to_date,
-    instruction,
-    is_given,
-    is_archived,
-    allow_late,
+    instruction = null,              // ✅ default like in LAEMPL
+    is_given = 1,                    // ✅ default
+    is_archived = 0,                 // ✅ default
+    allow_late = 0,                  // ✅ default
 
     // recipients
     submitted_by,
@@ -99,13 +116,10 @@ export const giveReport = (req, res) => {
     title,
     field_definitions = [],
 
-    // NEW: number-of-submission picker inputs from UI
-    // Option A: one number for everyone (e.g., 2, 3, or "auto")
-    number_of_submission,
-
-    // Option B: per-recipient mapping (array, same order as `assignees`)
-    number_of_submissions
-  } = req.body;
+    // number-of-submission picker inputs from UI
+    number_of_submission,            // "auto" or a number
+    number_of_submissions            // per-recipient array (optional)
+  } = req.body || {};
 
   // -------- Validation --------
   if (category_id == null || quarter == null || year == null || !to_date) {
@@ -124,7 +138,6 @@ export const giveReport = (req, res) => {
     return res.status(400).send('Provide submitted_by or a non-empty assignees array.');
   }
 
-  // If client provides an array for per-recipient numbers, lengths must match
   const hasPerRecipientNos = Array.isArray(number_of_submissions);
   if (hasPerRecipientNos && number_of_submissions.length !== recipients.length) {
     return res.status(400).send('number_of_submissions length must match assignees length.');
@@ -135,27 +148,34 @@ export const giveReport = (req, res) => {
     ? new Date(from_date).toISOString().slice(0, 10)
     : new Date().toISOString().slice(0, 10);
 
+  // Normalize flags to integers (avoid inserting booleans/undefined)
+  const _is_given    = Number(Boolean(is_given));
+  const _is_archived = Number(Boolean(is_archived));
+  const _allow_late  = Number(Boolean(allow_late));
+
   // Initial fields JSON: form schema + empty answers
   const initialFields = JSON.stringify({
-    _form: {
-      title,
-      fields: field_definitions
-    },
+    _form: { title, fields: field_definitions },
     _answers: {}
   });
 
-  // Helper: compute next available number if needed
-  const computeNextNum = (userId, cb) => {
+  // Next attempt number per (teacher, assignment)
+  const computeNextNum = (userId, reportAssignmentId, cb) => {
     const sql = `
       SELECT COALESCE(MAX(number_of_submission), 0) + 1 AS next_num
       FROM submission
-      WHERE submitted_by = ? AND category_id = ?
+      WHERE submitted_by = ? AND report_assignment_id = ?
     `;
-    db.query(sql, [userId, category_id], (err, rows) => {
+    db.query(sql, [userId, reportAssignmentId], (err, rows) => {
       if (err) return cb(err);
-      const next = rows?.[0]?.next_num || 1;
-      cb(null, next);
+      cb(null, rows?.[0]?.next_num || 1);
     });
+  };
+
+  const isAutoLike = (v) => {
+    if (v == null || v === '') return true;
+    const s = String(v).toLowerCase();
+    return s === 'auto' || s === 'unlimited';
   };
 
   db.query('START TRANSACTION', (txErr) => {
@@ -164,7 +184,7 @@ export const giveReport = (req, res) => {
     // 1) Insert the assignment (includes sub_category_id)
     const insertReportSql = `
       INSERT INTO report_assignment
-        (category_id, sub_category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late,title)
+        (category_id, sub_category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     const reportValues = [
@@ -175,10 +195,10 @@ export const giveReport = (req, res) => {
       year,
       fromDateValue,
       to_date,
-      instruction,
-      is_given,
-      is_archived,
-      allow_late,
+      instruction,      // ✅ will be NULL when omitted
+      _is_given,        // ✅ 0/1
+      _is_archived,     // ✅ 0/1
+      _allow_late,      // ✅ 0/1
       title
     ];
 
@@ -215,17 +235,18 @@ export const giveReport = (req, res) => {
           ? number_of_submissions[idx]
           : number_of_submission;
 
-        const useAuto = desiredNoRaw == null || desiredNoRaw === '' || String(desiredNoRaw).toLowerCase() === 'auto';
+        const useAuto = isAutoLike(desiredNoRaw);
         const desiredNo = useAuto ? null : Number(desiredNoRaw);
 
         const proceedInsert = (finalNo) => {
           const insertSubmissionSql = `
             INSERT INTO submission
-              (category_id, submitted_by, status, number_of_submission, value, date_submitted, fields)
+              (report_assignment_id, category_id, submitted_by, status, number_of_submission, value, date_submitted, fields)
             VALUES
-              (?, ?, 1, ?, ?, NOW(), ?)
+              (?, ?, ?, 1, ?, ?, NOW(), ?)
           `;
           const subValues = [
+            report_assignment_id,   // << FK
             category_id,
             userId,
             finalNo,
@@ -235,7 +256,6 @@ export const giveReport = (req, res) => {
 
           db.query(insertSubmissionSql, subValues, (subErr) => {
             if (subErr) {
-              // Duplicate guard: if you added a UNIQUE KEY, this will catch conflicts nicely
               return db.query('ROLLBACK', () =>
                 res.status(500).send('Failed to insert submission: ' + subErr)
               );
@@ -245,7 +265,7 @@ export const giveReport = (req, res) => {
         };
 
         if (useAuto) {
-          computeNextNum(userId, (nErr, nextNum) => {
+          computeNextNum(userId, report_assignment_id, (nErr, nextNum) => {
             if (nErr) {
               return db.query('ROLLBACK', () =>
                 res.status(500).send('Failed to compute next submission number: ' + nErr)
@@ -266,8 +286,7 @@ export const giveReport = (req, res) => {
     });
   });
 };
-
-// POST /laempl/assign  (Give LAEMPL Report)
+// POST /laempl/assign  (Give LAEMPL Report) — FIXED
 export const giveLAEMPLReport = (req, res) => {
   const {
     category_id,              // required
@@ -291,8 +310,8 @@ export const giveLAEMPLReport = (req, res) => {
     grade = 1,
 
     // number-of-submission picker support
-    number_of_submission,     // single value or "unlimited"/"auto"
-    number_of_submissions     // array aligned with assignees
+    number_of_submission,     // "auto"/"unlimited" or a number
+    number_of_submissions     // array aligned with assignees (optional)
   } = req.body || {};
 
   // ---- Basic validation ----
@@ -324,14 +343,19 @@ export const giveLAEMPLReport = (req, res) => {
     _number_of_submission = _number_of_submission.length ? _number_of_submission[0] : undefined;
   }
 
-  // ---- LAEMPL default structure ----
+  // ---- Defaults / JSON seed ----
+  const fromDateValue = from_date
+    ? new Date(from_date).toISOString().slice(0, 10)
+    : new Date().toISOString().slice(0, 10);
+
+  const _is_given    = Number(Boolean(is_given));
+  const _is_archived = Number(Boolean(is_archived));
+  const _allow_late  = Number(Boolean(allow_late));
+
   const TRAITS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
-  const COLS = [
-    { key: "m" }, { key: "f" },
-    { key: "gmrc" }, { key: "math" }, { key: "lang" }, { key: "read" }, { key: "makabasa" }
-  ];
-  const emptyRow = () => Object.fromEntries(COLS.map(c => [c.key, null]));
-  const rowsSeed = TRAITS.map(trait => ({ trait, ...emptyRow() }));
+  const COLS   = [{ key: "m" }, { key: "f" }, { key: "gmrc" }, { key: "math" }, { key: "lang" }, { key: "read" }, { key: "makabasa" }];
+  const emptyRow   = () => Object.fromEntries(COLS.map(c => [c.key, null]));
+  const rowsSeed   = TRAITS.map(trait => ({ trait, ...emptyRow() }));
   const totalsSeed = Object.fromEntries(COLS.map(c => [c.key, 0]));
 
   const initialFields = JSON.stringify({
@@ -342,25 +366,19 @@ export const giveLAEMPLReport = (req, res) => {
     meta: { createdAt: new Date().toISOString() }
   });
 
-  const fromDateValue = from_date
-    ? new Date(from_date).toISOString().slice(0, 10)
-    : new Date().toISOString().slice(0, 10);
-
-  // Helper: next available slot per teacher+category
-  const computeNextNum = (userId, cb) => {
+  // Helper: next attempt number PER (teacher, assignment)
+  const computeNextNum = (userId, reportAssignmentId, cb) => {
     const sql = `
       SELECT COALESCE(MAX(number_of_submission), 0) + 1 AS next_num
       FROM submission
-      WHERE submitted_by = ? AND category_id = ?
+      WHERE submitted_by = ? AND report_assignment_id = ?
     `;
-    db.query(sql, [userId, category_id], (err, rows) => {
+    db.query(sql, [userId, reportAssignmentId], (err, rows) => {
       if (err) return cb(err);
-      const next = rows?.[0]?.next_num || 1;
-      cb(null, next);
+      cb(null, rows?.[0]?.next_num || 1);
     });
   };
 
-  // Interpret a value as "auto/next" if it's null/empty/"unlimited"/"auto"
   const isAutoLike = (v) => {
     if (v == null || v === '') return true;
     const s = String(v).toLowerCase();
@@ -372,9 +390,10 @@ export const giveLAEMPLReport = (req, res) => {
   db.query('START TRANSACTION', (txErr) => {
     if (txErr) return res.status(500).send('Failed to start transaction: ' + txErr);
 
+    // 1) Create the assignment
     const insertReportSql = `
       INSERT INTO report_assignment
-        (category_id, sub_category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late,title)
+        (category_id, sub_category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     const reportValues = [
@@ -386,9 +405,9 @@ export const giveLAEMPLReport = (req, res) => {
       fromDateValue,
       to_date,
       instruction,
-      is_given,
-      is_archived,
-      allow_late,
+      _is_given,
+      _is_archived,
+      _allow_late,
       title
     ];
 
@@ -399,8 +418,9 @@ export const giveLAEMPLReport = (req, res) => {
         );
       }
 
-      const report_assignment_id = insRes.insertId; // kept for response (not stored in submission here)
+      const report_assignment_id = insRes.insertId;
 
+      // 2) Seed one blank submission per recipient (linked via FK)
       const insertOne = (idx) => {
         if (idx >= recipients.length) {
           return db.query('COMMIT', (cErr) => {
@@ -419,7 +439,7 @@ export const giveLAEMPLReport = (req, res) => {
 
         const userId = recipients[idx];
 
-        // Choose number for this recipient
+        // Decide desired number for this recipient:
         const desiredRaw = hasPerRecipientNos
           ? number_of_submissions[idx]
           : _number_of_submission;
@@ -427,11 +447,12 @@ export const giveLAEMPLReport = (req, res) => {
         const proceedInsert = (finalNo) => {
           const insertSubmissionSql = `
             INSERT INTO submission
-              (category_id, submitted_by, status, number_of_submission, value, date_submitted, fields)
+              (report_assignment_id, category_id, submitted_by, status, number_of_submission, value, date_submitted, fields)
             VALUES
-              (?, ?, 1, ?, ?, NOW(), ?)
+              (?, ?, ?, 1, ?, ?, NOW(), ?)
           `;
           const subValues = [
+            report_assignment_id,   // ✅ link to assignment
             category_id,
             userId,
             finalNo,
@@ -441,7 +462,6 @@ export const giveLAEMPLReport = (req, res) => {
 
           db.query(insertSubmissionSql, subValues, (subErr) => {
             if (subErr) {
-              // If you added UNIQUE (submitted_by, category_id, number_of_submission) you can map ER_DUP_ENTRY to 409
               return db.query('ROLLBACK', () =>
                 res.status(500).send('Failed to insert submission: ' + subErr)
               );
@@ -452,7 +472,7 @@ export const giveLAEMPLReport = (req, res) => {
         };
 
         if (isAutoLike(desiredRaw)) {
-          computeNextNum(userId, (nErr, nextNum) => {
+          computeNextNum(userId, report_assignment_id, (nErr, nextNum) => {
             if (nErr) {
               return db.query('ROLLBACK', () =>
                 res.status(500).send('Failed to compute next submission number: ' + nErr)
@@ -476,6 +496,7 @@ export const giveLAEMPLReport = (req, res) => {
     });
   });
 };
+
 
 // PATCH report
 export const patchReport = (req, res) => {

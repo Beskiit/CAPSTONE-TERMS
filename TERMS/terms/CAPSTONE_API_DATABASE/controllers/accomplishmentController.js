@@ -17,12 +17,23 @@ function buildInitialAccFields() {
  *  - category_id, quarter, year, to_date, title (required)
  *  - from_date (optional), instruction, is_given, is_archived, allow_late
  *  - submitted_by (single) OR assignees (array)
+ *  - (optional) sub_category_id
  */
 export const giveAccomplishmentReport = (req, res) => {
   const {
-    category_id, given_by = 5, quarter, year, from_date, to_date,
-    instruction = null, is_given = 1, is_archived = 0, allow_late = 0,
-    submitted_by, assignees,
+    category_id,
+    sub_category_id,                 // optional (kept for parity)
+    given_by = 5,
+    quarter,
+    year,
+    from_date,
+    to_date,
+    instruction = null,
+    is_given = 1,
+    is_archived = 0,
+    allow_late = 0,
+    submitted_by,
+    assignees,
     title // e.g. "Activity Completion Report"
   } = req.body || {};
 
@@ -46,19 +57,46 @@ export const giveAccomplishmentReport = (req, res) => {
     ? new Date(from_date).toISOString().slice(0,10)
     : new Date().toISOString().slice(0,10);
 
+  const _is_given    = Number(Boolean(is_given));
+  const _is_archived = Number(Boolean(is_archived));
+  const _allow_late  = Number(Boolean(allow_late));
+
   const initialFields = buildInitialAccFields();
+
+  // Helper: next attempt number PER (submitted_by, report_assignment_id)
+  const computeNextNum = (userId, reportAssignmentId, cb) => {
+    const sql = `
+      SELECT COALESCE(MAX(number_of_submission), 0) + 1 AS next_num
+      FROM submission
+      WHERE submitted_by = ? AND report_assignment_id = ?
+    `;
+    db.query(sql, [userId, reportAssignmentId], (err, rows) => {
+      if (err) return cb(err);
+      cb(null, rows?.[0]?.next_num || 1);
+    });
+  };
 
   db.query("START TRANSACTION", (txErr) => {
     if (txErr) return res.status(500).send("Failed to start transaction: " + txErr);
 
     const insertReportSql = `
       INSERT INTO report_assignment
-        (category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (category_id, sub_category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     const reportVals = [
-      category_id, given_by, quarter, year, fromDateVal, to_date,
-      instruction, is_given, is_archived, allow_late
+      category_id,
+      sub_category_id ?? null,
+      given_by,
+      quarter,
+      year,
+      fromDateVal,
+      to_date,
+      instruction,
+      _is_given,
+      _is_archived,
+      _allow_late,
+      title
     ];
 
     db.query(insertReportSql, reportVals, (insErr, insRes) => {
@@ -87,27 +125,28 @@ export const giveAccomplishmentReport = (req, res) => {
 
         const teacherId = recipients[i];
 
-        const nextNumSql = `
-          SELECT COALESCE(MAX(number_of_submission), 0) + 1 AS next_num
-          FROM submission
-          WHERE submitted_by = ? AND category_id = ?
-        `;
-        db.query(nextNumSql, [teacherId, category_id], (numErr, numRes) => {
-          if (numErr) {
+        // Auto-number attempts per (teacher, assignment)
+        computeNextNum(teacherId, report_assignment_id, (nErr, nextNum) => {
+          if (nErr) {
             return db.query("ROLLBACK", () =>
-              res.status(500).send("Failed to compute next submission number: " + numErr)
+              res.status(500).send("Failed to compute next submission number: " + nErr)
             );
           }
 
-          const nextNum = numRes?.[0]?.next_num || 1;
-
           const insertSubmissionSql = `
             INSERT INTO submission
-              (category_id, submitted_by, status, number_of_submission, value, date_submitted, fields)
+              (report_assignment_id, category_id, submitted_by, status, number_of_submission, value, date_submitted, fields)
             VALUES
-              (?, ?, 1, ?, ?, NOW(), ?)
+              (?, ?, ?, 1, ?, ?, NOW(), ?)
           `;
-          const subVals = [category_id, teacherId, nextNum, title, initialFields];
+          const subVals = [
+            report_assignment_id,   // ✅ FK linkage
+            category_id,
+            teacherId,
+            nextNum,
+            title,
+            initialFields
+          ];
 
           db.query(insertSubmissionSql, subVals, (subErr) => {
             if (subErr) {
@@ -132,7 +171,7 @@ export const giveAccomplishmentReport = (req, res) => {
 export const getAccomplishmentSubmission = (req, res) => {
   const { id } = req.params;
   const sql = `
-    SELECT submission_id, category_id, submitted_by, status, number_of_submission,
+    SELECT submission_id, report_assignment_id, category_id, submitted_by, status, number_of_submission,
            value, DATE_FORMAT(date_submitted,'%Y-%m-%d %H:%i:%s') AS date_submitted,
            fields
     FROM submission
@@ -152,7 +191,7 @@ export const getAccomplishmentSubmission = (req, res) => {
  * PATCH /submissions/accomplishment/:id
  * Accepts:
  *  - narrative (string)
- *  - removeImages (array of file names to remove) [optional]
+ *  - removeImages (array|string of file names to remove) [optional]
  *  - images (multipart files) to ADD to existing list [optional]
  *
  * Keeps status untouched. Only updates `fields`.
@@ -173,7 +212,7 @@ export const patchAccomplishmentSubmission = (req, res) => {
     const currImages = Array.isArray(current?.images) ? current.images : [];
     const addImages = files.map(f => f.filename);
 
-    // Remove requested images by exact file name
+    // support array or single string for removeImages
     const removeSet = new Set(
       Array.isArray(removeImages)
         ? removeImages

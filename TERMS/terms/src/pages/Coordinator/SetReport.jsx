@@ -176,7 +176,7 @@ const handleSubmit = async (e) => {
     (reportType === "laempl" ? "LAEMPL Report" : reportType === "mps" ? "MPS Report" : "Report");
 
   if (reportType === "laempl") {
-    endpoint = `${API_BASE}/laempl/assign`; // adjust if your backend path differs
+    endpoint = `${API_BASE}/reports/laempl`; // adjust if your backend path differs
     body = {
       ...base,
       title: fallbackTitle,
@@ -184,7 +184,7 @@ const handleSubmit = async (e) => {
       number_of_submission: numberValue,
     };
   } else if (reportType === "mps") {
-    endpoint = `${API_BASE}/mps/assign`; // adjust if your backend path differs
+    endpoint = `${API_BASE}/mps/give`; // adjust if your backend path differs
     body = {
       ...base,
       title: fallbackTitle,
@@ -239,7 +239,15 @@ const handleSubmit = async (e) => {
             <h2>Set Reports</h2>
 
             <form className="schedule-form" onSubmit={handleSubmit}>
-
+            
+              <div className="form-row allow-late-row">
+                <label>Title:</label>
+                <input type="text" 
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
+              </div>
+           
               <div className="form-row">
                 <label>Category:</label>
                 <select
