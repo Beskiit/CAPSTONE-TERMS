@@ -43,32 +43,30 @@ function ViewSubmission() {
           <SidebarCoordinator activeLink="View Report" />
         )}
         <div className="dashboard-content">
-          <div className="dashboard-main">
-            <h2>View Submission</h2>
+                    <div className="dashboard-main">
+                        <h2>Submitted Report</h2>
+                    </div>
+                    <div className="content">
+                  <table className="report-table">
+                      <thead>
+                        <tr>
+                          <th>Report Title</th>
+                          <th>School Year</th>
+                          <th>Quarter</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                          <tr onClick={() => navigate("/AssignedReportData")}>
+                            <td className="file-cell">
+                              <span className="file-name">MPS</span>
+                            </td>
+                            <td>2023–2024</td>
+                            <td>1st Quarter</td>
+                          </tr>
+                      </tbody>
+                  </table>
+              </div>
           </div>
-          <div className="content">
-            <table className="report-table">
-              <thead>
-                <tr>
-                  <th className="first-th">Reports</th>
-                  <th>Type</th>
-                  <th>Start Date</th>
-                  <th>Due Date</th>
-                  <th>Submitted</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr onClick={() => navigate("/LAEMPLInstruction")}>
-                  <td className="first-td">LAEMPL</td>
-                  <td>Teacher</td>
-                  <td>2023-10-01</td>
-                  <td>2023-10-15</td>
-                  <td>Yes</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
       </div>
     </>
   );

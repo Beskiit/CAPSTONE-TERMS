@@ -6,7 +6,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Header from "../../components/shared/Header";
 
-function AssignedReport() {
+function AssignedReportData() {
     const navigate = useNavigate();
 
     const [user, setUser] = useState(null);
@@ -49,17 +49,21 @@ function AssignedReport() {
                             <thead>
                                 <tr>
                                     <th>Report Title</th>
-                                    <th>School Year</th>
+                                    <th>Given By</th>
+                                    <th>Submission Date</th>
                                     <th>Quarter</th>
+                                    <th>Status</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr onClick={() => navigate("/AssignedReportData")}>
+                                <tr onClick={() => navigate("/")}>
                                     <td className="file-cell">
                                     <span className="file-name">MPS</span>
                                     </td>
-                                    <td>2023–2024</td>
+                                    <td>Tristan Labjata</td>
+                                    <td>09/17/25</td>
                                     <td>1st Quarter</td>
+                                    <td>Pending</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -70,4 +74,4 @@ function AssignedReport() {
     )
 }
 
-export default AssignedReport;
+export default AssignedReportData;
