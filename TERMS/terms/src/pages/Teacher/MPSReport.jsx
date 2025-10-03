@@ -5,7 +5,7 @@ import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import "./LAEMPLReport.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
-const SUBMISSION_ID = 12; // hardcoded
+const SUBMISSION_ID = new URLSearchParams(window.location.search).get("id") || 12;
 
 const TRAITS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
 

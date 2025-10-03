@@ -1,5 +1,7 @@
 import "./DashboardTeacher.css";
+import DeadlineComponent from "./DeadlineComponent.jsx";
 import React from 'react'
+import { useNavigate } from 'react-router-dom'
 import {useEffect, useState } from 'react'
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
@@ -155,47 +157,6 @@ function CalendarComponent() {
             <Calendar onChange={onChange} value={date} />
         </div>
     );
-}
-
-function DeadlineComponent({ deadlines = [] }) {
-  // Safe date+time formatter (PH local time on your browser)
-  const fmtDateTime = (iso) => {
-    if (!iso) return "";
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return "";
-    return d.toLocaleString("en-PH", {
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true,
-    });
-  };
-
-  return (
-    <div className="deadline-component">
-      <h4>Upcoming Deadlines</h4>
-      <hr />
-      <div className="deadline-container">
-        {Array.isArray(deadlines) && deadlines.length > 0 ? (
-          deadlines.map((d) => (
-            <a key={d.submission_id || d.report_assignment_id} className="deadline-item">
-              <p className="deadline-title">{d.title || "Untitled Report"}</p>
-              <div className="deadline-details">
-                <p>Due: {fmtDateTime(d.to_date)}</p>
-                <p style={{ fontSize: 12, opacity: 0.8 }}>
-                  Opens: {fmtDateTime(d.from_date)}
-                </p>
-              </div>
-            </a>
-          ))
-        ) : (
-          <p style={{ opacity: 0.8 }}>No upcoming deadlines 🎉</p>
-        )}
-      </div>
-    </div>
-  );
 }
 
 

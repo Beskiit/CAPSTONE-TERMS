@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import "./Instruction.css";
 import Header from "../../components/shared/Header.jsx";
 import Sidebar from "../../components/shared/SidebarTeacher.jsx";
@@ -7,6 +7,14 @@ import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 
 function MPSInstruction() {
   const navigate = useNavigate();
+  const { state } = useLocation();
+  const assignmentId = state?.id;
+  const title = state?.title;
+  const instruction = state?.instruction;
+  const fromDate = state?.from_date;
+  const toDate = state?.to_date;
+  const attempts = state?.number_of_submission;
+  const allowLate = state?.allow_late;
 
   // user object from backend
   const [user, setUser] = useState(null);
@@ -54,10 +62,10 @@ function MPSInstruction() {
           </div>
           <div className="content">
             <h3 className="header">Instructions</h3>
-            <p className="instruction">This is where the instruction should display.</p>
+            <p className="instruction">{instruction || "No instruction provided."}</p>
             <button
               className="instruction-btn"
-              onClick={() => navigate("/MPSReport")}
+              onClick={() => navigate(`/MPSReport?id=${assignmentId || ''}`)}
             >
               + Prepare Report
             </button>
@@ -65,15 +73,14 @@ function MPSInstruction() {
         </div>
         <div className="dashboard-sidebar">
           <div className="report-card">
-            <h3 className="report-card-header">This is where the name of the report go</h3>
-            <p className="report-card-text">Start Date</p>
-            <p className="report-card-text">Due Date</p>
+            <h3 className="report-card-header">{title || "Report"}</h3>
+            <p className="report-card-text">Start Date: {fromDate || "—"}</p>
+            <p className="report-card-text">Due Date: {toDate || "—"}</p>
           </div>
           <div className="report-card">
             <h3 className="report-card-header">Submission</h3>
-            <p className="report-card-text">Submissions: "Number of submission"</p>
-            <p className="report-card-text">Max. Attempts: "Number of Maximum Attempts"</p>
-            <p className="report-card-text">Allow late submissions: "logiccc"</p>
+            <p className="report-card-text">Submissions: {attempts ?? "—"}</p>
+            <p className="report-card-text">Allow late submissions: {Number(allowLate) ? "Yes" : "No"}</p>
           </div>
         </div>
       </div>

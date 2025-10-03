@@ -1,0 +1,65 @@
+/* ===== Upcoming Deadlines box ===== */
+.deadline-component {
+  display: block;
+}
+
+.deadline-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px; /* space between list and the footer button */
+}
+
+/* The list is ALWAYS scrollable within a fixed-height container */
+.deadline-list {
+  max-height: 360px;      /* tweak to fit ~3 of your cards */
+  overflow-y: auto;
+  display: grid;
+  gap: 10px;
+  padding-right: 6px;     /* room for scrollbar so content doesn't jump */
+}
+
+/* Each deadline card */
+.deadline-item {
+  display: block;
+  padding: 12px;
+  border-radius: 10px;
+  outline: 1px solid rgba(255,255,255,0.08);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.deadline-item:focus {
+  outline: 2px solid rgba(255,255,255,0.25);
+  outline-offset: 2px;
+}
+
+.deadline-title {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
+.deadline-details {
+  display: grid;
+  gap: 2px;
+}
+
+/* Footer button under the box */
+.see-all-footer {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: center;
+  padding: 6px 0;
+  text-decoration: underline;
+  cursor: pointer;
+  color: #1E56A0;
+}
+
+.see-all-footer:hover { opacity: 0.85; }
+
+/* Optional: nicer thin scrollbar */
+.deadline-list::-webkit-scrollbar { width: 6px; }
+.deadline-list::-webkit-scrollbar-thumb {
+  border-radius: 6px;
+  background: rgba(255,255,255,0.25);
+}
