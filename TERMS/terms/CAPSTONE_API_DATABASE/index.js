@@ -17,6 +17,10 @@ import submissionsRouter from "./routes/submissionRoutes.js";
 import mpsRoutes from "./routes/mpsRoutes.js";
 import accomplishmentRouter from "./routes/accomplishmentRoutes.js"
 import reportStatus from "./routes/reportStatusRoutes.js"
+import reportCountsRoutes from './routes/reportCountsRoutes.js';
+
+
+
 import { report } from "process";
 
 const app = express();
@@ -213,7 +217,8 @@ app.use("/reports/accomplishment", accomplishmentRouter)
 app.use("/uploads", express.static(path.resolve("uploads")));
 fs.mkdirSync(path.resolve("uploads/accomplishments"), { recursive: true });
 app.get("/health", (_req, res) => res.send("ok"));
-
+// If you already use '/reports/status' for other routes, this fits right in:
+app.use('/reports/status/count', reportCountsRoutes);
 app.use('/reports/status', reportStatus);
 // 404
 app.use((req, res, _next) => {
