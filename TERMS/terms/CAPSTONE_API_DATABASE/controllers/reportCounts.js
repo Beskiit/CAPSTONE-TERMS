@@ -8,6 +8,7 @@ import db from '../db.js';
  *   2 = approved (completed)
  *   3 = rejected
  */
+
 export const getStatusCountsByUser = (req, res) => {
   const { id } = req.params;
 
