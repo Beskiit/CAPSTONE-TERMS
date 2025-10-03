@@ -7,8 +7,12 @@ import {
 
 const router = express.Router();
 
-// Final paths after mount: /reports/status/count/user/:id and .../range
-router.get('/user/:id', getStatusCountsByUser);
+// Example:
+// GET /reports/status/count/user/961
+router.get('/user/:id/', getStatusCountsByUser);
+
+// Optional (date-windowed counts):
+// GET /reports/status/count/user/961/range?from=2025-10-01&to=2025-10-31
 router.get('/user/:id/range', getStatusCountsByUserInRange);
 
 export default router;
