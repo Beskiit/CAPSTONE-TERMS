@@ -1,21 +1,61 @@
-import express from 'express';
-import { createUser, getUser, getUsers, deleteUser, patchUser, getTeachers} from '../controllers/usersCon.js';
-import { requireAuth, requireAdmin, requirePrincipal, requireOwnershipOrRole } from '../middleware/auth.js';
+// routes/users.js
+import express from "express";
+import {
+  getTeachers,
+  createUser,
+  getUsers,
+  getUser,
+  patchUser,
+  deleteUser,
+} from "../controllers/usersCon.js";
+
+import {
+  requireAuth,
+  requireAdmin,
+  requirePrincipal,
+  requireOwnershipOrRole,
+} from "../middleware/auth.js";
 
 const router = express.Router();
+
+// helper: allow any of these roles
 const requireAnyRole = (roles) => (req, res, next) => {
-  const role = (req.user?.role || '').toLowerCase();
+  const role = (req.user?.role || "").toLowerCase();
   if (roles.map(r => r.toLowerCase()).includes(role)) return next();
-  return res.status(403).json({ error: 'Forbidden' });
+  return res.status(403).json({ error: "Forbidden" });
 };
-// Routes with proper authentication and authorization
-router.get('/', requireAuth, requirePrincipal, getUsers);         // GET /users (Principal/Admin only)
 
-router.get('/list/teachers', requireAuth, requireAnyRole(['principal','coordinator','admin']), getTeachers);
+/** GET /users  (principal or admin) */
+router.get(
+  "/",
+  requireAuth,
+  requireAnyRole(["principal", "admin"]),
+  getUsers
+);
 
-router.get('/:id', requireAuth, getUser);                        // GET /users/:id (Authenticated users)
-router.post('/', requireAuth, requireAdmin, createUser);         // POST /users (Admin only)
-router.delete('/:id', requireAuth, requireAdmin, deleteUser);    // DELETE /users/:id (Admin only)
-router.patch('/:id', requireAuth, requireOwnershipOrRole(['admin']), patchUser); // PATCH /users/:id (Owner or Admin)
+/** GET /users/teachers  (principal/coordinator/admin) */
+router.get(
+  "/teachers",
+  requireAuth,
+  requireAnyRole(["principal", "coordinator", "admin"]),
+  getTeachers
+);
+
+/** GET /users/:id  (any authenticated) */
+router.get("/:id", requireAuth, getUser);
+
+/** POST /users  (admin only) */
+router.post("/", requireAuth, requireAdmin, createUser);
+
+/** PATCH /users/:id  (owner or admin) */
+router.patch(
+  "/:id",
+  requireAuth,
+  requireOwnershipOrRole(["admin"]),
+  patchUser
+);
+
+/** DELETE /users/:id  (admin only) */
+router.delete("/:id", requireAuth, requireAdmin, deleteUser);
 
 export default router;

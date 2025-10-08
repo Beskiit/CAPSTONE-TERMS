@@ -115,11 +115,10 @@ export const getSubmission = (req, res) => {
 // simple passthrough for React's /submissions/laempl/:id GET
 export const getLAEMPLBySubmissionId = (req, res) => getSubmission(req, res);
 
-
 export const submitAnswers = (req, res) => {
   const { id } = req.params;
   const body = req.body || {};
-  const status = body.status;
+  const requestedStatus = body.status; // may be undefined
 
   let answers = {};
   const input = body.answers ?? {};
@@ -129,14 +128,18 @@ export const submitAnswers = (req, res) => {
     answers = input;
   }
 
-  const selectSql = `SELECT fields FROM submission WHERE submission_id = ?`;
+  const selectSql = `SELECT status, fields FROM submission WHERE submission_id = ?`;
   db.query(selectSql, [id], (selErr, selRes) => {
     if (selErr) return res.status(500).send('Database error: ' + selErr);
     if (!selRes.length) return res.status(404).send('Submission not found.');
 
+    const currentStatus = Number(selRes[0].status) || 0;
+
     let current = {};
     try {
-      current = typeof selRes[0].fields === 'string' ? JSON.parse(selRes[0].fields) : (selRes[0].fields || {});
+      current = typeof selRes[0].fields === 'string'
+        ? JSON.parse(selRes[0].fields)
+        : (selRes[0].fields || {});
     } catch { current = {}; }
 
     const next = {
@@ -144,15 +147,18 @@ export const submitAnswers = (req, res) => {
       _answers: { ...(current._answers || {}), ...answers },
     };
 
-    const sets = ['fields = ?'];
+    // Decide the new status:
+    let newStatusClause = '';
     const params = [JSON.stringify(next)];
-
-    if (Number.isInteger(status)) { // <— ensure INT if schema expects it
-      sets.push('status = ?');
-      params.push(status);
+    if (Number.isInteger(requestedStatus)) {
+      newStatusClause = ', status = ?';
+      params.push(requestedStatus);
+    } else if (currentStatus < 2) {
+      // auto-promote only if not yet at/above 2
+      newStatusClause = ', status = 2';
     }
 
-    const updateSql = `UPDATE submission SET ${sets.join(', ')} WHERE submission_id = ?`;
+    const updateSql = `UPDATE submission SET fields = ?, date_submitted = NOW()${newStatusClause} WHERE submission_id = ?`;
     params.push(id);
 
     db.query(updateSql, params, (updErr) => {
@@ -165,11 +171,14 @@ export const submitAnswers = (req, res) => {
       `;
       db.query(fetchSql, [id], (fErr, fRes) => {
         if (fErr) return res.status(500).send('Database error: ' + fErr);
-        res.json(normalizeFields(fRes[0]));
+        const out = { ...fRes[0] };
+        try { out.fields = typeof out.fields === 'string' ? JSON.parse(out.fields) : out.fields; } catch {}
+        return res.json(out);
       });
     });
   });
 };
+
 
 export const getMySubmissions = (req, res) => {
   const userId = req.user?.user_id || req.params.id || req.query.user_id;
@@ -200,7 +209,6 @@ export const getMySubmissions = (req, res) => {
     return res.json(results);
   });
 };
-
 export const patchLAEMPLBySubmissionId = (req, res) => {
   const { id } = req.params; // submission_id
 
@@ -224,10 +232,9 @@ export const patchLAEMPLBySubmissionId = (req, res) => {
     return n;
   };
 
-  // — Accept body as rows[] or data{} (string or object) —
   const body   = req.body || {};
-  const status = body.status;      // optional numeric status (e.g., 2 = submitted)
-  const grade  = body.grade;       // optional grade override
+  const requestedStatus = body.status; // may be undefined
+  const grade  = body.grade;
 
   const rowsInput = body.rows ?? body.data ?? {};
   let rowsNormalized;
@@ -240,11 +247,8 @@ export const patchLAEMPLBySubmissionId = (req, res) => {
     } else {
       rowsNormalized = [];
     }
-  } catch {
-    rowsNormalized = [];
-  }
+  } catch { rowsNormalized = []; }
 
-  // — Normalize to exact shape and clamp —
   const cleanRows = TRAITS.map(trait => {
     const src = rowsNormalized.find(r => (r?.trait || '').toLowerCase() === trait.toLowerCase()) || {};
     const cleaned = { trait };
@@ -252,19 +256,18 @@ export const patchLAEMPLBySubmissionId = (req, res) => {
     return cleaned;
   });
 
-  // — Totals (ignore nulls) —
   const totals = COLS.reduce((acc, c) => {
     acc[c.key] = cleanRows.reduce((sum, r) => sum + (r[c.key] ?? 0), 0);
     return acc;
   }, {});
 
-  // — Fetch submission created by give step —
-  const selectSql = `SELECT fields FROM submission WHERE submission_id = ?`;
+  const selectSql = `SELECT status, fields FROM submission WHERE submission_id = ?`;
   db.query(selectSql, [id], (selErr, selRes) => {
     if (selErr) return res.status(500).send('Database error: ' + selErr);
     if (!selRes.length) return res.status(404).send('Submission not found.');
 
-    // Parse/initialize fields JSON
+    const currentStatus = Number(selRes[0].status) || 0;
+
     let current = {};
     try {
       current = typeof selRes[0].fields === 'string'
@@ -272,7 +275,6 @@ export const patchLAEMPLBySubmissionId = (req, res) => {
         : (selRes[0].fields || {});
     } catch { current = {}; }
 
-    // If this submission wasn’t seeded correctly, initialize a LAEMPL skeleton.
     const ensureRows = () => {
       const byTrait = Object.create(null);
       (current.rows || []).forEach(r => { if (r?.trait) byTrait[r.trait] = r; });
@@ -286,22 +288,22 @@ export const patchLAEMPLBySubmissionId = (req, res) => {
     const nextFields = {
       type: 'LAEMPL',
       grade: grade ?? current.grade ?? 1,
-      rows: cleanRows.length ? cleanRows : ensureRows(), // if body empty, keep existing shape
+      rows: cleanRows.length ? cleanRows : ensureRows(),
       totals,
-      meta: {
-        ...(current.meta || {}),
-        updatedAt: new Date().toISOString(),
-      }
+      meta: { ...(current.meta || {}), updatedAt: new Date().toISOString() }
     };
 
-    const sets = ['fields = ?', 'date_submitted = NOW()'];
+    // Decide the new status:
+    let newStatusClause = '';
     const params = [JSON.stringify(nextFields)];
-    if (typeof status === 'number') {
-      sets.push('status = ?');
-      params.push(status);
+    if (typeof requestedStatus === 'number') {
+      newStatusClause = ', status = ?';
+      params.push(requestedStatus);
+    } else if (currentStatus < 2) {
+      newStatusClause = ', status = 2';
     }
 
-    const updateSql = `UPDATE submission SET ${sets.join(', ')} WHERE submission_id = ?`;
+    const updateSql = `UPDATE submission SET fields = ?, date_submitted = NOW()${newStatusClause} WHERE submission_id = ?`;
     params.push(id);
 
     db.query(updateSql, params, (updErr) => {
