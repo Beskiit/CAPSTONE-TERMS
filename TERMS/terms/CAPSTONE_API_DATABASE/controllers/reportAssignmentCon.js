@@ -498,12 +498,12 @@ export const giveLAEMPLReport = (req, res) => {
 };
 
 
-// PATCH report
+// PATCH report  — also set linked submissions.status = 2
 export const patchReport = (req, res) => {
   const { id } = req.params;
   const {
     category_id,
-    sub_category_id,   // 👈 allow updating this
+    sub_category_id,
     given_by,
     quarter,
     year,
@@ -514,7 +514,7 @@ export const patchReport = (req, res) => {
     is_archived,
     allow_late,
     title
-  } = req.body;
+  } = req.body || {};
 
   const updates = [];
   const values = [];
@@ -536,12 +536,62 @@ export const patchReport = (req, res) => {
     return res.status(400).send('No fields provided for update.');
   }
 
-  const sql = `UPDATE report_assignment SET ${updates.join(', ')} WHERE report_assignment_id = ?`;
-  values.push(id);
+  db.query('START TRANSACTION', (txErr) => {
+    if (txErr) return res.status(500).send('Failed to start transaction: ' + txErr);
 
-  db.query(sql, values, (err) => {
-    if (err) return res.status(500).send('Update failed: ' + err);
-    res.send(`Report with ID ${id} has been updated.`);
+    const sqlUpdateReport = `UPDATE report_assignment SET ${updates.join(', ')} WHERE report_assignment_id = ?`;
+    const reportVals = [...values, id];
+
+    db.query(sqlUpdateReport, reportVals, (updErr, updRes) => {
+      if (updErr) {
+        return db.query('ROLLBACK', () =>
+          res.status(500).send('Update failed: ' + updErr)
+        );
+      }
+
+      // If no rows changed, you can still proceed to set status=2,
+      // but usually we only change statuses when something actually changed.
+      // Remove this check if you ALWAYS want to set status=2 on every PATCH call.
+      if (updRes.affectedRows === 0) {
+        return db.query('COMMIT', (cErr) => {
+          if (cErr) {
+            return db.query('ROLLBACK', () =>
+              res.status(500).send('Commit failed: ' + cErr)
+            );
+          }
+          return res.send(`Report with ID ${id} was already up to date.`);
+        });
+      }
+
+      // --- Flip linked submissions to status = 2 ---
+      // If you want to avoid overwriting approved/rejected, limit the WHERE:
+      //   AND s.status IN (1)   // e.g., only from "pending/assigned" → "in progress"
+      const sqlFlipSubs = `
+        UPDATE submission s
+        SET s.status = 2
+        WHERE s.report_assignment_id = ?
+      `;
+      db.query(sqlFlipSubs, [id], (flipErr, flipRes) => {
+        if (flipErr) {
+          return db.query('ROLLBACK', () =>
+            res.status(500).send('Failed to update submission statuses: ' + flipErr)
+          );
+        }
+
+        db.query('COMMIT', (cErr) => {
+          if (cErr) {
+            return db.query('ROLLBACK', () =>
+              res.status(500).send('Commit failed: ' + cErr)
+            );
+          }
+          return res.json({
+            message: `Report ${id} updated. Linked submissions set to status=2.`,
+            report_updated_rows: updRes.affectedRows,
+            submissions_updated_rows: flipRes.affectedRows
+          });
+        });
+      });
+    });
   });
 };
 

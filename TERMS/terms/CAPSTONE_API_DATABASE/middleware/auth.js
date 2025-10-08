@@ -1,10 +1,18 @@
 // Authentication middleware
 export const requireAuth = (req, res, next) => {
-  if (req.isAuthenticated()) {
+  // Local dev bypass (DO NOT use in production)
+  if (process.env.DEV_BYPASS_AUTH === "1") {
+    // give yourself an admin role so your routes with requireAnyRole / requireAdmin will pass
+    req.user = { user_id: 1, role: "admin", name: "Dev Admin" };
     return next();
   }
-  res.status(401).json({ error: 'Authentication required' });
+
+  // ... your real auth checks (session/JWT) below ...
+  if (typeof req.isAuthenticated === "function" && req.isAuthenticated()) return next();
+  if (req.session?.user) { req.user = req.session.user; return next(); }
+  return res.status(401).json({ error: "Authentication required" });
 };
+
 
 // Role-based authorization middleware
 export const requireRole = (roles) => {
