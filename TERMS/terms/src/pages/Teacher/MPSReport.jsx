@@ -7,12 +7,13 @@ import "./LAEMPLReport.css";
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
 const SUBMISSION_ID = new URLSearchParams(window.location.search).get("id") || 12;
 
-const TRAITS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
+const TRAITS_MPS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
 
-const COLS = [
+const COLS_MPS = [
   { key: "m",      label: "Male" },
   { key: "f",      label: "Female" },
   { key: "total",  label: "Total no. of Pupils" },
+  { key: "total_score",  label: "Total Score" },
   { key: "mean",   label: "Mean" },
   { key: "median", label: "Median" },
   { key: "pl",     label: "PL" },
@@ -31,7 +32,7 @@ function MPSReport() {
 
   const [data, setData] = useState(() =>
     Object.fromEntries(
-      TRAITS.map(t => [t, Object.fromEntries(COLS.map(c => [c.key, ""]))])
+      TRAITS_MPS.map(t => [t, Object.fromEntries(COLS_MPS.map(c => [c.key, ""]))])
     )
   );
 
@@ -56,8 +57,8 @@ function MPSReport() {
     }));
   };
 
-  const totals = COLS.reduce((acc, c) => {
-    acc[c.key] = TRAITS.reduce(
+  const totals = COLS_MPS.reduce((acc, c) => {
+    acc[c.key] = TRAITS_MPS.reduce(
       (sum, t) => sum + (Number(data[t][c.key]) || 0),
       0
     );
@@ -98,11 +99,11 @@ function MPSReport() {
           if (touchedRef.current) return;
 
           const next = Object.fromEntries(
-            TRAITS.map(t => [t, Object.fromEntries(COLS.map(c => [c.key, ""]))])
+            TRAITS_MPS.map(t => [t, Object.fromEntries(COLS_MPS.map(c => [c.key, ""]))])
           );
           rows.forEach(rw => {
             if (!rw?.trait || !next[rw.trait]) return;
-            COLS.forEach(c => {
+            COLS_MPS.forEach(c => {
               next[rw.trait][c.key] = (rw[c.key] ?? "").toString();
             });
           });
@@ -114,9 +115,9 @@ function MPSReport() {
 
   // ---- serialize payload helpers
   const toRows = () =>
-    TRAITS.map(trait => {
+    TRAITS_MPS.map(trait => {
       const row = { trait };
-      COLS.forEach(col => {
+      COLS_MPS.forEach(col => {
         const v = data[trait][col.key];
         row[col.key] = (v === "" || v == null) ? null : Number(v);
       });
@@ -124,97 +125,97 @@ function MPSReport() {
     });
 
   const toTotals = () =>
-    Object.fromEntries(COLS.map(col => [col.key, Number(totals[col.key] || 0)]));
+    Object.fromEntries(COLS_MPS.map(col => [col.key, Number(totals[col.key] || 0)]));
 
   // ---- save/submit (status handled server-side; this just sends fields)
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState(null);
-// under: const [saveMsg, setSaveMsg] = useState(null);
-const [importing, setImporting] = useState(false);
-const [importMsg, setImportMsg] = useState(null);
-const fileInputRef = useRef(null);
+  // under: const [saveMsg, setSaveMsg] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState(null);
+  const fileInputRef = useRef(null);
 
-// tiny CSV parser that handles quotes and commas
-function csvToRows(text) {
-  const rows = [];
-  let row = [], cell = "", inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i], next = text[i + 1];
-    if (inQuotes) {
-      if (c === '"' && next === '"') { cell += '"'; i++; }
-      else if (c === '"') { inQuotes = false; }
-      else { cell += c; }
-    } else {
-      if (c === '"') inQuotes = true;
-      else if (c === ',') { row.push(cell); cell = ""; }
-      else if (c === '\r') { /* ignore */ }
-      else if (c === '\n') { row.push(cell); rows.push(row); row = []; cell = ""; }
-      else { cell += c; }
+  // tiny CSV parser that handles quotes and commas
+  function csvToRows(text) {
+    const rows = [];
+    let row = [], cell = "", inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i], next = text[i + 1];
+      if (inQuotes) {
+        if (c === '"' && next === '"') { cell += '"'; i++; }
+        else if (c === '"') { inQuotes = false; }
+        else { cell += c; }
+      } else {
+        if (c === '"') inQuotes = true;
+        else if (c === ',') { row.push(cell); cell = ""; }
+        else if (c === '\r') { /* ignore */ }
+        else if (c === '\n') { row.push(cell); rows.push(row); row = []; cell = ""; }
+        else { cell += c; }
+      }
     }
+    // flush last cell/row
+    if (cell.length > 0 || row.length) { row.push(cell); rows.push(row); }
+    return rows;
   }
-  // flush last cell/row
-  if (cell.length > 0 || row.length) { row.push(cell); rows.push(row); }
-  return rows;
-}
 
-// map header labels to column keys
-const LABEL_TO_KEY = Object.fromEntries(COLS.map(c => [c.label.toLowerCase(), c.key]));
+  // map header labels to column keys
+  const LABEL_TO_KEY = Object.fromEntries(COLS_MPS.map(c => [c.label.toLowerCase(), c.key]));
 
-// takes CSV text, returns { nextData, importedCount }
-function parseMPSCsv(text) {
-  const rows = csvToRows(text).filter(r => r.some(v => String(v).trim() !== ""));
-  if (!rows.length) throw new Error("CSV is empty.");
+  // takes CSV text, returns { nextData, importedCount }
+  function parseMPSCsv(text) {
+    const rows = csvToRows(text).filter(r => r.some(v => String(v).trim() !== ""));
+    if (!rows.length) throw new Error("CSV is empty.");
 
-  // expect first header cell to be "Trait"
-  const header = rows[0].map(h => String(h || "").trim());
-  const traitIdx = header.findIndex(h => h.toLowerCase() === "trait");
-  if (traitIdx === -1) throw new Error('Header must include "Trait".');
+    // expect first header cell to be "Trait"
+    const header = rows[0].map(h => String(h || "").trim());
+    const traitIdx = header.findIndex(h => h.toLowerCase() === "trait");
+    if (traitIdx === -1) throw new Error('Header must include "Trait".');
 
-  // build column index map (by label)
-  const colIndexByKey = {};
-  header.forEach((h, i) => {
-    const key = LABEL_TO_KEY[h.toLowerCase()];
-    if (key) colIndexByKey[key] = i;
-  });
-
-  // at least one known column needed
-  const knownCols = Object.keys(colIndexByKey);
-  if (!knownCols.length) throw new Error("No known columns found in header.");
-
-  // start from a blank sheet
-  const next = Object.fromEntries(
-    TRAITS.map(t => [t, Object.fromEntries(COLS.map(c => [c.key, ""]))])
-  );
-
-  let imported = 0;
-  for (let r = 1; r < rows.length; r++) {
-    const row = rows[r];
-    const firstCell = String(row[traitIdx] || "").trim();
-    if (!firstCell) continue;
-    if (firstCell.toLowerCase() === "total") break; // ignore totals row
-    if (!TRAITS.includes(firstCell)) continue;      // ignore unknown trait rows
-
-    knownCols.forEach(key => {
-      const idx = colIndexByKey[key];
-      const raw = row[idx] ?? "";
-      const val = String(raw).trim();
-      // keep blank as "", numeric strings cleaned; UI already strips non-numeric
-      next[firstCell][key] = val;
+    // build column index map (by label)
+    const colIndexByKey = {};
+    header.forEach((h, i) => {
+      const key = LABEL_TO_KEY[h.toLowerCase()];
+      if (key) colIndexByKey[key] = i;
     });
-    imported++;
+
+    // at least one known column needed
+    const knownCols = Object.keys(colIndexByKey);
+    if (!knownCols.length) throw new Error("No known columns found in header.");
+
+    // start from a blank sheet
+    const next = Object.fromEntries(
+      TRAITS_MPS.map(t => [t, Object.fromEntries(COLS_MPS.map(c => [c.key, ""]))])
+    );
+
+    let imported = 0;
+    for (let r = 1; r < rows.length; r++) {
+      const row = rows[r];
+      const firstCell = String(row[traitIdx] || "").trim();
+      if (!firstCell) continue;
+      if (firstCell.toLowerCase() === "total") break; // ignore totals row
+      if (!TRAITS_MPS.includes(firstCell)) continue;      // ignore unknown trait rows
+
+      knownCols.forEach(key => {
+        const idx = colIndexByKey[key];
+        const raw = row[idx] ?? "";
+        const val = String(raw).trim();
+        // keep blank as "", numeric strings cleaned; UI already strips non-numeric
+        next[firstCell][key] = val;
+      });
+      imported++;
+    }
+
+    return { nextData: next, importedCount: imported };
   }
 
-  return { nextData: next, importedCount: imported };
-}
-
-async function importFromFile(file) {
-  if (!file) throw new Error("No file selected.");
-  if (!/\.csv$/i.test(file.name)) {
-    throw new Error("Please upload a .csv file.");
+  async function importFromFile(file) {
+    if (!file) throw new Error("No file selected.");
+    if (!/\.csv$/i.test(file.name)) {
+      throw new Error("Please upload a .csv file.");
+    }
+    const text = await file.text();
+    return parseMPSCsv(text);
   }
-  const text = await file.text();
-  return parseMPSCsv(text);
-}
 
   const submitMPS = async () => {
     if (isDisabled) {
@@ -268,12 +269,12 @@ async function importFromFile(file) {
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
 
-    const header = ["Trait", ...COLS.map(c => c.label)];
-    const rows = TRAITS.map(trait => [
+    const header = ["Trait", ...COLS_MPS.map(c => c.label)];
+    const rows = TRAITS_MPS.map(trait => [
       trait,
-      ...COLS.map(c => data[trait][c.key] === "" ? "" : data[trait][c.key])
+      ...COLS_MPS.map(c => data[trait][c.key] === "" ? "" : data[trait][c.key])
     ]);
-    const totalRow = ["Total", ...COLS.map(c => totals[c.key])];
+    const totalRow = ["Total", ...COLS_MPS.map(c => totals[c.key])];
 
     const lines = [header, ...rows, totalRow].map(r => r.map(esc).join(",")).join("\n");
     return lines;
@@ -291,10 +292,10 @@ async function importFromFile(file) {
   // blank template export
   const handleGenerateTemplate = () => {
     const blank = Object.fromEntries(
-      TRAITS.map(t => [t, Object.fromEntries(COLS.map(c => [c.key, ""]))])
+      TRAITS_MPS.map(t => [t, Object.fromEntries(COLS_MPS.map(c => [c.key, ""]))])
     );
-    const header = ["Trait", ...COLS.map(c => c.label)];
-    const rows = TRAITS.map(trait => [trait, ...COLS.map(c => blank[trait][c.key])]);
+    const header = ["Trait", ...COLS_MPS.map(c => c.label)];
+    const rows = TRAITS_MPS.map(trait => [trait, ...COLS_MPS.map(c => blank[trait][c.key])]);
     const csv = [header, ...rows].map(r => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     downloadBlob(blob, "MPS_Template.csv");
@@ -305,7 +306,7 @@ async function importFromFile(file) {
     touchedRef.current = true;     // prevent late hydration overwrites
     setEditOverride(true);         // allow editing even if locked
     const blank = Object.fromEntries(
-      TRAITS.map(t => [t, Object.fromEntries(COLS.map(c => [c.key, ""]))])
+      TRAITS_MPS.map(t => [t, Object.fromEntries(COLS_MPS.map(c => [c.key, ""]))])
     );
     setData(blank);
   };
@@ -332,66 +333,64 @@ async function importFromFile(file) {
                 Import File
               </button>
 
+              {openPopup && (
+                <div className="modal-overlay">
+                  <div className="import-popup">
+                    <div className="popup-header">
+                      <h2>Import File</h2>
+                      <button className="close-button" onClick={() => { setOpenPopup(false); setImportMsg(null); }}>X</button>
+                    </div>
+                    <hr />
+                    <form
+                      className="import-form"
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        if (isDisabled) return; // should be disabled by button anyway
+                        try {
+                          setImporting(true);
+                          setImportMsg(null);
+                          const file = fileInputRef.current?.files?.[0];
+                          const { nextData, importedCount } = await importFromFile(file);
 
-             {openPopup && (
-              <div className="modal-overlay">
-                <div className="import-popup">
-                  <div className="popup-header">
-                    <h2>Import File</h2>
-                    <button className="close-button" onClick={() => { setOpenPopup(false); setImportMsg(null); }}>X</button>
+                          // mark as user-edited to prevent hydration overwrite
+                          touchedRef.current = true;
+                          // allow editing even if backend locked (since user took an explicit action)
+                          setEditOverride(true);
+
+                          setData(nextData);
+                          setImportMsg(`Imported ${importedCount} row(s).`);
+                          // auto-close after a short delay (optional)
+                          setTimeout(() => setOpenPopup(false), 600);
+                        } catch (err) {
+                          setImportMsg(err.message || "Import failed.");
+                        } finally {
+                          setImporting(false);
+                        }
+                      }}
+                    >
+                      <label htmlFor="fileInput" className="file-upload-label">
+                        Click here to upload a file
+                      </label>
+                      <input
+                        id="fileInput"
+                        type="file"
+                        accept=".csv"
+                        ref={fileInputRef}
+                        style={{ display: "none" }}
+                        onChange={() => setImportMsg(null)}
+                      />
+                      <button type="submit" disabled={isDisabled || importing}>
+                        {importing ? "Uploading..." : "Upload"}
+                      </button>
+                      {importMsg && <p className="import-hint">{importMsg}</p>}
+                      <p className="import-hint">
+                        Expected CSV format: first row is headers with <b>Trait</b>, then any of{" "}
+                        {COLS_MPS.map(c => c.label).join(", ")}. A final <b>Total</b> row (optional) will be ignored.
+                      </p>
+                    </form>
                   </div>
-                  <hr />
-                  <form
-                    className="import-form"
-                    onSubmit={async (e) => {
-                      e.preventDefault();
-                      if (isDisabled) return; // should be disabled by button anyway
-                      try {
-                        setImporting(true);
-                        setImportMsg(null);
-                        const file = fileInputRef.current?.files?.[0];
-                        const { nextData, importedCount } = await importFromFile(file);
-
-                        // mark as user-edited to prevent hydration overwrite
-                        touchedRef.current = true;
-                        // allow editing even if backend locked (since user took an explicit action)
-                        setEditOverride(true);
-
-                        setData(nextData);
-                        setImportMsg(`Imported ${importedCount} row(s).`);
-                        // auto-close after a short delay (optional)
-                        setTimeout(() => setOpenPopup(false), 600);
-                      } catch (err) {
-                        setImportMsg(err.message || "Import failed.");
-                      } finally {
-                        setImporting(false);
-                      }
-                    }}
-                  >
-                    <label htmlFor="fileInput" className="file-upload-label">
-                      Click here to upload a file
-                    </label>
-                    <input
-                      id="fileInput"
-                      type="file"
-                      accept=".csv"
-                      ref={fileInputRef}
-                      style={{ display: "none" }}
-                      onChange={() => setImportMsg(null)}
-                    />
-                    <button type="submit" disabled={isDisabled || importing}>
-                      {importing ? "Uploading..." : "Upload"}
-                    </button>
-                    {importMsg && <p className="import-hint">{importMsg}</p>}
-                    <p className="import-hint">
-                      Expected CSV format: first row is headers with <b>Trait</b>, then any of{" "}
-                      {COLS.map(c => c.label).join(", ")}. A final <b>Total</b> row (optional) will be ignored.
-                    </p>
-                  </form>
                 </div>
-              </div>
-            )}
-
+              )}
 
               <button onClick={handleExport}>Export</button>
             </div>
@@ -435,16 +434,16 @@ async function importFromFile(file) {
                 <thead>
                   <tr>
                     <th scope="col" className="row-head"> </th>
-                    {COLS.map(col => (
+                    {COLS_MPS.map(col => (
                       <th key={col.key} scope="col">{col.label}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {TRAITS.map(trait => (
+                  {TRAITS_MPS.map(trait => (
                     <tr key={trait}>
                       <th scope="row" className="row-head">{trait}</th>
-                      {COLS.map(col => (
+                      {COLS_MPS.map(col => (
                         <td key={col.key}>
                           <input
                             type="number"
@@ -462,11 +461,11 @@ async function importFromFile(file) {
 
                   <tr className="total-row">
                     <th scope="row" className="row-head">Total</th>
-                    {COLS.map(col => (
+                    {COLS_MPS.map(col => (
                       <td key={col.key} className="total-cell">{totals[col.key]}</td>
                     ))}
                   </tr>
-                </tbody>
+                </tbody> 
               </table>
             </div>
 
@@ -482,6 +481,7 @@ async function importFromFile(file) {
                 Clear Table
               </button>
             </div>
+            {saveMsg && <p className="save-hint">{saveMsg}</p>}
           </div>
         </div>
 
