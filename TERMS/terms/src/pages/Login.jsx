@@ -4,7 +4,7 @@ import './Login.css';
 const Login = () => {
   const handleGoogleLogin = () => {
     // Redirect to backend OAuth route
-    window.location.href = 'http://localhost:5000/auth/google';
+    window.location.href = 'https://terms-api.kiri8tives.com/auth/google';
   };
 
   return (

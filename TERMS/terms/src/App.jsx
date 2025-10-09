@@ -1,5 +1,5 @@
 import './App.css'
-import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom'
+import { Routes, Route, useNavigate } from 'react-router-dom'
 import depedLogo from './assets/deped-logo.png'
 import EyeIcon from './assets/eye.svg'
 import EyeOffIcon from './assets/eye-close.svg'
@@ -40,9 +40,8 @@ import ForApprovalData from './pages/Principal/ForApprovalData.jsx'
 
 function App() {
   return (
-    <BrowserRouter>
-      <main>
-        <Routes>
+    <main>
+      <Routes>
           <Route path="/" element={<Login />} />
           <Route path="/DashboardTeacher" element={<DashboardTeacher />} />
           <Route path="/DashboardCoordinator" element={<DashboardCoordinator />} />
@@ -69,9 +68,8 @@ function App() {
           <Route path="/AssignedReportData" element={<AssignedReportData />} />
           <Route path="/SubmissionData" element={<SubmissionData />} />
           <Route path="/ForApprovalData" element={<ForApprovalData />} />
-        </Routes>
-      </main>
-    </BrowserRouter>
+      </Routes>
+    </main>
   )
 }
 
@@ -99,7 +97,7 @@ function LoginForm() {
     }
 
     try {
-      const response = await fetch('http://localhost:5000/temp-auth/login', {
+      const response = await fetch('https://terms-api.kiri8tives.com/temp-auth/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -121,7 +119,11 @@ function LoginForm() {
             navigate('/DashboardTeacher');
             break;
           case 'coordinator':
+            navigate('/DashboardCoordinator');
+            break;
           case 'principal':
+            navigate('/DashboardPrincipal');
+            break;
           case 'admin':
             navigate('/DashboardCoordinator');
             break;

@@ -5,7 +5,7 @@ import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import "../Teacher/LAEMPLReport.css";
 import Modal from "react-modal";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
+const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
 
 const SUBMISSION_ID =
   new URLSearchParams(window.location.search).get("id") || "10";

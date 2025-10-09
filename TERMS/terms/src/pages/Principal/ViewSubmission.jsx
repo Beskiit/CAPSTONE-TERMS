@@ -13,7 +13,7 @@ function ViewSubmission() {
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const res = await fetch("http://localhost:5000/auth/me", {
+        const res = await fetch("https://terms-api.kiri8tives.com/auth/me", {
           credentials: "include",
         });
         if (res.status === 401) {

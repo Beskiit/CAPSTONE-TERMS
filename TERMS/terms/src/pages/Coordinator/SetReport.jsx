@@ -7,7 +7,7 @@ import Laempl from "../../assets/templates/LAEMPL.png";
 import AccomplishmentReport from "../../assets/templates/accomplishment-report.png";
 //import MpsTemplate from "../../assets/templates/mps.png";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
+const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
 
 // Preview mapping (category_id → sub_category_id → image)
 const TEMPLATE_MAP = {

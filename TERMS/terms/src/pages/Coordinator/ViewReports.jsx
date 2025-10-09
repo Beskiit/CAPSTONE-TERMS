@@ -29,7 +29,7 @@ function ViewReports() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("http://localhost:5000/auth/me", {
+        const res = await fetch("https://terms-api.kiri8tives.com/auth/me", {
           credentials: "include",
         });
         if (!res.ok) return;
@@ -45,7 +45,7 @@ function ViewReports() {
   useEffect(() => {
     (async () => {
       try {
-        const { data } = await axios.get("http://localhost:5000/categories");
+        const { data } = await axios.get("https://terms-api.kiri8tives.com/categories");
         setCategories(data);
       } catch (error) {
         console.error("Error fetching categories:", error);
@@ -59,7 +59,7 @@ function ViewReports() {
       if (!selectedCategory) return setSubCategories([]);
       try {
         const { data } = await axios.get(
-          `http://localhost:5000/subcategories/${selectedCategory}`
+          `https://terms-api.kiri8tives.com/subcategories/${selectedCategory}`
         );
         setSubCategories(data);
       } catch (error) {
@@ -84,7 +84,7 @@ function ViewReports() {
       return;
     }
     try {
-      await axios.post("http://localhost:5000/reports", {
+      await axios.post("https://terms-api.kiri8tives.com/reports", {
         category_id: selectedCategory,
         given_by: defaultGivenBy,
         quarter: defaultQuarter,

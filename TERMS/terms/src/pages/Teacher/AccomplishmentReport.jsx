@@ -6,7 +6,7 @@ import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import "./AccomplishmentReport.css";
 
 // Always strip trailing slash on base, then build our own paths.
-const API_BASE = (import.meta.env.VITE_API_BASE || "http://localhost:5000").replace(/\/$/, "");
+const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
 const BASE = `${API_BASE}/reports/accomplishment`; // <-- matches your Postman endpoint
 
 function normalizeImages(images) {
