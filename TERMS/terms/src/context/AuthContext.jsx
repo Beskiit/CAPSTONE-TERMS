@@ -22,17 +22,16 @@ export const AuthProvider = ({ children }) => {
 
   const checkAuthStatus = async () => {
     try {
-      const response = await fetch('http://localhost:5000/auth/status', {
+      const response = await fetch('https://terms-api.kiri8tives.com/auth/me', {
         credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
         },
       });
       
-      const data = await response.json();
-      
-      if (data.authenticated) {
-        setUser(data.user);
+      if (response.ok) {
+        const data = await response.json();
+        setUser(data);
         setIsAuthenticated(true);
       } else {
         setUser(null);
@@ -49,7 +48,7 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     try {
-      await fetch('http://localhost:5000/auth/logout', {
+      await fetch('https://terms-api.kiri8tives.com/auth/logout', {
         method: 'POST',
         credentials: 'include',
         headers: {

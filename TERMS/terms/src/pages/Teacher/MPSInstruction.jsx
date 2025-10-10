@@ -23,7 +23,7 @@ function MPSInstruction() {
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const res = await fetch("http://localhost:5000/auth/me", {
+        const res = await fetch("https://terms-api.kiri8tives.com/auth/me", {
           credentials: "include", // ensures cookie/session goes with request
         });
         if (!res.ok) {
