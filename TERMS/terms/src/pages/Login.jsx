@@ -1,5 +1,6 @@
 import React from 'react';
 import './Login.css';
+import depedLogo from '../assets/deped-logo.png';
 
 const Login = () => {
   const handleGoogleLogin = () => {
@@ -12,7 +13,7 @@ const Login = () => {
     <div className="login-container">
       <div className="login-card">
         <div className="login-header">
-          <img src="/src/assets/deped-logo.png" alt="DepEd Logo" className="logo" />
+          <img src={depedLogo} alt="DepEd Logo" className="logo" />
           <h1>CAPSTONE TERMS</h1>
           <p>Teacher Evaluation and Report Management System</p>
         </div>
