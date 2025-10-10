@@ -7,6 +7,8 @@ import Edit from "../../assets/edit.svg";
 import Delete from "../../assets/delete.svg";
 import Modal from "react-modal";
 
+const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
+
 function UserManagement() {
   const navigate = useNavigate();
   const [openPopupAdd, setOpenPopupAdd] = useState(false);
@@ -28,7 +30,7 @@ function UserManagement() {
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const res = await fetch("https://terms-api.kiri8tives.com/auth/me", {
+        const res = await fetch(`${API_BASE}/auth/me`, {
           credentials: "include",
         });
         if (!res.ok) return; // not logged in

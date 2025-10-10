@@ -4,6 +4,8 @@ import Sidebar from "../../components/shared/SidebarPrincipal.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import Header from "../../components/shared/Header.jsx";
 
+const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
+
 function ViewSubmission() {
     const navigate = useNavigate();
 
@@ -13,7 +15,7 @@ function ViewSubmission() {
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const res = await fetch("https://terms-api.kiri8tives.com/auth/me", {
+        const res = await fetch(`${API_BASE}/auth/me`, {
           credentials: "include",
         });
         if (res.status === 401) {

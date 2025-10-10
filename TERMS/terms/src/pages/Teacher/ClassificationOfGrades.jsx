@@ -5,6 +5,8 @@ import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import './ClassificationOfGrades.css';
 import { useEffect, useState } from 'react';
 
+const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
+
 function ClassificationOfGrades() {
     const navigate = useNavigate();
     const [user, setUser] = useState(null);
@@ -12,7 +14,7 @@ function ClassificationOfGrades() {
     useEffect(() => {
     const fetchUser = async () => {
       try {
-        const res = await fetch("https://terms-api.kiri8tives.com/auth/me", {
+        const res = await fetch(`${API_BASE}/auth/me`, {
           credentials: "include", // important so session cookie is sent
         });
         if (!res.ok) return; // not logged in
