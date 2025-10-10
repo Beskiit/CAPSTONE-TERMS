@@ -68,7 +68,7 @@ function SetReport() {
   useEffect(() => {
   const fetchTeachers = async () => {
     try {
-      const res = await fetch(`${API_BASE}/users/list/teachers`, { credentials: "include" });
+      const res = await fetch(`${API_BASE}/users/teachers`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch teachers");
       const data = await res.json(); // [{ user_id, name }]
       setUsers(data);

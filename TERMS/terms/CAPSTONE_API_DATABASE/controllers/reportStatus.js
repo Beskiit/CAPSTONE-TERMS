@@ -30,19 +30,25 @@ export const getUpcomingDeadlinesByUser = (req, res) => {
       ra.instruction,
       ra.from_date,
       ra.to_date,
+      ra.category_id,
+      ra.sub_category_id,
+      c.category_name,
+      sc.sub_category_name,
       st.value AS status_value
     FROM submission s
     JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
     JOIN status st ON st.status_id = s.status
+    JOIN category c ON c.category_id = ra.category_id
+    LEFT JOIN sub_category sc ON sc.sub_category_id = ra.sub_category_id
     WHERE s.submitted_by = ?
-      AND ra.to_date >= NOW()          -- still open
-      AND (st.value = 'pending')       -- still not finished
-    ORDER BY ra.to_date ASC
+      AND ra.to_date >= NOW()                -- still open
+      AND (LOWER(st.value) = 'pending' OR s.status = 1)  -- pending/not finished
+    ORDER BY ra.to_date ASC, ra.report_assignment_id ASC
   `;
   db.query(sql, [id], (err, rows) => {
     if (err) return res.status(500).send("DB error: " + err);
-    if (!rows.length) return res.status(404).send("No upcoming deadlines.");
-    res.json(rows);
+    // Return empty list with 200 so frontend can show friendly message
+    return res.json(rows || []);
   });
 };
 
