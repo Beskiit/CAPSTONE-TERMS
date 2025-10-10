@@ -22,7 +22,8 @@ export const AuthProvider = ({ children }) => {
 
   const checkAuthStatus = async () => {
     try {
-      const response = await fetch('https://terms-api.kiri8tives.com/auth/me', {
+      const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:5000';
+      const response = await fetch(`${apiBase.replace(/\/$/, '')}/auth/me`, {
         credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
@@ -48,7 +49,8 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     try {
-      await fetch('https://terms-api.kiri8tives.com/auth/logout', {
+      const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:5000';
+      await fetch(`${apiBase.replace(/\/$/, '')}/auth/logout`, {
         method: 'POST',
         credentials: 'include',
         headers: {

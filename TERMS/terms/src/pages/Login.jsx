@@ -4,7 +4,8 @@ import './Login.css';
 const Login = () => {
   const handleGoogleLogin = () => {
     // Redirect to backend OAuth route
-    window.location.href = 'https://terms-api.kiri8tives.com/auth/google';
+    const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:5000';
+    window.location.href = `${apiBase.replace(/\/$/, '')}/auth/google`;
   };
 
   return (

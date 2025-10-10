@@ -97,7 +97,8 @@ function LoginForm() {
     }
 
     try {
-      const response = await fetch('https://terms-api.kiri8tives.com/temp-auth/login', {
+      const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:5000';
+      const response = await fetch(`${apiBase.replace(/\/$/, '')}/temp-auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
