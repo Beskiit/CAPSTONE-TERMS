@@ -26,7 +26,8 @@ const PORT = Number(process.env.PORT || 5000);
 
 // ---- Env-driven URLs ----
 const IS_PROD = process.env.NODE_ENV === "production";
-const FRONTEND_URL = (process.env.FRONTEND_URL || "https://terms.kiri8tives.com").replace(/\/$/, "");
+// Default to localhost frontend in dev to avoid redirecting to live site
+const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/$/, "");
 const PUBLIC_URL = (process.env.PUBLIC_URL || `http://localhost:${PORT}`).replace(/\/$/, "");
 
 // if you later set secure cookies, this helps behind Nginx/HTTPS
