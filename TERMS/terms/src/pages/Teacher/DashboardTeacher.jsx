@@ -2,7 +2,7 @@ import "./DashboardTeacher.css";
 import DeadlineComponent from "./DeadlineComponent.jsx";
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
-import {useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import Header from '../../components/shared/Header.jsx';
@@ -13,51 +13,56 @@ import Approved from '../../assets/approved.svg';
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
 
-
 function Dashboard() {
   const [user, setUser] = useState(null);
   const [deadlines, setDeadlines] = useState([]);
   const [counts, setCounts] = useState({
-    submitted: 0,
+    submitted: 0,  // we will store COMPLETED here (per your request)
     pending: 0,
-    approved: 0,
+    approved: 0,   // strict approved-only
     rejected: 0,
   });
 
-  useEffect(() => {
-  if (!user?.user_id) return;
-
   const fetchCounts = async () => {
     try {
+      if (!user?.user_id) return; // safety
       const res = await fetch(
         `${API_BASE}/reports/status/count/user/${user.user_id}`,
         { credentials: "include" }
       );
 
       if (!res.ok) {
-        // If 404 or any error, keep zeros rather than throwing
         const txt = await res.text();
         console.warn("Counts fetch failed:", res.status, txt);
         return;
       }
 
-      const data = await res.json();
-      // data = { pending, approved, completed, rejected, submitted }
+      let data = await res.json();
+
+      // Normalize keys to lowercase to be safe:
+      if (data && typeof data === "object") {
+        const lower = {};
+        for (const k of Object.keys(data)) lower[k.toLowerCase()] = data[k];
+        data = lower;
+      }
+
       setCounts({
-        submitted: Number(data.submitted ?? 0),
+        // ⬇️ Use COMPLETED for the left card (you called it "Total Submitted")
+        submitted: Number(data.completed ?? 0),
+
         pending: Number(data.pending ?? 0),
-        approved: Number(data.approved ?? data.completed ?? 0),
+
+        // ⬇️ Show STRICT approved-only (status=3)
+        approved: Number(data.approved_strict ?? data.approved ?? 0),
+
         rejected: Number(data.rejected ?? 0),
       });
     } catch (e) {
       console.error("Failed to load counts:", e);
-      // leave counts at 0s
     }
   };
 
-  fetchCounts();
-}, [user]);
-
+  // Load current user
   useEffect(() => {
     const fetchUser = async () => {
       try {
@@ -72,11 +77,18 @@ function Dashboard() {
     fetchUser();
   }, []);
 
+  // fetch counts when user is known
+  useEffect(() => {
+    if (!user?.user_id) return;
+    fetchCounts();
+  }, [user]);
+
+  // Load upcoming deadlines when user is known
   useEffect(() => {
     if (!user?.user_id) return; // wait until user is loaded
     const fetchDeadlines = async () => {
       try {
-        const res = await fetch(`${API_BASE}/reports/status/user/${user.user_id}/upcoming`);
+        const res = await fetch(`${API_BASE}/reports/status/user/${user.user_id}/upcoming`, { credentials: "include" });
         if (!res.ok) throw new Error("Failed to fetch deadlines");
         const data = await res.json();
         setDeadlines(data);
@@ -87,78 +99,77 @@ function Dashboard() {
     fetchDeadlines();
   }, [user]);
 
-    return (
-        <>
-        <Header userText={user ? user.name : "Guest"} />
-        <div className="dashboard-container">
-            <Sidebar activeLink="Dashboard"/>
-            <div className="dashboard-content">
-                <div className="dashboard-main">
-                    <h2>Dashboard</h2>
-                <div className="dashboard-cards">
-                    <div className="dashboard-card">
-                        <div className="title-container">
-                            <img src={Submitted} alt="Submitted Photo" />
-                            <h3>Total Submitted</h3>
-                        </div>
-                        <p>{counts.submitted}</p>
-                    </div>
-                    <div className="dashboard-card">
-                        <div className="title-container">
-                            <img src={Pending} alt="Pending Photo" />
-                            <h3>Pending</h3>
-                        </div>
-                        <p>{counts.pending}</p>
-                    </div>
-                    <div className="dashboard-card">
-                        <div className="title-container">
-                            <img src={Approved} alt="Approved Photo" />
-                            <h3>Approved</h3>
-                        </div>
-                        <p>{counts.approved}</p>
-                    </div>
+  return (
+    <>
+      <Header userText={user ? user.name : "Guest"} />
+      <div className="dashboard-container">
+        <Sidebar activeLink="Dashboard" />
+        <div className="dashboard-content">
+          <div className="dashboard-main">
+            <h2>Dashboard</h2>
+            <div className="dashboard-cards">
+              <div className="dashboard-card">
+                <div className="title-container">
+                  <img src={Submitted} alt="Completed Photo" />
+                  {/* You can keep the old label if you want, but this is clearer */}
+                  <h3>Completed</h3>
                 </div>
-                    <div className="submitted-reports">
-                        <h2>Submitted Reports</h2>
-                        <hr />
-                        <div className="submitted-reports-container" clickable>
-                            <div className="submitted-report-title">
-                                <h4>Quarterly Assessment Report</h4>
-                                <p>Intervention Report</p>
-                                <p>1st Quarter</p>
-                            </div>
-                            <div className="submitted-report-date">
-                                <p>SY: 2025-2026</p>
-                                <p>Date Given: May 06, 2025</p>
-                                <p>May 06, 2025</p>
-                            </div>
-                        </div>
-                    </div>
+                <p>{counts.submitted}</p>
+              </div>
+              <div className="dashboard-card">
+                <div className="title-container">
+                  <img src={Pending} alt="Pending Photo" />
+                  <h3>Pending</h3>
                 </div>
+                <p>{counts.pending}</p>
+              </div>
+              <div className="dashboard-card">
+                <div className="title-container">
+                  <img src={Approved} alt="Approved Photo" />
+                  <h3>Approved</h3>
+                </div>
+                <p>{counts.approved}</p>
+              </div>
             </div>
-            <div className="dashboard-sidebar">
-                <CalendarComponent />
-                <DeadlineComponent deadlines={deadlines} />
 
+            <div className="submitted-reports">
+              <h2>Submitted Reports</h2>
+              <hr />
+              <div className="submitted-reports-container" clickable="true">
+                <div className="submitted-report-title">
+                  <h4>Quarterly Assessment Report</h4>
+                  <p>Intervention Report</p>
+                  <p>1st Quarter</p>
+                </div>
+                <div className="submitted-report-date">
+                  <p>SY: 2025-2026</p>
+                  <p>Date Given: May 06, 2025</p>
+                  <p>May 06, 2025</p>
+                </div>
+              </div>
             </div>
+          </div>
         </div>
-        </>
-        
-    )
+
+        <div className="dashboard-sidebar">
+          <CalendarComponent />
+          <DeadlineComponent deadlines={deadlines} />
+        </div>
+      </div>
+    </>
+  );
 }
 
 function CalendarComponent() {
-    const [date, setDate] = useState(new Date());
-    const onChange = (newDate) => {
-        setDate(newDate);
-    };
-    return (
-        <div className="calendar-container">
-            <Calendar onChange={onChange} value={date} />
-        </div>
-    );
+  const [date, setDate] = useState(new Date());
+  const onChange = (newDate) => {
+    setDate(newDate);
+  };
+  return (
+    <div className="calendar-container">
+      <Calendar onChange={onChange} value={date} />
+    </div>
+  );
 }
-
-
 
 export default Dashboard;
