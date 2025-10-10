@@ -7,6 +7,8 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import './ClassificationOfGradesReport.css';
 
+const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
+
 function ClassificationOfGradesReport() {
     const [openPopup, setOpenPopup] = useState(false);
 
@@ -20,7 +22,7 @@ function ClassificationOfGradesReport() {
     useEffect(() => {
     const fetchUser = async () => {
       try {
-        const res = await fetch("https://terms-api.kiri8tives.com/auth/me", {
+        const res = await fetch(`${API_BASE}/auth/me`, {
           credentials: "include", // important so session cookie is sent
         });
         if (!res.ok) return; // not logged in

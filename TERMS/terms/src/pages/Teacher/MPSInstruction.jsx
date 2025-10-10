@@ -5,6 +5,8 @@ import Header from "../../components/shared/Header.jsx";
 import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 
+const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
+
 function MPSInstruction() {
   const navigate = useNavigate();
   const { state } = useLocation();
@@ -23,7 +25,7 @@ function MPSInstruction() {
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const res = await fetch("https://terms-api.kiri8tives.com/auth/me", {
+        const res = await fetch(`${API_BASE}/auth/me`, {
           credentials: "include", // ensures cookie/session goes with request
         });
         if (!res.ok) {

@@ -6,6 +6,8 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Header from "../../components/shared/Header";
 
+const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
+
 function SubmittedReport() {
     const navigate = useNavigate();
 
@@ -18,7 +20,7 @@ function SubmittedReport() {
     useEffect(() => {
     const fetchUser = async () => {
       try {
-        const res = await fetch("https://terms-api.kiri8tives.com/auth/me", {
+        const res = await fetch(`${API_BASE}/auth/me`, {
           credentials: "include", // important so session cookie is sent
         });
         if (!res.ok) return; // not logged in

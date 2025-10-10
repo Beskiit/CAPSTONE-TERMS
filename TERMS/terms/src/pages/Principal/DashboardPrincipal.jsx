@@ -9,6 +9,8 @@ import Submitted from '../../assets/submitted.svg';
 import Pending from '../../assets/pending.svg';
 import Approved from '../../assets/approved.svg';
 
+const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
+
 function DashboardPrincipal(){
 
     const [user, setUser] = useState(null);
@@ -16,7 +18,7 @@ function DashboardPrincipal(){
         useEffect(() => {
         const fetchUser = async () => {
           try {
-            const res = await fetch("https://terms-api.kiri8tives.com/auth/me", {
+            const res = await fetch(`${API_BASE}/auth/me`, {
               credentials: "include", // important so session cookie is sent
             });
             if (!res.ok) return; // not logged in
