@@ -5,6 +5,9 @@ export default function DeadlineComponent({ deadlines = [] }) {
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState(false);
 
+  // The API already filters for upcoming deadlines, so we don't need to filter again
+  const filteredDeadlines = deadlines;
+
   const fmtDateTime = (iso) => {
     if (!iso) return "";
     const d = new Date(iso);
@@ -41,7 +44,7 @@ export default function DeadlineComponent({ deadlines = [] }) {
 
   const goToTemplate = (deadline) => {
     const kind = detectType(deadline);
-    const id = deadline.report_assignment_id || deadline.submission_id;
+    const id = deadline.submission_id || deadline.report_assignment_id;
 
     const common = {
       id,
@@ -61,7 +64,7 @@ export default function DeadlineComponent({ deadlines = [] }) {
   };
 
   // render top 3 by default; expand to show all but keep the box scrollable
-  const visible = expanded ? deadlines : deadlines.slice(0, 3);
+  const visible = expanded ? filteredDeadlines : filteredDeadlines.slice(0, 3);
 
   return (
     <div className="deadline-component">
@@ -101,13 +104,13 @@ export default function DeadlineComponent({ deadlines = [] }) {
         </div>
 
         {/* Footer UNDER the box; toggles within the same container */}
-        {deadlines.length > 3 && (
+        {filteredDeadlines.length > 3 && (
           <button
             type="button"
             className="see-all-footer"
             onClick={() => setExpanded(v => !v)}
           >
-            {expanded ? "Show less" : `See all (${deadlines.length}) →`}
+            {expanded ? "Show less" : `See all (${filteredDeadlines.length}) →`}
           </button>
         )}
       </div>

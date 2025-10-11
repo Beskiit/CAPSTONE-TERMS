@@ -9,7 +9,7 @@ import Submitted from '../../assets/submitted.svg';
 import Pending from '../../assets/pending.svg';
 import Approved from '../../assets/approved.svg';
 
-const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
 
 function DashboardCoordinator() {
   const [user, setUser] = useState(null);
@@ -170,6 +170,9 @@ function CalendarComponent() {
 }
 
 function DeadlineComponent({ deadlines = [] }) {
+  // The API already filters for upcoming deadlines, so we don't need to filter again
+  const filteredDeadlines = deadlines;
+
   const fmtDateTime = (iso) => {
     if (!iso) return "";
     const d = new Date(iso);
@@ -189,8 +192,8 @@ function DeadlineComponent({ deadlines = [] }) {
       <h4>Upcoming Deadlines</h4>
       <hr />
       <div className="deadline-container">
-        {Array.isArray(deadlines) && deadlines.length > 0 ? (
-          deadlines.map((d) => (
+        {Array.isArray(filteredDeadlines) && filteredDeadlines.length > 0 ? (
+          filteredDeadlines.map((d) => (
             <div key={d.submission_id || d.report_assignment_id} className="deadline-item">
               <p className="deadline-title">{d.title || "Untitled Report"}</p>
               <div className="deadline-details">

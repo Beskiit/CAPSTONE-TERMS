@@ -192,6 +192,39 @@ function AccomplishmentReport() {
     }
   };
 
+  // New function to submit the report (change status to submitted)
+  const onSubmitToCoordinator = async () => {
+    setSaving(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const res = await fetch(`${BASE}/${submissionId}/answers`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          status: 2, // Submitted status
+          answers: {
+            narrative: narrative,
+            images: existingImages.map(img => img.filename)
+          }
+        }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Submit failed: ${res.status} ${text}`);
+      }
+
+      setSuccess("Report submitted to coordinator successfully!");
+    } catch (e2) {
+      setError(e2.message || "Submit failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Optional hooks
   const onGenerate = () => {
     alert("Generate Report: hook this to your generator when ready.");
@@ -269,8 +302,11 @@ function AccomplishmentReport() {
               )}
 
               <button onClick={onExport}>Export</button>
-              <button onClick={onSubmitFinal} disabled={saving}>
-                {saving ? "Saving…" : "Submit"}
+              <button onClick={onSubmit} disabled={saving}>
+                {saving ? "Saving…" : "Save Draft"}
+              </button>
+              <button onClick={onSubmitToCoordinator} disabled={saving} className="submit-button">
+                {saving ? "Submitting…" : "Submit to Coordinator"}
               </button>
             </div>
             </>

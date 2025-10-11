@@ -247,7 +247,7 @@ export const getMPSSubmission = (req, res) => {
 
 export const patchMPSSubmission = (req, res) => {
   const { id } = req.params;
-  const { rows, totals } = req.body || {};  // editing only the form data
+  const { rows, totals, status } = req.body || {};  // editing form data and status
 
   if (!Array.isArray(rows) || !rows.length) {
     return res.status(400).send("rows array is required.");
@@ -294,10 +294,21 @@ export const patchMPSSubmission = (req, res) => {
 
     const newFields = JSON.stringify(next);
 
-    const updateSql = `UPDATE submission SET fields = ? WHERE submission_id = ?`;
-    db.query(updateSql, [newFields, id], (updErr) => {
+    // Handle status update if provided
+    let updateSql = `UPDATE submission SET fields = ?`;
+    let params = [newFields];
+    
+    if (typeof status === 'number') {
+      updateSql += `, status = ?, date_submitted = NOW()`;
+      params.push(status);
+    }
+    
+    updateSql += ` WHERE submission_id = ?`;
+    params.push(id);
+
+    db.query(updateSql, params, (updErr) => {
       if (updErr) return res.status(500).send("Update failed: " + updErr);
-      res.json({ ok: true });
+      res.json({ ok: true, status: status });
     });
   });
 };

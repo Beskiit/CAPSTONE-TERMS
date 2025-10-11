@@ -31,6 +31,7 @@ import DashboardPrincipal from './pages/Principal/DashboardPrincipal.jsx'
 import ViewSubmission from './pages/Principal/ViewSubmission.jsx'
 import SubmittedReport from './pages/Teacher/SubmittedReport.jsx'
 import AssignedReport from './pages/Coordinator/AssignedReport.jsx'
+import ViewSubmissionTeacher from './pages/Teacher/ViewSubmission.jsx'
 import ForApproval from './pages/Principal/ForApproval.jsx'
 import UserManagement from './pages/Principal/UserManagement.jsx'
 import AssignedReportData from './pages/Coordinator/AssignedReportData.jsx'
@@ -65,9 +66,10 @@ function App() {
           <Route path="/AssignedReport" element={<AssignedReport />} />
           <Route path="/ForApproval" element={<ForApproval />} />
           <Route path="/UserManagement" element={<UserManagement />} />
-          <Route path="/AssignedReportData" element={<AssignedReportData />} />
+          <Route path="/AssignedReportData/:submissionId" element={<AssignedReportData />} />
           <Route path="/SubmissionData" element={<SubmissionData />} />
           <Route path="/ForApprovalData" element={<ForApprovalData />} />
+          <Route path="/submission/:submissionId" element={<ViewSubmissionTeacher />} />
       </Routes>
     </main>
   )

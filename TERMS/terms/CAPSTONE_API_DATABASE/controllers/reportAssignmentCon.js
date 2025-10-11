@@ -20,7 +20,7 @@ export const getReports = (req, res) => {
   });
 };
 
-// GET reports by user
+// GET reports by user (for teachers to see their submissions)
 export const getReportsByUser = (req, res) => {
   const { id } = req.params;
 
@@ -63,10 +63,62 @@ export const getReportsByUser = (req, res) => {
   ORDER BY ra.to_date DESC, ra.report_assignment_id DESC, s.number_of_submission DESC
 `;
 
-
   db.query(sql, [id], (err, rows) => {
     if (err) return res.status(500).send('Database error: ' + err);
     if (!rows.length) return res.status(404).send('No assigned reports found for this user.');
+    res.json(rows);
+  });
+};
+
+// GET reports assigned by coordinator (for coordinators to see their assigned reports with submissions)
+export const getReportsAssignedByUser = (req, res) => {
+  const { id } = req.params;
+
+  const sql = `
+  SELECT
+    s.submission_id,
+    s.report_assignment_id,
+    s.category_id,
+    s.submitted_by,
+    s.number_of_submission,
+    s.status,
+    s.value AS submission_title,
+    DATE_FORMAT(s.date_submitted, '%m/%d/%Y') AS date_submitted,
+
+    -- assignment details
+    ra.report_assignment_id,
+    ra.title AS assignment_title,
+    DATE_FORMAT(ra.from_date, '%m/%d/%Y') AS from_date,
+    DATE_FORMAT(ra.to_date, '%m/%d/%Y') AS to_date,
+    ra.instruction,
+    ra.allow_late,
+    ra.is_given,
+    ra.is_archived,
+    qp.quarter,
+    sy.school_year,
+
+    c.category_name,
+    sc.sub_category_name,
+    COALESCE(sc.sub_category_name, c.category_name) AS report_name,
+
+    -- teacher who submitted
+    ud.name AS submitted_by_name,
+    ud2.name AS given_by_name
+  FROM submission s
+  JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
+  JOIN category c ON ra.category_id = c.category_id
+  LEFT JOIN sub_category sc ON ra.sub_category_id = sc.sub_category_id
+  LEFT JOIN user_details ud ON s.submitted_by = ud.user_id  -- teacher who submitted
+  LEFT JOIN user_details ud2 ON ra.given_by = ud2.user_id   -- coordinator who assigned
+  LEFT JOIN school_year sy ON sy.year_id = ra.year
+  LEFT JOIN quarter_period qp ON qp.quarter_period_id = ra.quarter
+  WHERE ra.given_by = ?  -- Show reports assigned by this coordinator
+  ORDER BY ra.to_date DESC, ra.report_assignment_id DESC, s.number_of_submission DESC
+`;
+
+  db.query(sql, [id], (err, rows) => {
+    if (err) return res.status(500).send('Database error: ' + err);
+    if (!rows.length) return res.status(404).send('No assigned reports found for this coordinator.');
     res.json(rows);
   });
 };

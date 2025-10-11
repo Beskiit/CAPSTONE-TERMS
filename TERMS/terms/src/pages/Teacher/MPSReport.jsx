@@ -3,9 +3,10 @@ import Header from "../../components/shared/Header.jsx";
 import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import "./LAEMPLReport.css";
+import "../../components/shared/StatusBadges.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
-const SUBMISSION_ID = new URLSearchParams(window.location.search).get("id") || 12;
+const SUBMISSION_ID = new URLSearchParams(window.location.search).get("id") || 1;
 
 const TRAITS_MPS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
 
@@ -13,7 +14,6 @@ const COLS_MPS = [
   { key: "m",      label: "Male" },
   { key: "f",      label: "Female" },
   { key: "total",  label: "Total no. of Pupils" },
-  { key: "total_score",  label: "Total Score" },
   { key: "mean",   label: "Mean" },
   { key: "median", label: "Median" },
   { key: "pl",     label: "PL" },
@@ -24,8 +24,8 @@ const COLS_MPS = [
   { key: "ls",     label: "LS" },
 ];
 
-// statuses that lock the UI
-const LOCK_STATUSES = new Set([1]); // add 2 if "approved" should also lock
+// statuses that lock the UI (only lock when approved/rejected)
+const LOCK_STATUSES = new Set([3, 4]); // 3 = approved, 4 = rejected
 
 function MPSReport() {
   const [openPopup, setOpenPopup] = useState(false);
@@ -88,7 +88,13 @@ function MPSReport() {
         const r = await fetch(`${API_BASE}/mps/submissions/${SUBMISSION_ID}`, {
           credentials: "include",
         });
-        if (!r.ok) return;
+        if (!r.ok) {
+          console.error(`Failed to fetch MPS submission ${SUBMISSION_ID}:`, r.status);
+          if (r.status === 404) {
+            setSaveMsg("Error: Submission not found. Please check if the submission ID is correct or create a new assignment.");
+          }
+          return;
+        }
         const json = await r.json();
 
         if (typeof json?.status !== "undefined") setStatus(json.status);
@@ -109,7 +115,9 @@ function MPSReport() {
           });
           setData(next);
         }
-      } catch {}
+      } catch (err) {
+        console.error("Error loading MPS submission:", err);
+      }
     })();
   }, []);
 
@@ -238,6 +246,45 @@ function MPSReport() {
       }
       const json = await res.json();
       setSaveMsg("Saved successfully.");
+
+      // if server returns updated status after save/submit, reflect it
+      if (typeof json?.status !== "undefined") setStatus(json.status);
+
+      // RE-LOCK after successful save/submit
+      setEditOverride(false);
+    } catch (err) {
+      setSaveMsg(`Error: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // New function to submit the report to coordinator (change status to submitted)
+  const submitToCoordinator = async () => {
+    if (isDisabled) {
+      setSaveMsg("This submission is locked and cannot be changed.");
+      return;
+    }
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const body = { 
+        rows: toRows(), 
+        totals: toTotals(),
+        status: 2 // Submitted status
+      };
+      const res = await fetch(`${API_BASE}/mps/submissions/${SUBMISSION_ID}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || `HTTP ${res.status}`);
+      }
+      const json = await res.json();
+      setSaveMsg("Report submitted to coordinator successfully!");
 
       // if server returns updated status after save/submit, reflect it
       if (typeof json?.status !== "undefined") setStatus(json.status);
@@ -474,8 +521,8 @@ function MPSReport() {
               <button type="button" disabled={saving || isDisabled} onClick={submitMPS}>
                 {saving ? "Saving..." : "Save as Draft"}
               </button>
-              <button type="button" disabled={saving || isDisabled} onClick={submitMPS}>
-                {saving ? "Submitting..." : "Submit"}
+              <button type="button" disabled={saving || isDisabled} onClick={submitToCoordinator} className="submit-button">
+                {saving ? "Submitting..." : "Submit to Coordinator"}
               </button>
               <button type="button" onClick={handleClear}>
                 Clear Table

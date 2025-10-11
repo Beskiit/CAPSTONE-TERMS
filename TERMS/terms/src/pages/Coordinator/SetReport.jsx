@@ -7,7 +7,7 @@ import Laempl from "../../assets/templates/LAEMPL.png";
 import AccomplishmentReport from "../../assets/templates/accomplishment-report.png";
 //import MpsTemplate from "../../assets/templates/mps.png";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
 
 // Preview mapping (category_id → sub_category_id → image)
 const TEMPLATE_MAP = {
@@ -20,6 +20,7 @@ function SetReport() {
   const [user, setUser] = useState(null);
   const role = (user?.role || "").toLowerCase();
   const isCoordinator = role === "coordinator";
+  const isPrincipal = role === "principal";
 
   const [users, setUsers] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -30,6 +31,7 @@ function SetReport() {
   const [selectedCategory, setSelectedCategory] = useState("");
   const [selectedSubCategory, setSelectedSubCategory] = useState("");
   const [selectedTeacher, setSelectedTeacher] = useState("");
+  const [selectedTeachers, setSelectedTeachers] = useState([]); // For multiple teacher selection
 
   const [startDate, setStartDate] = useState("");
   const [dueDate, setDueDate] = useState("");
@@ -39,6 +41,11 @@ function SetReport() {
   const [imgLoading, setImgLoading] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  
+  // New state for workflow management
+  const [workflowType, setWorkflowType] = useState("direct"); // "direct" or "coordinated"
+  const [selectedCoordinator, setSelectedCoordinator] = useState("");
+  const [coordinators, setCoordinators] = useState([]);
 
   // Preview image resolver
   const previewSrc = useMemo(() => {
@@ -66,18 +73,35 @@ function SetReport() {
 
   // ✅ Load teachers (users)
   useEffect(() => {
-  const fetchTeachers = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/users/teachers`, { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch teachers");
-      const data = await res.json(); // [{ user_id, name }]
-      setUsers(data);
-    } catch (err) {
-      console.error(err);
+    const fetchTeachers = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/users/teachers`, { credentials: "include" });
+        if (!res.ok) throw new Error("Failed to fetch teachers");
+        const data = await res.json(); // [{ user_id, name }]
+        setUsers(data);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    fetchTeachers();
+  }, [API_BASE]);
+
+  // ✅ Load coordinators (for principals to assign through coordinators)
+  useEffect(() => {
+    const fetchCoordinators = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/users/coordinators`, { credentials: "include" });
+        if (!res.ok) throw new Error("Failed to fetch coordinators");
+        const data = await res.json(); // [{ user_id, name }]
+        setCoordinators(data);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    if (isPrincipal) {
+      fetchCoordinators();
     }
-  };
-  fetchTeachers();
-}, [API_BASE]);
+  }, [API_BASE, isPrincipal]);
 
 
   // ✅ Load categories
@@ -135,94 +159,118 @@ function detectReportType(subCategories, selectedSubCategoryId) {
 }
 
   // Handle form submit → connect to giveReport
- // --- REPLACE YOUR handleSubmit WITH THIS ---
-const handleSubmit = async (e) => {
-  e.preventDefault();
+  // --- ENHANCED handleSubmit FOR BOTH WORKFLOW TYPES ---
+  const handleSubmit = async (e) => {
+    e.preventDefault();
 
-  // quick form guardrails
-  if (!selectedCategory || !selectedSubCategory || !selectedTeacher || !dueDate) {
-    alert("Please complete Category, Sub-Category, Teacher, and Due Date.");
-    return;
-  }
-
-  // detect report type from the chosen sub-category
-  const reportType = detectReportType(subCategories, selectedSubCategory);
-
-  // map the attempts picker to number_of_submission
-  // (blank -> "unlimited" so backend auto-assigns next slot)
-  const numberValue =
-    attempts === "" ? "unlimited" : isNaN(Number(attempts)) ? attempts : Number(attempts);
-
-  // shared payload fields
-  const base = {
-    category_id: Number(selectedCategory),
-    sub_category_id: Number(selectedSubCategory),
-    submitted_by: Number(selectedTeacher), // single teacher
-    quarter: 1,
-    year: 1,
-    from_date: startDate || null,
-    to_date: dueDate,
-    instruction,
-    is_given: 1,
-    is_archived: 0,
-    allow_late: allowLate ? 1 : 0,
-  };
-
-  // choose endpoint & payload by type
-  let endpoint = "";
-  let body = {};
-  const fallbackTitle =
-    (title && title.trim()) ||
-    (reportType === "laempl" ? "LAEMPL Report" : reportType === "mps" ? "MPS Report" : "Report");
-
-  if (reportType === "laempl") {
-    endpoint = `${API_BASE}/reports/laempl`; // adjust if your backend path differs
-    body = {
-      ...base,
-      title: fallbackTitle,
-      grade: 1, // hardcoded for now; add a UI field later if needed
-      number_of_submission: numberValue,
-    };
-  } else if (reportType === "mps") {
-    endpoint = `${API_BASE}/mps/give`; // adjust if your backend path differs
-    body = {
-      ...base,
-      title: fallbackTitle,
-      grade: 1,
-      number_of_submission: numberValue,
-    };
-  } else {
-    // generic (schema-based) assign
-    endpoint = `${API_BASE}/reports/give`;
-    body = {
-      ...base,
-      title: fallbackTitle,
-      field_definitions: [], // add if you use dynamic fields
-      number_of_submission: numberValue,
-    };
-  }
-
-  try {
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      const errText = await res.text();
-      alert("Failed to set report: " + errText);
+    // Enhanced form validation based on workflow type
+    if (!selectedCategory || !selectedSubCategory || !dueDate) {
+      alert("Please complete Category, Sub-Category, and Due Date.");
       return;
     }
 
-    const data = await res.json();
-    alert(`Report assigned successfully! ID: ${data.report_assignment_id ?? "(created)"}`);
-  } catch (err) {
-    console.error("Error submitting report:", err);
-    alert("Error submitting report. Check console.");
-  }
-};
+    // Validate teacher selection based on workflow
+    if (workflowType === "direct") {
+      if (!selectedTeacher && selectedTeachers.length === 0) {
+        alert("Please select at least one teacher.");
+        return;
+      }
+    } else if (workflowType === "coordinated") {
+      if (!selectedCoordinator) {
+        alert("Please select a coordinator for the coordinated workflow.");
+        return;
+      }
+      if (!selectedTeacher && selectedTeachers.length === 0) {
+        alert("Please select at least one teacher.");
+        return;
+      }
+    }
+
+    // detect report type from the chosen sub-category
+    const reportType = detectReportType(subCategories, selectedSubCategory);
+
+    // map the attempts picker to number_of_submission
+    const numberValue =
+      attempts === "" ? "unlimited" : isNaN(Number(attempts)) ? attempts : Number(attempts);
+
+    // Determine recipients based on workflow type
+    const recipients = selectedTeachers.length > 0 ? selectedTeachers : [selectedTeacher];
+    const givenBy = workflowType === "coordinated" ? Number(selectedCoordinator) : user.user_id;
+
+    // shared payload fields
+    const base = {
+      category_id: Number(selectedCategory),
+      sub_category_id: Number(selectedSubCategory),
+      given_by: givenBy,
+      assignees: recipients.map(Number), // Multiple teachers
+      quarter: 1,
+      year: 1,
+      from_date: startDate || null,
+      to_date: dueDate,
+      instruction,
+      is_given: 1,
+      is_archived: 0,
+      allow_late: allowLate ? 1 : 0,
+    };
+
+    // choose endpoint & payload by type
+    let endpoint = "";
+    let body = {};
+    const fallbackTitle =
+      (title && title.trim()) ||
+      (reportType === "laempl" ? "LAEMPL Report" : reportType === "mps" ? "MPS Report" : "Report");
+
+    if (reportType === "laempl") {
+      endpoint = `${API_BASE}/reports/laempl`;
+      body = {
+        ...base,
+        title: fallbackTitle,
+        grade: 1,
+        number_of_submission: numberValue,
+      };
+    } else if (reportType === "mps") {
+      endpoint = `${API_BASE}/mps/give`;
+      body = {
+        ...base,
+        title: fallbackTitle,
+        grade: 1,
+        number_of_submission: numberValue,
+      };
+    } else {
+      // generic (schema-based) assign
+      endpoint = `${API_BASE}/reports/give`;
+      body = {
+        ...base,
+        title: fallbackTitle,
+        field_definitions: [],
+        number_of_submission: numberValue,
+      };
+    }
+
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        alert("Failed to set report: " + errText);
+        return;
+      }
+
+      const data = await res.json();
+      const workflowMessage = workflowType === "coordinated" 
+        ? "Report assigned to coordinator for distribution to teachers!" 
+        : "Report assigned directly to teachers!";
+      alert(`${workflowMessage} ID: ${data.report_assignment_id ?? "(created)"}`);
+    } catch (err) {
+      console.error("Error submitting report:", err);
+      alert("Error submitting report. Check console.");
+    }
+  };
 
   return (
     <>

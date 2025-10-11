@@ -120,41 +120,27 @@ function CalendarComponent() {
     );
 }
 
-function DeadlineComponent(){
-    const deadlines = [
-        {
-            id: 1,
-            title: "Quarterly Assessment Report",
-            dueDate: "May 06, 2025",
-            dueTime: "7:00 PM"
-        },
-        {
-            id: 2,
-            title: "Final Grades Submission",
-            dueDate: "May 15, 2025",
-            dueTime: "11:59 PM"
-        },
-        {
-            id: 3,
-            title: "Parent-Teacher Meeting",
-            dueDate: "May 20, 2025",
-            dueTime: "3:00 PM"
-        }
-    ];
+function DeadlineComponent({ deadlines = [] }){
+    // The API already filters for upcoming deadlines, so we don't need to filter again
+    const filteredDeadlines = deadlines;
     return(
     <>
     <div className="deadline-component">
             <h4>Upcoming Deadlines</h4>
             <hr />
             <div className="deadline-container">
-                {deadlines.map((deadline) => (
-                    <div key={deadline.id} className="deadline-item">
-                        <p className="deadline-title">{deadline.title}</p>
-                        <div className="deadline-details">
-                            <p>Due: {deadline.dueDate} <span>{deadline.dueTime}</span></p>
+                {Array.isArray(filteredDeadlines) && filteredDeadlines.length > 0 ? (
+                    filteredDeadlines.map((deadline) => (
+                        <div key={deadline.id || deadline.submission_id || deadline.report_assignment_id} className="deadline-item">
+                            <p className="deadline-title">{deadline.title}</p>
+                            <div className="deadline-details">
+                                <p>Due: {deadline.dueDate || deadline.to_date} <span>{deadline.dueTime}</span></p>
+                            </div>
                         </div>
-                    </div>
-                ))}
+                    ))
+                ) : (
+                    <p style={{ opacity: 0.8 }}>No upcoming deadlines 🎉</p>
+                )}
             </div>
         </div>
     </>
