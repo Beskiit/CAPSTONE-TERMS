@@ -16,7 +16,7 @@ router.get('/google/callback',
   (req, res) => {
     // Successful authentication, redirect to frontend with user info
     const user = req.user;
-    const frontendURL = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const frontendURL = process.env.FRONTEND_URL || 'https://your-frontend-domain.com';
     
     // Redirect to frontend with user role to determine which dashboard to show
     res.redirect(`${frontendURL}/dashboard?role=${user.role}&user=${encodeURIComponent(JSON.stringify({

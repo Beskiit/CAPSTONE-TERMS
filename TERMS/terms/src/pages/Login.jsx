@@ -5,7 +5,7 @@ import depedLogo from '../assets/deped-logo.png';
 const Login = () => {
   const handleGoogleLogin = () => {
     // Redirect to backend OAuth route
-    const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:5000';
+    const apiBase = import.meta.env.VITE_API_BASE || 'https://terms-api.kiri8tives.com';
     window.location.href = `${apiBase.replace(/\/$/, '')}/auth/google`;
   };
 

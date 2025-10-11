@@ -13,7 +13,7 @@ export default defineConfig({
     // Optional: proxy so you can call /api without CORS in dev:
     proxy: {
       '/api': {
-        target: 'http://localhost:5000',
+        target: 'https://terms-api.kiri8tives.com',
         changeOrigin: true,
         rewrite: p => p.replace(/^\/api/, '')
       }

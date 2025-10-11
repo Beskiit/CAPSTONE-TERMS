@@ -22,7 +22,7 @@ export const AuthProvider = ({ children }) => {
 
   const checkAuthStatus = async () => {
     try {
-      const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:5000';
+      const apiBase = import.meta.env.VITE_API_BASE || 'https://terms-api.kiri8tives.com';
       const response = await fetch(`${apiBase.replace(/\/$/, '')}/auth/me`, {
         credentials: 'include',
         headers: {
@@ -49,7 +49,7 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     try {
-      const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:5000';
+      const apiBase = import.meta.env.VITE_API_BASE || 'https://terms-api.kiri8tives.com';
       await fetch(`${apiBase.replace(/\/$/, '')}/auth/logout`, {
         method: 'POST',
         credentials: 'include',

@@ -14,7 +14,7 @@
 2. Click "Create Credentials" > "OAuth 2.0 Client ID"
 3. Choose "Web application"
 4. Add these URLs to authorized redirect URIs:
-   - `http://localhost:5000/auth/google/callback` (for development)
+   - `https://terms-api.kiri8tives.com/auth/google/callback` (for production)
    - `https://yourdomain.com/auth/google/callback` (for production)
 5. Save and copy the Client ID and Client Secret
 

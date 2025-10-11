@@ -9,7 +9,7 @@ import Submitted from '../../assets/submitted.svg';
 import Pending from '../../assets/pending.svg';
 import Approved from '../../assets/approved.svg';
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
+const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
 
 function DashboardCoordinator() {
   const [user, setUser] = useState(null);
