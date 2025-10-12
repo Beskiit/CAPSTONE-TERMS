@@ -229,13 +229,15 @@ function detectReportType(subCategories, selectedSubCategoryId) {
         number_of_submission: numberValue,
       };
     } else if (reportType === "mps") {
-      endpoint = `${API_BASE}/mps/give`;
-      body = {
-        ...base,
-        title: fallbackTitle,
-        grade: 1,
-        number_of_submission: numberValue,
-      };
+  // Use the generic assigner; MPS rows will be filled later by the teacher UI
+  endpoint = `${API_BASE}/reports/give`;
+  body = {
+    ...base,
+    title: fallbackTitle,
+    field_definitions: [],            // generic payload
+    number_of_submission: numberValue,
+  };
+
     } else {
       // generic (schema-based) assign
       endpoint = `${API_BASE}/reports/give`;

@@ -65,8 +65,8 @@ export const getReportsByUser = (req, res) => {
 
   db.query(sql, [id], (err, rows) => {
     if (err) return res.status(500).send('Database error: ' + err);
-    if (!rows.length) return res.status(404).send('No assigned reports found for this user.');
-    res.json(rows);
+    // Return empty array instead of 404 when no reports found
+    res.json(rows || []);
   });
 };
 
@@ -118,8 +118,8 @@ export const getReportsAssignedByUser = (req, res) => {
 
   db.query(sql, [id], (err, rows) => {
     if (err) return res.status(500).send('Database error: ' + err);
-    if (!rows.length) return res.status(404).send('No assigned reports found for this coordinator.');
-    res.json(rows);
+    // Return empty array instead of 404 when no reports found
+    res.json(rows || []);
   });
 };
 
@@ -147,10 +147,16 @@ export const getReport = (req, res) => {
 };
 // POST (Give Report) + create blank submission(s) with form schema
 export const giveReport = (req, res) => {
+  // Get the authenticated user's ID
+  const authenticatedUserId = req.user?.user_id;
+  if (!authenticatedUserId) {
+    return res.status(401).send('Authentication required');
+  }
+
   const {
     category_id,
     sub_category_id,                 // optional
-    given_by = 5,
+    given_by = authenticatedUserId,
     quarter,
     year,
     from_date,                       // optional override
@@ -340,10 +346,16 @@ export const giveReport = (req, res) => {
 };
 // POST /laempl/assign  (Give LAEMPL Report) — FIXED
 export const giveLAEMPLReport = (req, res) => {
+  // Get the authenticated user's ID
+  const authenticatedUserId = req.user?.user_id;
+  if (!authenticatedUserId) {
+    return res.status(401).send('Authentication required');
+  }
+
   const {
     category_id,              // required
     sub_category_id,          // optional
-    given_by = 5,
+    given_by = authenticatedUserId,
     quarter,                  // required
     year,                     // required
     from_date,                // optional (YYYY-MM-DD)

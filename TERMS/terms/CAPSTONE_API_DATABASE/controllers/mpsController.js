@@ -22,10 +22,16 @@ function buildInitialMpsFields(grade=1) {
  * linking each submission via report_assignment_id (FK).
  */
 export const giveMPSReport = (req, res) => {
+  // Get the authenticated user's ID
+  const authenticatedUserId = req.user?.user_id;
+  if (!authenticatedUserId) {
+    return res.status(401).send('Authentication required');
+  }
+
   const {
     category_id,                     // required
     sub_category_id,                 // optional (keep if your UI/categories use it)
-    given_by = 5,
+    given_by = authenticatedUserId,
     quarter,                         // required
     year,                            // required
     from_date,                       // optional (YYYY-MM-DD)

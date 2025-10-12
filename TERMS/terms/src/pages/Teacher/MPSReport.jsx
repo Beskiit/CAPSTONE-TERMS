@@ -6,7 +6,20 @@ import "./LAEMPLReport.css";
 import "../../components/shared/StatusBadges.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
-const SUBMISSION_ID = new URLSearchParams(window.location.search).get("id") || 1;
+// read id from URL, but don't coerce null → 0
+const idParam = new URLSearchParams(window.location.search).get("id");
+// --- robust id reader: works with ?id=, #...&id=, or anywhere in href ---
+function getSubmissionId() {
+  const sources = [window.location.search, window.location.hash, window.location.href];
+  for (const s of sources) {
+    if (!s) continue;
+    const m = s.match(/[?&#]id=(\d+)/); // positive integer
+    if (m) return parseInt(m[1], 10);
+  }
+  return null;
+}
+
+const SUBMISSION_ID = getSubmissionId();
 
 const TRAITS_MPS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
 
@@ -69,6 +82,11 @@ function MPSReport() {
   const [openSec, setOpenSec] = useState(false);
 
   const [user, setUser] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -84,10 +102,15 @@ function MPSReport() {
   // load current submission to get status and hydrate fields (if present)
   useEffect(() => {
     (async () => {
+      if (SUBMISSION_ID == null) {
+        setSaveMsg("Error: Missing or invalid submission id in URL.");
+        return;
+      }
       try {
-        const r = await fetch(`${API_BASE}/mps/submissions/${SUBMISSION_ID}`, {
-          credentials: "include",
-        });
+        const r = await fetch(
+          `${API_BASE}/submissions/mps/submissions/${SUBMISSION_ID}`,
+          { credentials: "include" }
+        );
         if (!r.ok) {
           console.error(`Failed to fetch MPS submission ${SUBMISSION_ID}:`, r.status);
           if (r.status === 404) {
@@ -119,7 +142,7 @@ function MPSReport() {
         console.error("Error loading MPS submission:", err);
       }
     })();
-  }, []);
+  }, []); // runs once
 
   // ---- serialize payload helpers
   const toRows = () =>
@@ -136,14 +159,82 @@ function MPSReport() {
     Object.fromEntries(COLS_MPS.map(col => [col.key, Number(totals[col.key] || 0)]));
 
   // ---- save/submit (status handled server-side; this just sends fields)
-  const [saving, setSaving] = useState(false);
-  const [saveMsg, setSaveMsg] = useState(null);
-  // under: const [saveMsg, setSaveMsg] = useState(null);
-  const [importing, setImporting] = useState(false);
-  const [importMsg, setImportMsg] = useState(null);
-  const fileInputRef = useRef(null);
+  const submitMPS = async () => {
+    if (isDisabled) {
+      setSaveMsg("This submission is locked and cannot be changed.");
+      return;
+    }
+    if (SUBMISSION_ID == null) {
+      setSaveMsg("Error: Missing submission id.");
+      return;
+    }
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const body = { rows: toRows(), totals: toTotals() };
+      const res = await fetch(
+        `${API_BASE}/submissions/mps/submissions/${SUBMISSION_ID}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(body),
+        }
+      );
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || `HTTP ${res.status}`);
+      }
+      const json = await res.json();
+      setSaveMsg("Saved successfully.");
+      if (typeof json?.status !== "undefined") setStatus(json.status);
+      setEditOverride(false);
+    } catch (err) {
+      setSaveMsg(`Error: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
 
-  // tiny CSV parser that handles quotes and commas
+  // submit the report to coordinator (change status to submitted)
+  const submitToCoordinator = async () => {
+    if (isDisabled) {
+      setSaveMsg("This submission is locked and cannot be changed.");
+      return;
+    }
+    if (SUBMISSION_ID == null) {
+      setSaveMsg("Error: Missing submission id.");
+      return;
+    }
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const body = { rows: toRows(), totals: toTotals(), status: 2 };
+      const res = await fetch(
+        `${API_BASE}/submissions/mps/submissions/${SUBMISSION_ID}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(body),
+        }
+      );
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || `HTTP ${res.status}`);
+      }
+      const json = await res.json();
+      setSaveMsg("Report submitted to coordinator successfully!");
+      if (typeof json?.status !== "undefined") setStatus(json.status);
+      setEditOverride(false);
+    } catch (err) {
+      setSaveMsg(`Error: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ---- IMPORT helpers
   function csvToRows(text) {
     const rows = [];
     let row = [], cell = "", inQuotes = false;
@@ -161,36 +252,27 @@ function MPSReport() {
         else { cell += c; }
       }
     }
-    // flush last cell/row
     if (cell.length > 0 || row.length) { row.push(cell); rows.push(row); }
     return rows;
   }
 
-  // map header labels to column keys
   const LABEL_TO_KEY = Object.fromEntries(COLS_MPS.map(c => [c.label.toLowerCase(), c.key]));
 
-  // takes CSV text, returns { nextData, importedCount }
   function parseMPSCsv(text) {
     const rows = csvToRows(text).filter(r => r.some(v => String(v).trim() !== ""));
     if (!rows.length) throw new Error("CSV is empty.");
-
-    // expect first header cell to be "Trait"
     const header = rows[0].map(h => String(h || "").trim());
     const traitIdx = header.findIndex(h => h.toLowerCase() === "trait");
     if (traitIdx === -1) throw new Error('Header must include "Trait".');
 
-    // build column index map (by label)
     const colIndexByKey = {};
     header.forEach((h, i) => {
       const key = LABEL_TO_KEY[h.toLowerCase()];
       if (key) colIndexByKey[key] = i;
     });
-
-    // at least one known column needed
     const knownCols = Object.keys(colIndexByKey);
     if (!knownCols.length) throw new Error("No known columns found in header.");
 
-    // start from a blank sheet
     const next = Object.fromEntries(
       TRAITS_MPS.map(t => [t, Object.fromEntries(COLS_MPS.map(c => [c.key, ""]))])
     );
@@ -200,105 +282,28 @@ function MPSReport() {
       const row = rows[r];
       const firstCell = String(row[traitIdx] || "").trim();
       if (!firstCell) continue;
-      if (firstCell.toLowerCase() === "total") break; // ignore totals row
-      if (!TRAITS_MPS.includes(firstCell)) continue;      // ignore unknown trait rows
+      if (firstCell.toLowerCase() === "total") break;
+      if (!TRAITS_MPS.includes(firstCell)) continue;
 
       knownCols.forEach(key => {
         const idx = colIndexByKey[key];
         const raw = row[idx] ?? "";
         const val = String(raw).trim();
-        // keep blank as "", numeric strings cleaned; UI already strips non-numeric
         next[firstCell][key] = val;
       });
       imported++;
     }
-
     return { nextData: next, importedCount: imported };
   }
 
   async function importFromFile(file) {
     if (!file) throw new Error("No file selected.");
-    if (!/\.csv$/i.test(file.name)) {
-      throw new Error("Please upload a .csv file.");
-    }
+    if (!/\.csv$/i.test(file.name)) throw new Error("Please upload a .csv file.");
     const text = await file.text();
     return parseMPSCsv(text);
   }
 
-  const submitMPS = async () => {
-    if (isDisabled) {
-      setSaveMsg("This submission is locked and cannot be changed.");
-      return;
-    }
-    setSaving(true);
-    setSaveMsg(null);
-    try {
-      const body = { rows: toRows(), totals: toTotals() };
-      const res = await fetch(`${API_BASE}/mps/submissions/${SUBMISSION_ID}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt || `HTTP ${res.status}`);
-      }
-      const json = await res.json();
-      setSaveMsg("Saved successfully.");
-
-      // if server returns updated status after save/submit, reflect it
-      if (typeof json?.status !== "undefined") setStatus(json.status);
-
-      // RE-LOCK after successful save/submit
-      setEditOverride(false);
-    } catch (err) {
-      setSaveMsg(`Error: ${err.message}`);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // New function to submit the report to coordinator (change status to submitted)
-  const submitToCoordinator = async () => {
-    if (isDisabled) {
-      setSaveMsg("This submission is locked and cannot be changed.");
-      return;
-    }
-    setSaving(true);
-    setSaveMsg(null);
-    try {
-      const body = { 
-        rows: toRows(), 
-        totals: toTotals(),
-        status: 2 // Submitted status
-      };
-      const res = await fetch(`${API_BASE}/mps/submissions/${SUBMISSION_ID}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt || `HTTP ${res.status}`);
-      }
-      const json = await res.json();
-      setSaveMsg("Report submitted to coordinator successfully!");
-
-      // if server returns updated status after save/submit, reflect it
-      if (typeof json?.status !== "undefined") setStatus(json.status);
-
-      // RE-LOCK after successful save/submit
-      setEditOverride(false);
-    } catch (err) {
-      setSaveMsg(`Error: ${err.message}`);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // ---- EXPORT: CSV
+  // EXPORT helpers
   const downloadBlob = (blob, filename) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -327,6 +332,26 @@ function MPSReport() {
     return lines;
   };
 
+  // ✅ ADDED: Generate Template
+  const handleGenerateTemplate = () => {
+    const header = ["Trait", ...COLS_MPS.map(c => c.label)];
+    const blank = Object.fromEntries(
+      TRAITS_MPS.map(t => [t, Object.fromEntries(COLS_MPS.map(c => [c.key, ""]))])
+    );
+    const rows = TRAITS_MPS.map(trait => [trait, ...COLS_MPS.map(c => blank[trait][c.key])]);
+    const csv = [header, ...rows].map(r => r.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "MPS_Template.csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   const handleExport = () => {
     const csv = toCSV();
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -336,22 +361,10 @@ function MPSReport() {
     downloadBlob(blob, fname);
   };
 
-  // blank template export
-  const handleGenerateTemplate = () => {
-    const blank = Object.fromEntries(
-      TRAITS_MPS.map(t => [t, Object.fromEntries(COLS_MPS.map(c => [c.key, ""]))])
-    );
-    const header = ["Trait", ...COLS_MPS.map(c => c.label)];
-    const rows = TRAITS_MPS.map(trait => [trait, ...COLS_MPS.map(c => blank[trait][c.key])]);
-    const csv = [header, ...rows].map(r => r.join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    downloadBlob(blob, "MPS_Template.csv");
-  };
-
   // CLEAR TABLE — also enable edit override
   const handleClear = () => {
-    touchedRef.current = true;     // prevent late hydration overwrites
-    setEditOverride(true);         // allow editing even if locked
+    touchedRef.current = true;
+    setEditOverride(true);
     const blank = Object.fromEntries(
       TRAITS_MPS.map(t => [t, Object.fromEntries(COLS_MPS.map(c => [c.key, ""]))])
     );
@@ -374,12 +387,7 @@ function MPSReport() {
           <div className="content">
             <div className="buttons">
               <button onClick={handleGenerateTemplate}>Generate Template</button>
-
-              {/* Import is disabled when inputs are disabled */}
-              <button onClick={() => setOpenPopup(true)}>
-                Import File
-              </button>
-
+              <button onClick={() => setOpenPopup(true)}>Import File</button>
               {openPopup && (
                 <div className="modal-overlay">
                   <div className="import-popup">
@@ -392,21 +400,16 @@ function MPSReport() {
                       className="import-form"
                       onSubmit={async (e) => {
                         e.preventDefault();
-                        if (isDisabled) return; // should be disabled by button anyway
+                        if (isDisabled) return;
                         try {
                           setImporting(true);
                           setImportMsg(null);
                           const file = fileInputRef.current?.files?.[0];
                           const { nextData, importedCount } = await importFromFile(file);
-
-                          // mark as user-edited to prevent hydration overwrite
                           touchedRef.current = true;
-                          // allow editing even if backend locked (since user took an explicit action)
                           setEditOverride(true);
-
                           setData(nextData);
                           setImportMsg(`Imported ${importedCount} row(s).`);
-                          // auto-close after a short delay (optional)
                           setTimeout(() => setOpenPopup(false), 600);
                         } catch (err) {
                           setImportMsg(err.message || "Import failed.");
@@ -415,30 +418,17 @@ function MPSReport() {
                         }
                       }}
                     >
-                      <label htmlFor="fileInput" className="file-upload-label">
-                        Click here to upload a file
-                      </label>
-                      <input
-                        id="fileInput"
-                        type="file"
-                        accept=".csv"
-                        ref={fileInputRef}
-                        style={{ display: "none" }}
-                        onChange={() => setImportMsg(null)}
-                      />
-                      <button type="submit" disabled={isDisabled || importing}>
-                        {importing ? "Uploading..." : "Upload"}
-                      </button>
+                      <label htmlFor="fileInput" className="file-upload-label">Click here to upload a file</label>
+                      <input id="fileInput" type="file" accept=".csv" ref={fileInputRef} style={{ display: "none" }} onChange={() => setImportMsg(null)} />
+                      <button type="submit" disabled={isDisabled || importing}>{importing ? "Uploading..." : "Upload"}</button>
                       {importMsg && <p className="import-hint">{importMsg}</p>}
                       <p className="import-hint">
-                        Expected CSV format: first row is headers with <b>Trait</b>, then any of{" "}
-                        {COLS_MPS.map(c => c.label).join(", ")}. A final <b>Total</b> row (optional) will be ignored.
+                        Expected CSV format: first row is headers with <b>Trait</b>, then any of {COLS_MPS.map(c => c.label).join(", ")}. A final <b>Total</b> row (optional) will be ignored.
                       </p>
                     </form>
                   </div>
                 </div>
               )}
-
               <button onClick={handleExport}>Export</button>
             </div>
 
@@ -512,7 +502,7 @@ function MPSReport() {
                       <td key={col.key} className="total-cell">{totals[col.key]}</td>
                     ))}
                   </tr>
-                </tbody> 
+                </tbody>
               </table>
             </div>
 
@@ -524,9 +514,7 @@ function MPSReport() {
               <button type="button" disabled={saving || isDisabled} onClick={submitToCoordinator} className="submit-button">
                 {saving ? "Submitting..." : "Submit to Coordinator"}
               </button>
-              <button type="button" onClick={handleClear}>
-                Clear Table
-              </button>
+              <button type="button" onClick={handleClear}>Clear Table</button>
             </div>
             {saveMsg && <p className="save-hint">{saveMsg}</p>}
           </div>

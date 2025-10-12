@@ -5,12 +5,13 @@ import {
   getMPSSubmission,
   patchMPSSubmission
 } from "../controllers/mpsController.js";
+import { requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
 router.get("/health", (_req, res) => res.json({ ok: true, scope: "mps" }));
 
 // Admin/Coordinator creates the assignment + blank submissions
-router.post('/give', giveMPSReport);
+router.post('/give', requireAuth, giveMPSReport);
 
 // Teacher loads one submission (by id shown in the UI)
 router.get('/submissions/:id', getMPSSubmission);

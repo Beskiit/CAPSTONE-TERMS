@@ -3,32 +3,35 @@ import {
   getSubmissions,
   getSubmissionsByUser,
   getSubmission,
-  getLAEMPLBySubmissionId,   // <-- will add below
+  getLAEMPLBySubmissionId,
   patchLAEMPLBySubmissionId,
   createSubmission,
   submitAnswers,
   deleteSubmission,
   getMySubmissions,
-} from "../controllers/submissionController.js";  // <-- FIXED path
-
+  patchMPSBySubmissionId,          // ⬅️ NEW
+} from "../controllers/submissionController.js";
 
 const router = express.Router();
-// routes/submissionRoutes.js
 
+// List + by user
 router.get("/", getSubmissions);
 router.get("/user/:id", getSubmissionsByUser);
 
-// ORDER MATTERS:
-router.get("/laempl/:id", getLAEMPLBySubmissionId);   // <-- put before
+// --- SPECIFIC ROUTES MUST COME BEFORE "/:id" ---
+// LAEMPL
+router.get("/laempl/:id", getLAEMPLBySubmissionId);
 router.patch("/laempl/:id", patchLAEMPLBySubmissionId);
 
+// MPS (match your front-end calls)
+router.get("/mps/submissions/:id", getSubmission);          // reuse generic getter
+router.patch("/mps/submissions/:id", patchMPSBySubmissionId);
+
+// Generic
 router.get("/:id", getSubmission);
 router.patch("/:id/answers", submitAnswers);
 router.post("/", createSubmission);
 router.delete("/:id", deleteSubmission);
-
 router.get("/my/:id", getMySubmissions);
 
-
 export default router;
-

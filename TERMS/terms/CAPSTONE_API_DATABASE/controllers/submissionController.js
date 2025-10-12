@@ -325,6 +325,100 @@ export const patchLAEMPLBySubmissionId = (req, res) => {
   });
 };
 
+export const patchMPSBySubmissionId = (req, res) => {
+  const { id } = req.params; // submission_id
+
+  // MPS schema
+  const TRAITS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
+  const COLS = [
+    { key: "m" }, { key: "f" }, { key: "total" },
+    { key: "mean" }, { key: "median" }, { key: "pl" },
+    { key: "mps" }, { key: "sd" }, { key: "target" },
+    { key: "hs" }, { key: "ls" },
+  ];
+
+  const num = (v) => {
+    if (v === "" || v == null) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const body = req.body || {};
+  const requestedStatus = body.status; // optional
+
+  // normalize incoming rows
+  const rowsInput = body.rows ?? body.data ?? [];
+  const rowsNormalized = Array.isArray(rowsInput) ? rowsInput : [];
+
+  const cleanRows = TRAITS.map(trait => {
+    const src = rowsNormalized.find(r => (r?.trait || "").toLowerCase() === trait.toLowerCase()) || {};
+    const out = { trait };
+    COLS.forEach(c => { out[c.key] = num(src[c.key]); });
+    return out;
+  });
+
+  // totals (sum numeric; ignore nulls)
+  const totals = COLS.reduce((acc, c) => {
+    acc[c.key] = cleanRows.reduce((sum, r) => sum + (r[c.key] ?? 0), 0);
+    return acc;
+  }, {});
+
+  // fetch current
+  const selectSql = `SELECT status, fields FROM submission WHERE submission_id = ?`;
+  db.query(selectSql, [id], (selErr, selRes) => {
+    if (selErr) return res.status(500).send('Database error: ' + selErr);
+    if (!selRes.length) return res.status(404).send('Submission not found.');
+
+    const currentStatus = Number(selRes[0].status) || 0;
+
+    let current = {};
+    try {
+      current = typeof selRes[0].fields === 'string'
+        ? JSON.parse(selRes[0].fields)
+        : (selRes[0].fields || {});
+    } catch { current = {}; }
+
+    const nextFields = {
+      type: 'MPS',
+      grade: current.grade ?? 1,
+      rows: cleanRows,
+      totals,
+      meta: { ...(current.meta || {}), updatedAt: new Date().toISOString() },
+    };
+
+    // status transition
+    let statusSql = '';
+    const params = [JSON.stringify(nextFields)];
+    if (Number.isInteger(requestedStatus)) {
+      statusSql = ', status = ?';
+      params.push(requestedStatus);
+    } else if (currentStatus < 2) {
+      statusSql = ', status = 2'; // auto-promote to Submitted on first save
+    }
+
+    const updateSql = `UPDATE submission SET fields = ?, date_submitted = NOW()${statusSql} WHERE submission_id = ?`;
+    params.push(id);
+
+    db.query(updateSql, params, (updErr) => {
+      if (updErr) return res.status(500).send('Update failed: ' + updErr);
+
+      const fetchSql = `
+        SELECT submission_id, category_id, submitted_by, status, number_of_submission,
+               value, DATE_FORMAT(date_submitted, '%m/%d/%Y %H:%i:%s') AS date_submitted, fields
+        FROM submission
+        WHERE submission_id = ?
+      `;
+      db.query(fetchSql, [id], (fErr, fRes) => {
+        if (fErr) return res.status(500).send('Database error: ' + fErr);
+        const out = { ...fRes[0] };
+        try { out.fields = typeof out.fields === 'string' ? JSON.parse(out.fields) : out.fields; } catch {}
+        return res.json(out);
+      });
+    });
+  });
+};
+
+
 
 // DELETE submission
 export const deleteSubmission = (req, res) => {
