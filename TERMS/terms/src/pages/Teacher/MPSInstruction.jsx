@@ -9,8 +9,12 @@ const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives
 
 function MPSInstruction() {
   const navigate = useNavigate();
-  const { state } = useLocation();
-  const assignmentId = state?.id;
+  const { search, state } = useLocation();
+
+  // ✅ always resolve the id, even on hard reloads
+  const qsId = new URLSearchParams(search).get("id");
+  const submissionId = qsId ?? state?.submission_id ?? state?.id;
+
   const title = state?.title;
   const instruction = state?.instruction;
   const fromDate = state?.from_date;
@@ -18,22 +22,16 @@ function MPSInstruction() {
   const attempts = state?.number_of_submission;
   const allowLate = state?.allow_late;
 
-  // user object from backend
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const res = await fetch(`${API_BASE}/auth/me`, {
-          credentials: "include", // ensures cookie/session goes with request
-        });
-        if (!res.ok) {
-          setLoading(false);
-          return; // not logged in
-        }
+        const res = await fetch(`${API_BASE}/auth/me`, { credentials: "include" });
+        if (!res.ok) return;
         const data = await res.json();
-        setUser(data); // <-- includes role, name, email
+        setUser(data);
       } catch (err) {
         console.error("Failed to fetch user:", err);
       } finally {
@@ -43,7 +41,6 @@ function MPSInstruction() {
     fetchUser();
   }, []);
 
-  // ✅ role comes from backend user object
   const role = (user?.role || "").toLowerCase();
   const isTeacher = role === "teacher";
 
@@ -53,11 +50,7 @@ function MPSInstruction() {
     <>
       <Header userText={user ? user.name : "Guest"} />
       <div className="dashboard-container">
-        {isTeacher ? (
-          <Sidebar activeLink="MPS" />
-        ) : (
-          <SidebarCoordinator activeLink="MPS" />
-        )}
+        {isTeacher ? <Sidebar activeLink="MPS" /> : <SidebarCoordinator activeLink="MPS" />}
         <div className="dashboard-content">
           <div className="dashboard-main">
             <h2>MPS</h2>
@@ -67,7 +60,7 @@ function MPSInstruction() {
             <p className="instruction">{instruction || "No instruction provided."}</p>
             <button
               className="instruction-btn"
-              onClick={() => navigate(`/MPSReport?id=${assignmentId || ''}`)}
+              onClick={() => navigate(`/MPSReport?id=${submissionId || ""}`)}
             >
               + Prepare Report
             </button>
@@ -82,7 +75,9 @@ function MPSInstruction() {
           <div className="report-card">
             <h3 className="report-card-header">Submission</h3>
             <p className="report-card-text">Submissions: {attempts ?? "—"}</p>
-            <p className="report-card-text">Allow late submissions: {Number(allowLate) ? "Yes" : "No"}</p>
+            <p className="report-card-text">
+              Allow late submissions: {Number(allowLate) ? "Yes" : "No"}
+            </p>
           </div>
         </div>
       </div>

@@ -5,7 +5,7 @@ import SidebarPrincipal from "../../components/shared/SidebarPrincipal.jsx";
 import "./SetReport.css";
 import Laempl from "../../assets/templates/LAEMPL.png";
 import AccomplishmentReport from "../../assets/templates/accomplishment-report.png";
-//import MpsTemplate from "../../assets/templates/mps.png";
+// import MpsTemplate from "../../assets/templates/mps.png";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
 
@@ -13,7 +13,7 @@ const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.
 const TEMPLATE_MAP = {
   "1": { "10": AccomplishmentReport },
   "2": { "20": Laempl },
-  //"3": { "30": MpsTemplate },
+  // "3": { "30": MpsTemplate },
 };
 
 function SetReport() {
@@ -38,14 +38,15 @@ function SetReport() {
   const [instruction, setInstruction] = useState("");
   const [title, setTitle] = useState("");
 
-  const [imgLoading, setImgLoading] = useState(false);
-  const [imgError, setImgError] = useState(false);
   const [showModal, setShowModal] = useState(false);
-  
-  // New state for workflow management
+
+  // workflow management
   const [workflowType, setWorkflowType] = useState("direct"); // "direct" or "coordinated"
   const [selectedCoordinator, setSelectedCoordinator] = useState("");
   const [coordinators, setCoordinators] = useState([]);
+
+  // NEW: prevent double-submit
+  const [submitting, setSubmitting] = useState(false);
 
   // Preview image resolver
   const previewSrc = useMemo(() => {
@@ -84,7 +85,7 @@ function SetReport() {
       }
     };
     fetchTeachers();
-  }, [API_BASE]);
+  }, []);
 
   // ✅ Load coordinators (for principals to assign through coordinators)
   useEffect(() => {
@@ -101,8 +102,7 @@ function SetReport() {
     if (isPrincipal) {
       fetchCoordinators();
     }
-  }, [API_BASE, isPrincipal]);
-
+  }, [isPrincipal]);
 
   // ✅ Load categories
   useEffect(() => {
@@ -120,136 +120,132 @@ function SetReport() {
   }, []);
 
   // ✅ Load subcategories whenever category changes
-  // load subcategories whenever selectedCategory changes
-useEffect(() => {
-  if (!selectedCategory) {
-    setSubCategories([]);
-    return;
-  }
-  const fetchSubCategories = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/subcategories/${selectedCategory}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      setSubCategories(data); // ✅ data must be [{sub_category_id, sub_category_name}, ...]
-    } catch (err) {
-      console.error("Failed to fetch subcategories:", err);
-    }
-  };
-  fetchSubCategories();
-}, [selectedCategory]);
-
-// --- ADD THIS HELPER ABOVE handleSubmit ---
-// Decide report type using sub-category name (preferred) or known IDs (fallback)
-function detectReportType(subCategories, selectedSubCategoryId) {
-  const sub = subCategories.find(
-    s => String(s.sub_category_id) === String(selectedSubCategoryId)
-  );
-  const name = (sub?.sub_category_name || "").toLowerCase();
-
-  if (name.includes("laempl")) return "laempl";
-  if (name.includes("mps")) return "mps";
-
-  // Optional fallback by ID (adjust to match your DB if you like)
-  const id = Number(selectedSubCategoryId);
-  if ([20].includes(id)) return "laempl"; // e.g., 20 = LAEMPL
-  if ([30].includes(id)) return "mps";    // e.g., 30 = MPS
-
-  return "generic";
-}
-
-  // Handle form submit → connect to giveReport
-  // --- ENHANCED handleSubmit FOR BOTH WORKFLOW TYPES ---
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-
-    // Enhanced form validation based on workflow type
-    if (!selectedCategory || !selectedSubCategory || !dueDate) {
-      alert("Please complete Category, Sub-Category, and Due Date.");
+  useEffect(() => {
+    if (!selectedCategory) {
+      setSubCategories([]);
       return;
     }
-
-    // Validate teacher selection based on workflow
-    if (workflowType === "direct") {
-      if (!selectedTeacher && selectedTeachers.length === 0) {
-        alert("Please select at least one teacher.");
-        return;
+    const fetchSubCategories = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/subcategories/${selectedCategory}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setSubCategories(data); // expects [{sub_category_id, sub_category_name}, ...]
+      } catch (err) {
+        console.error("Failed to fetch subcategories:", err);
       }
-    } else if (workflowType === "coordinated") {
-      if (!selectedCoordinator) {
-        alert("Please select a coordinator for the coordinated workflow.");
-        return;
-      }
-      if (!selectedTeacher && selectedTeachers.length === 0) {
-        alert("Please select at least one teacher.");
-        return;
-      }
-    }
-
-    // detect report type from the chosen sub-category
-    const reportType = detectReportType(subCategories, selectedSubCategory);
-
-    // map the attempts picker to number_of_submission
-    const numberValue =
-      attempts === "" ? "unlimited" : isNaN(Number(attempts)) ? attempts : Number(attempts);
-
-    // Determine recipients based on workflow type
-    const recipients = selectedTeachers.length > 0 ? selectedTeachers : [selectedTeacher];
-    const givenBy = workflowType === "coordinated" ? Number(selectedCoordinator) : user.user_id;
-
-    // shared payload fields
-    const base = {
-      category_id: Number(selectedCategory),
-      sub_category_id: Number(selectedSubCategory),
-      given_by: givenBy,
-      assignees: recipients.map(Number), // Multiple teachers
-      quarter: 1,
-      year: 1,
-      from_date: startDate || null,
-      to_date: dueDate,
-      instruction,
-      is_given: 1,
-      is_archived: 0,
-      allow_late: allowLate ? 1 : 0,
     };
+    fetchSubCategories();
+  }, [selectedCategory]);
 
-    // choose endpoint & payload by type
-    let endpoint = "";
-    let body = {};
-    const fallbackTitle =
-      (title && title.trim()) ||
-      (reportType === "laempl" ? "LAEMPL Report" : reportType === "mps" ? "MPS Report" : "Report");
+  // Decide report type using sub-category name (preferred) or known IDs (fallback)
+  function detectReportType(subCategories, selectedSubCategoryId) {
+    const sub = subCategories.find(
+      (s) => String(s.sub_category_id) === String(selectedSubCategoryId)
+    );
+    const name = (sub?.sub_category_name || "").toLowerCase();
 
-    if (reportType === "laempl") {
-      endpoint = `${API_BASE}/reports/laempl`;
-      body = {
-        ...base,
-        title: fallbackTitle,
-        grade: 1,
-        number_of_submission: numberValue,
-      };
-    } else if (reportType === "mps") {
-  // Use the generic assigner; MPS rows will be filled later by the teacher UI
-  endpoint = `${API_BASE}/reports/give`;
-  body = {
-    ...base,
-    title: fallbackTitle,
-    field_definitions: [],            // generic payload
-    number_of_submission: numberValue,
-  };
+    if (name.includes("laempl")) return "laempl";
+    if (name.includes("mps")) return "mps";
 
-    } else {
-      // generic (schema-based) assign
-      endpoint = `${API_BASE}/reports/give`;
-      body = {
-        ...base,
-        title: fallbackTitle,
-        field_definitions: [],
-        number_of_submission: numberValue,
-      };
-    }
+    // Optional fallback by ID (adjust to match your DB if you like)
+    const id = Number(selectedSubCategoryId);
+    if ([20].includes(id)) return "laempl"; // e.g., 20 = LAEMPL
+    if ([30].includes(id)) return "mps"; // e.g., 30 = MPS
+
+    return "generic";
+  }
+
+  // --- handleSubmit ---
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (submitting) return; // guard against double-click
+    setSubmitting(true);
 
     try {
+      // Basic validation
+      if (!user?.user_id) {
+        alert("User not loaded yet. Please try again in a moment.");
+        return;
+      }
+      if (!selectedCategory || !selectedSubCategory || !dueDate) {
+        alert("Please complete Category, Sub-Category, and Due Date.");
+        return;
+      }
+
+      // Validate teacher selection based on workflow
+      if (workflowType === "direct") {
+        if (!selectedTeacher && selectedTeachers.length === 0) {
+          alert("Please select at least one teacher.");
+          return;
+        }
+      } else if (workflowType === "coordinated") {
+        if (!selectedCoordinator) {
+          alert("Please select a coordinator for the coordinated workflow.");
+          return;
+        }
+        if (!selectedTeacher && selectedTeachers.length === 0) {
+          alert("Please select at least one teacher.");
+          return;
+        }
+      }
+
+      const reportType = detectReportType(subCategories, selectedSubCategory);
+
+      // FIX: map attempts to INT or NULL (NULL = unlimited)
+      const numberValue =
+        attempts === "" || attempts === "unlimited" ? null : Number(attempts);
+
+      const recipients =
+        selectedTeachers.length > 0 ? selectedTeachers : [selectedTeacher];
+
+      const givenBy =
+        workflowType === "coordinated" ? Number(selectedCoordinator) : user.user_id;
+
+      const base = {
+        category_id: Number(selectedCategory),
+        sub_category_id: Number(selectedSubCategory),
+        given_by: Number(givenBy),
+        assignees: recipients.map((x) => Number(x)),
+        quarter: 1,
+        year: 1,
+        from_date: startDate || null,
+        to_date: dueDate,
+        instruction,
+        is_given: 1,
+        is_archived: 0,
+        allow_late: allowLate ? 1 : 0,
+      };
+
+      let endpoint = "";
+      let body = {};
+      const fallbackTitle =
+        (title && title.trim()) ||
+        (reportType === "laempl"
+          ? "LAEMPL Report"
+          : reportType === "mps"
+          ? "MPS Report"
+          : "Report");
+
+      if (reportType === "laempl") {
+        endpoint = `${API_BASE}/reports/laempl`;
+        body = {
+          ...base,
+          title: fallbackTitle,
+          grade: 1,
+          number_of_submission: numberValue, // INT or NULL
+        };
+      } else {
+        // generic + MPS both go here (MPS rows filled by teacher UI later)
+        endpoint = `${API_BASE}/reports/give`;
+        body = {
+          ...base,
+          title: fallbackTitle,
+          field_definitions: [],
+          number_of_submission: numberValue, // INT or NULL
+        };
+      }
+
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -264,13 +260,38 @@ function detectReportType(subCategories, selectedSubCategoryId) {
       }
 
       const data = await res.json();
-      const workflowMessage = workflowType === "coordinated" 
-        ? "Report assigned to coordinator for distribution to teachers!" 
-        : "Report assigned directly to teachers!";
-      alert(`${workflowMessage} ID: ${data.report_assignment_id ?? "(created)"}`);
+      const workflowMessage =
+        workflowType === "coordinated"
+          ? "Report assigned to coordinator for distribution to teachers!"
+          : "Report assigned directly to teachers!";
+
+      // If backend returns submission_ids, great; otherwise we at least show RA id.
+      const subCount = Array.isArray(data.submission_ids)
+        ? ` Created ${data.submission_ids.length} submission record(s).`
+        : "";
+
+      alert(
+        `${workflowMessage} Assignment ID: ${
+          data.report_assignment_id ?? "(created)"
+        }.${subCount}`
+      );
+
+      // Optional: reset form
+      setSelectedTeacher("");
+      setSelectedTeachers([]);
+      setSelectedSubCategory("");
+      setSelectedCategory("");
+      setStartDate("");
+      setDueDate("");
+      setInstruction("");
+      setTitle("");
+      setAttempts("");
+      setAllowLate(false);
     } catch (err) {
       console.error("Error submitting report:", err);
       alert("Error submitting report. Check console.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -289,15 +310,15 @@ function detectReportType(subCategories, selectedSubCategoryId) {
             <h2>Set Reports</h2>
 
             <form className="schedule-form" onSubmit={handleSubmit}>
-            
               <div className="form-row allow-late-row">
                 <label>Title:</label>
-                <input type="text" 
+                <input
+                  type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                 />
               </div>
-           
+
               <div className="form-row">
                 <label>Category:</label>
                 <select
@@ -309,25 +330,27 @@ function detectReportType(subCategories, selectedSubCategoryId) {
                 >
                   <option value="">Select Category</option>
                   {categories.map((category) => (
-                    <option key={category.category_id} value={category.category_id}>
+                    <option
+                      key={category.category_id}
+                      value={category.category_id}
+                    >
                       {category.category_name}
                     </option>
                   ))}
                 </select>
 
                 <label>Select Teacher:</label>
-                  <select
-                    value={selectedTeacher}
-                    onChange={(e) => setSelectedTeacher(e.target.value)}
-                  >
-                    <option value="">Select Teacher</option>
-                    {users.map((u) => (
-                      <option key={u.user_id} value={u.user_id}>
-                        {u.name}
-                      </option>
-                    ))}
-                  </select>
-
+                <select
+                  value={selectedTeacher}
+                  onChange={(e) => setSelectedTeacher(e.target.value)}
+                >
+                  <option value="">Select Teacher</option>
+                  {users.map((u) => (
+                    <option key={u.user_id} value={u.user_id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {selectedCategory && (
@@ -339,14 +362,16 @@ function detectReportType(subCategories, selectedSubCategoryId) {
                   >
                     <option value="">Select Sub-Category</option>
                     {subCategories.map((sub) => (
-                      <option key={sub.sub_category_id} value={sub.sub_category_id}>
+                      <option
+                        key={sub.sub_category_id}
+                        value={sub.sub_category_id}
+                      >
                         {sub.sub_category_name}
                       </option>
                     ))}
                   </select>
                 </div>
               )}
-
 
               <div className="form-row">
                 <label>Start Date:</label>
@@ -378,7 +403,9 @@ function detectReportType(subCategories, selectedSubCategoryId) {
                   value={attempts}
                   onChange={(e) => setAttempts(e.target.value)}
                 >
-                  <option value="" disabled>Select Number of Attempts</option>
+                  <option value="" disabled>
+                    Select Number of Attempts
+                  </option>
                   <option value="1">1</option>
                   <option value="2">2</option>
                   <option value="3">3</option>
@@ -387,7 +414,6 @@ function detectReportType(subCategories, selectedSubCategoryId) {
                   <option value="unlimited">Unlimited</option>
                 </select>
               </div>
-
 
               <div className="form-row-ins form-row textarea-row">
                 <label>Instructions:</label>
@@ -399,9 +425,18 @@ function detectReportType(subCategories, selectedSubCategoryId) {
               </div>
 
               <div className="form-actions">
-                <button type="submit">Set Schedule</button>
+                <button type="submit" disabled={submitting}>
+                  {submitting ? "Setting..." : "Set Schedule"}
+                </button>
               </div>
             </form>
+
+            {/* Optional: preview image */}
+            {previewSrc && (
+              <div className="template-preview">
+                <img src={previewSrc} alt="Template preview" />
+              </div>
+            )}
           </div>
         </div>
       </div>

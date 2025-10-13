@@ -42,12 +42,15 @@ export default function DeadlineComponent({ deadlines = [] }) {
     return "generic";
   };
 
-  const goToTemplate = (deadline) => {
-    const kind = detectType(deadline);
-    const id = deadline.submission_id || deadline.report_assignment_id;
+  const getSubmissionId = (d) =>
+  d?.submission_id ?? d?.id ?? d?.report_assignment_id ?? null;
 
-    const common = {
-      id,
+  const goToTemplate = (deadline) => {
+     const kind = detectType(deadline);
+    const submissionId = getSubmissionId(deadline);
+
+    const commonState = {
+      submission_id: submissionId,                  // keep in state too (convenience)
       title: deadline.title,
       instruction: deadline.instruction,
       from_date: deadline.from_date,
@@ -56,10 +59,10 @@ export default function DeadlineComponent({ deadlines = [] }) {
       allow_late: deadline.allow_late,
     };
 
-    if (kind === "laempl")         return navigate("/LAEMPLInstruction", { state: common });
-    if (kind === "mps")            return navigate("/MPSInstruction", { state: common });
-    if (kind === "accomplishment") return navigate("/AccomplishmentReportInstruction", { state: common });
-    if (kind === "cog")            return navigate("/ClassificationOfGradesInstruction", { state: common });
+    if (kind === "laempl")         return navigate("/LAEMPLInstruction", { state: commonState });
+    if (kind === "mps")            return navigate("/MPSInstruction", { state: commonState });
+    if (kind === "accomplishment") return navigate("/AccomplishmentReportInstruction", { state: commonState });
+    if (kind === "cog")            return navigate("/ClassificationOfGradesInstruction", { state: commonState });
     return navigate("/SubmittedReport");
   };
 
