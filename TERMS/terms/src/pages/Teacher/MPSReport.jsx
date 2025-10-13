@@ -4,22 +4,11 @@ import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import "./LAEMPLReport.css";
 import "../../components/shared/StatusBadges.css";
+import { useLocation } from "react-router-dom";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
-// read id from URL, but don't coerce null → 0
-const idParam = new URLSearchParams(window.location.search).get("id");
-// --- robust id reader: works with ?id=, #...&id=, or anywhere in href ---
-function getSubmissionId() {
-  const sources = [window.location.search, window.location.hash, window.location.href];
-  for (const s of sources) {
-    if (!s) continue;
-    const m = s.match(/[?&#]id=(\d+)/); // positive integer
-    if (m) return parseInt(m[1], 10);
-  }
-  return null;
-}
 
-const SUBMISSION_ID = getSubmissionId();
+
 
 const TRAITS_MPS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
 
@@ -41,6 +30,60 @@ const COLS_MPS = [
 const LOCK_STATUSES = new Set([3, 4]); // 3 = approved, 4 = rejected
 
 function MPSReport() {
+  const location = useLocation();
+
+  const SUBMISSION_ID = React.useMemo(() => {
+    // 1) try querystring ?id=123
+    const params = new URLSearchParams(location.search);
+    const fromQS = params.get("id");
+    if (fromQS && /^\d+$/.test(fromQS)) return parseInt(fromQS, 10);
+
+    // 2) try hash or full href (fallbacks)
+    const sources = [location.hash, window.location.href];
+    for (const s of sources) {
+      if (!s) continue;
+      const m = s.match(/[?&#]id=(\d+)/);
+      if (m) return parseInt(m[1], 10);
+    }
+    return null;
+  }, [location.search, location.hash, location.key]); 
+
+    useEffect(() => {
+    (async () => {
+      if (SUBMISSION_ID == null) return; // wait for id to be available
+      try {
+        const r = await fetch(`${API_BASE}/submissions/mps/submissions/${SUBMISSION_ID}`, {
+          credentials: "include",
+        });
+        if (!r.ok) {
+          console.error(`Failed to fetch MPS submission ${SUBMISSION_ID}:`, r.status);
+          if (r.status === 404) {
+            setSaveMsg("Error: Submission not found. Please check the link or create a new assignment.");
+          }
+          return;
+        }
+        const json = await r.json();
+        if (typeof json?.status !== "undefined") setStatus(json.status);
+
+        const rows = json?.fields?.rows;
+        if (Array.isArray(rows) && !touchedRef.current) {
+          const next = Object.fromEntries(
+            TRAITS_MPS.map(t => [t, Object.fromEntries(COLS_MPS.map(c => [c.key, ""]))])
+          );
+          rows.forEach(rw => {
+            if (!rw?.trait || !next[rw.trait]) return;
+            COLS_MPS.forEach(c => {
+              next[rw.trait][c.key] = (rw[c.key] ?? "").toString();
+            });
+          });
+          setData(next);
+        }
+      } catch (err) {
+        console.error("Error loading MPS submission:", err);
+      }
+    })();
+  }, [SUBMISSION_ID]); // ✅ re-run when the id changes
+
   const [openPopup, setOpenPopup] = useState(false);
 
   const [data, setData] = useState(() =>
@@ -48,6 +91,7 @@ function MPSReport() {
       TRAITS_MPS.map(t => [t, Object.fromEntries(COLS_MPS.map(c => [c.key, ""]))])
     )
   );
+
 
   // tracks whether the user already edited or cleared the form
   const touchedRef = useRef(false);
@@ -142,7 +186,7 @@ function MPSReport() {
         console.error("Error loading MPS submission:", err);
       }
     })();
-  }, []); // runs once
+  }, [SUBMISSION_ID]); // runs once
 
   // ---- serialize payload helpers
   const toRows = () =>
