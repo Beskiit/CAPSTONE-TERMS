@@ -11,16 +11,20 @@ const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives
 
 function AccomplishmentReportInstruction() {
     const navigate = useNavigate();
-    const { state } = useLocation();
-    const assignmentId = state?.id;
+    const [user, setUser] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const { search, state } = useLocation();
+
+    // ✅ always resolve the id, even on hard reloads
+    const qsId = new URLSearchParams(search).get("id");
+    const submissionId = qsId ?? state?.submission_id ?? state?.id;
+
     const title = state?.title;
     const instruction = state?.instruction;
     const fromDate = state?.from_date;
     const toDate = state?.to_date;
     const attempts = state?.number_of_submission;
     const allowLate = state?.allow_late;
-    const [user, setUser] = useState(null);
-    const [loading, setLoading] = useState(true);
 
     const role = (user?.role || "").toLowerCase();
     const isTeacher = role === "teacher";
@@ -58,7 +62,8 @@ function AccomplishmentReportInstruction() {
                     <div className="content">
                         <h3 className="header">Instructions</h3>
                         <p className="instruction">{instruction || "No instruction provided."}</p>
-                        <button className="instruction-btn" onClick={() => navigate(`/AccomplishmentReport?id=${assignmentId || ''}`)}>+ Prepare Report</button>
+                        <button className="instruction-btn" onClick={() => navigate(`/AccomplishmentReport?id=${submissionId || ""}`)}>
+                            + Prepare Report</button>
                     </div>
                 </div>
                 <div className="dashboard-sidebar">

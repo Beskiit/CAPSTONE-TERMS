@@ -13,12 +13,13 @@ function normalizeImages(images) {
   if (!Array.isArray(images)) return [];
   return images.map((img) => {
     if (typeof img === "string") {
-      // If backend returns "uploads/accomplishments/123-file.jpg", make it absolute
       const isAbsolute = /^https?:\/\//i.test(img);
-      const url = isAbsolute ? img : `${API_BASE}/${img.replace(/^\/+/, "")}`;
+      const hasSlash = img.includes("/");
+      const rel = isAbsolute ? img : (hasSlash ? img : `uploads/accomplishments/${img}`);
+      const url = isAbsolute ? rel : `${API_BASE}/${rel.replace(/^\/+/, "")}`;
       return { url, filename: img.split("/").pop() || img };
     }
-    const raw = img.url || img.path || img.src || "";
+    const raw = img.url || img.path || img.src || (img.filename ? `uploads/accomplishments/${img.filename}` : "");
     const isAbsolute = /^https?:\/\//i.test(raw);
     const url = isAbsolute ? raw : (raw ? `${API_BASE}/${raw.replace(/^\/+/, "")}` : "");
     const filename = img.filename || (raw ? raw.split("/").pop() : "");
@@ -30,7 +31,7 @@ function AccomplishmentReport() {
   const [openPopup, setOpenPopup] = useState(false);
   const navigate = useNavigate();
 
-  // --- Determine submission id from route or query (fallback to 17) ---
+  // --- Determine submission id from route or query (fallback to 18) ---
   const { id: idFromRoute } = useParams();
   const [sp] = useSearchParams();
   const idFromQuery = sp.get("id");
@@ -70,6 +71,19 @@ function AccomplishmentReport() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  // NEW: track submission status and alert visibility
+  const [submissionStatus, setSubmissionStatus] = useState(null);
+  const [reportAssignmentId, setReportAssignmentId] = useState(null); // <-- NEW
+  const [showSubmittedAlert, setShowSubmittedAlert] = useState(true);
+  const [showSubmitToast, setShowSubmitToast] = useState(false);
+  const [showConsolidate, setShowConsolidate] = useState(false);
+  const [peerGroups, setPeerGroups] = useState([]); // [{title, images, submissions}]
+
+  // AI Summary
+  const [aiSummary, setAiSummary] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [prevNarrative, setPrevNarrative] = useState("");
+
   // --- Load user for role guard ---
   useEffect(() => {
     (async () => {
@@ -101,7 +115,6 @@ function AccomplishmentReport() {
         }
         const data = await res.json();
 
-        // Narrative can be at top-level or inside fields.*
         const n =
           data?.narrative ??
           data?.fields?.narrative ??
@@ -114,9 +127,16 @@ function AccomplishmentReport() {
           data?.fields?.photos ??
           [];
 
+        const statusFromApi =
+          data?.status ??
+          data?.fields?.status ??
+          null;
+
         if (!alive) return;
         setNarrative(String(n || ""));
         setExistingImages(normalizeImages(imgs));
+        setSubmissionStatus(statusFromApi);
+        setReportAssignmentId(data?.report_assignment_id ?? null); // <-- NEW
 
         // Prefill coordinator fields if your API returns them under fields.*
         setActivity((prev) => ({
@@ -141,6 +161,13 @@ function AccomplishmentReport() {
     };
   }, [submissionId]);
 
+  // Auto-hide submit toast after a short delay
+  useEffect(() => {
+    if (!showSubmitToast) return;
+    const timer = setTimeout(() => setShowSubmitToast(false), 5000);
+    return () => clearTimeout(timer);
+  }, [showSubmitToast]);
+
   // --- Handlers ---
   const handleFiles = (e) => {
     const files = Array.from(e.target.files || []);
@@ -154,6 +181,12 @@ function AccomplishmentReport() {
 
   const onSubmit = async (e) => {
     e?.preventDefault?.();
+
+    if (isTeacher && submissionStatus >= 2) {
+      setError("This report has already been submitted to the coordinator.");
+      return;
+    }
+
     setSaving(true);
     setError("");
     setSuccess("");
@@ -161,7 +194,7 @@ function AccomplishmentReport() {
     try {
       const fd = new FormData();
       fd.append("narrative", narrative);
-      for (const f of newFiles) fd.append("images", f); // matches multer.array("images")
+      for (const f of newFiles) fd.append("images", f);
 
       const res = await fetch(`${BASE}/${submissionId}`, {
         method: "PATCH",
@@ -174,7 +207,6 @@ function AccomplishmentReport() {
         throw new Error(`PATCH ${submissionId} failed: ${res.status} ${text}`);
       }
 
-      // optimistic: show newly added files as previews
       if (newFiles.length) {
         const appended = newFiles.map((f) => ({
           url: URL.createObjectURL(f),
@@ -192,24 +224,26 @@ function AccomplishmentReport() {
     }
   };
 
-  // New function to submit the report (change status to submitted)
   const onSubmitToCoordinator = async () => {
+    if (submissionStatus >= 2) {
+      setError("This report is already submitted to the coordinator.");
+      return;
+    }
+
     setSaving(true);
     setError("");
     setSuccess("");
 
     try {
-      const res = await fetch(`${BASE}/${submissionId}/answers`, {
+      const fd = new FormData();
+      fd.append("narrative", narrative);
+      fd.append("status", "2");
+      for (const f of newFiles) fd.append("images", f);
+
+      const res = await fetch(`${BASE}/${submissionId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        body: fd,
         credentials: "include",
-        body: JSON.stringify({
-          status: 2, // Submitted status
-          answers: {
-            narrative: narrative,
-            images: existingImages.map(img => img.filename)
-          }
-        }),
       });
 
       if (!res.ok) {
@@ -217,7 +251,32 @@ function AccomplishmentReport() {
         throw new Error(`Submit failed: ${res.status} ${text}`);
       }
 
+      // Capture values that are being sent to the coordinator for display
+      const imagesCount = newFiles.length;
+
+      if (newFiles.length) {
+        const appended = newFiles.map((f) => ({ url: URL.createObjectURL(f), filename: f.name }));
+        setExistingImages((prev) => prev.concat(appended));
+        setNewFiles([]);
+      }
+
       setSuccess("Report submitted to coordinator successfully!");
+      setSubmissionStatus(2);
+      setShowSubmitToast(true);
+
+      // Show an alert summarizing what was passed to the coordinator
+      try {
+        const payloadPreview = {
+          submissionId,
+          status: 2,
+          narrativePreview: (narrative || "").slice(0, 100),
+          imagesCount,
+          reportAssignmentId,
+        };
+        alert(`Submitted to Coordinator:\n${JSON.stringify(payloadPreview, null, 2)}`);
+      } catch (_) {
+        // no-op if alert construction fails
+      }
     } catch (e2) {
       setError(e2.message || "Submit failed");
     } finally {
@@ -225,14 +284,173 @@ function AccomplishmentReport() {
     }
   };
 
-  // Optional hooks
   const onGenerate = () => {
     alert("Generate Report: hook this to your generator when ready.");
   };
   const onExport = () => {
     alert("Export: hook this to your export endpoint when ready.");
   };
+  const onSubmitToPrincipal = async () => {
+    if (submissionStatus >= 2) {
+      setError("This report is already submitted to the principal.");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const fd = new FormData();
+      fd.append("narrative", narrative);
+      fd.append("status", "2"); // Set status to completed (ready for principal review)
+      
+      // Add coordinator activity data
+      fd.append("activityName", activity.activityName);
+      fd.append("facilitators", activity.facilitators);
+      fd.append("objectives", activity.objectives);
+      fd.append("date", activity.date);
+      fd.append("time", activity.time);
+      fd.append("venue", activity.venue);
+      fd.append("keyResult", activity.keyResult);
+      fd.append("personsInvolved", activity.personsInvolved);
+      fd.append("expenses", activity.expenses);
+      
+      for (const f of newFiles) fd.append("images", f);
+
+      const res = await fetch(`${BASE}/${submissionId}`, {
+        method: "PATCH",
+        body: fd,
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Submit to principal failed: ${res.status} ${text}`);
+      }
+
+      if (newFiles.length) {
+        const appended = newFiles.map((f) => ({ url: URL.createObjectURL(f), filename: f.name }));
+        setExistingImages((prev) => prev.concat(appended));
+        setNewFiles([]);
+      }
+
+      setSuccess("Report submitted to principal successfully!");
+      setSubmissionStatus(2);
+      setShowSubmitToast(true);
+    } catch (e2) {
+      setError(e2.message || "Submit to principal failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const onSubmitFinal = () => onSubmit(); // reuse for now
+
+  const openConsolidate = async () => {
+    setError("");
+    setSuccess("");
+    try {
+      // Use report_assignment_id so we fetch peers from the correct assignment
+      const url = reportAssignmentId
+        ? `${BASE}/${submissionId}/peers?ra=${encodeURIComponent(reportAssignmentId)}`
+        : `${BASE}/${submissionId}/peers`;
+      
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`Failed to load peers: ${res.status} ${txt}`);
+      }
+      const data = await res.json();
+      try {
+        console.log("[Consolidate] peers response:", data);
+        console.log("[Consolidate] peers response (pretty):\n" + JSON.stringify(data, null, 2));
+      } catch (_) { /* noop */ }
+      
+      setPeerGroups(Array.isArray(data) ? data : []);
+      setShowConsolidate(true);
+    } catch (e) {
+      setError(e.message || "Failed to load peers");
+    }
+  };
+
+  const consolidateByTitle = async (title) => {
+    try {
+      const res = await fetch(`${BASE}/${submissionId}/consolidate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ title }),
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`Consolidate failed: ${res.status} ${txt}`);
+      }
+      const out = await res.json();
+      setExistingImages(normalizeImages(out.images || []));
+      setSuccess(`Consolidated ${out.count || (out.images||[]).length} images into this report.`);
+      setShowConsolidate(false);
+    } catch (e) {
+      setError(e.message || "Consolidate failed");
+    }
+  };
+
+  const summarizePeers = async (groupTitle) => {
+		try {
+			setAiLoading(true);
+			setAiSummary("");
+			setError("");
+			// find group
+			const g = peerGroups.find(pg => pg.title === groupTitle);
+			const narratives = (g?.submissions || []).map(s => {
+				const f = parseFields(s);
+				return String(f.narrative || f.text || "");
+			}).filter(t => t && t.trim());
+			if (!narratives.length && !reportAssignmentId && !(g?.submissions?.[0]?.report_assignment_id)) {
+				setError("No narratives found in this group to summarize.");
+				setAiLoading(false);
+				return;
+			}
+			const payload = {
+				narratives,
+				report_assignment_id: reportAssignmentId || (g?.submissions?.[0]?.report_assignment_id)
+			};
+			const r = await fetch(`${API_BASE}/ai/summarize`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				credentials: 'include',
+				body: JSON.stringify(payload)
+			});
+			if (!r.ok) {
+				let msg = '';
+				try { const j = await r.json(); msg = j?.error || JSON.stringify(j); } catch { msg = await r.text().catch(()=> ''); }
+				throw new Error(msg || `AI summarize failed (${r.status})`);
+			}
+			const j = await r.json();
+			setAiSummary(j.summary || "");
+		} catch (e) {
+			setError(e.message || 'AI summarize failed');
+		} finally {
+			setAiLoading(false);
+		}
+	};
+
+	const insertSummaryIntoNarrative = () => {
+		setPrevNarrative(narrative);
+		setNarrative(aiSummary);
+	};
+
+	const undoInsertSummary = () => {
+		if (prevNarrative) setNarrative(prevNarrative);
+	};
+
+  // Helper: safely parse submission.fields which may be a JSON string
+  const parseFields = (s) => {
+    let f = s?.fields;
+    if (typeof f === 'string') { try { f = JSON.parse(f); } catch { f = {}; } }
+    if (!f || typeof f !== 'object') f = {};
+    return f;
+  };
 
   if (loadingUser) {
     return (
@@ -258,63 +476,17 @@ function AccomplishmentReport() {
         <div className="dashboard-content">
           <div className="dashboard-main">
             <h2>Accomplishment Report</h2>
-            <p style={{ opacity: 0.7, marginTop: 4 }}>Submission ID: {submissionId}</p>
           </div>
 
           <div className="content">
             {isTeacher ? (
               <>
-            <div className="buttons">
-              <button onClick={onGenerate}>Generate Report</button>
-
-              {!isTeacher && (
-                <button onClick={() => setOpenPopup(true)}>Upload Images</button>
-              )}
-              {openPopup && (
-                <div className="modal-overlay">
-                  <div className="import-popup">
-                    <div className="popup-header">
-                      <h2>Import File</h2>
-                      <button
-                        className="close-button"
-                        onClick={() => setOpenPopup(false)}
-                      >
-                        X
-                      </button>
-                    </div>
-                    <hr />
-                    <form className="import-form" onSubmit={(e) => e.preventDefault()}>
-                      <label htmlFor="fileInput" className="file-upload-label">
-                        Click here to upload a file
-                      </label>
-                      <input
-                        id="fileInput"
-                        type="file"
-                        multiple
-                        accept="image/*"
-                        style={{ display: "none" }}
-                        onChange={handleFiles}
-                      />
-                      <button type="submit">Upload</button>
-                    </form>
-                  </div>
-                </div>
-              )}
-
-              <button onClick={onExport}>Export</button>
-              <button onClick={onSubmit} disabled={saving}>
-                {saving ? "Saving…" : "Save Draft"}
-              </button>
-              <button onClick={onSubmitToCoordinator} disabled={saving} className="submit-button">
-                {saving ? "Submitting…" : "Submit to Coordinator"}
-              </button>
-            </div>
-            </>
-            ):
-            (
-              <>
                 <div className="buttons">
                   <button onClick={onGenerate}>Generate Report</button>
+
+                  {!isTeacher && (
+                    <button onClick={() => setOpenPopup(true)}>Upload Images</button>
+                  )}
                   {openPopup && (
                     <div className="modal-overlay">
                       <div className="import-popup">
@@ -347,21 +519,141 @@ function AccomplishmentReport() {
                   )}
 
                   <button onClick={onExport}>Export</button>
-                  <button onClick={onSubmitFinal} disabled={saving}>
-                    {saving ? "Saving…" : "Submit"}
+                  <button onClick={onSubmit} disabled={saving || submissionStatus >= 2}>
+                    {saving ? "Saving…" : "Save Draft"}
                   </button>
-                  <button>Consolidate</button>
+                  <button
+                    onClick={onSubmitToCoordinator}
+                    disabled={saving || submissionStatus >= 2}
+                    className="submit-button"
+                  >
+                    {saving ? "Submitting…" : "Submit to Coordinator"}
+                  </button>
                 </div>
               </>
-            )
-          }
+            ) : (
+              <>
+                <div className="buttons">
+                  <button onClick={onGenerate}>Generate Report</button>
+                  <button onClick={() => setOpenPopup(true)}>Upload Images</button>
+                  {openPopup && (
+                    <div className="modal-overlay">
+                      <div className="import-popup">
+                        <div className="popup-header">
+                          <h2>Import File</h2>
+                          <button
+                            className="close-button"
+                            onClick={() => setOpenPopup(false)}
+                          >
+                            X
+                          </button>
+                        </div>
+                        <hr />
+                        <form className="import-form" onSubmit={(e) => e.preventDefault()}>
+                          <label htmlFor="fileInput" className="file-upload-label">
+                            Click here to upload a file
+                          </label>
+                          <input
+                            id="fileInput"
+                            type="file"
+                            multiple
+                            accept="image/*"
+                            style={{ display: "none" }}
+                            onChange={handleFiles}
+                          />
+                          <button type="submit">Upload</button>
+                        </form>
+                      </div>
+                    </div>
+                  )}
+
+                  <button onClick={onExport}>Export</button>
+                  <button onClick={onSubmitToPrincipal} disabled={saving || submissionStatus >= 2}>
+                    {saving ? "Submitting…" : "Submit to Principal"}
+                  </button>
+                  <button onClick={openConsolidate}>Consolidate</button>
+                </div>
+              </>
+            )}
 
             <div className="accomplishment-report-container">
               <h3>Activity Completion Report</h3>
 
-              {/* Alerts */}
-              {error && <div className="alert error" style={{ marginBottom: 12 }}>{error}</div>}
-              {success && <div className="alert success" style={{ marginBottom: 12 }}>{success}</div>}
+              {isTeacher && submissionStatus >= 2 && showSubmittedAlert && (
+                <div
+                  className="alert info"
+                  style={{
+                    marginBottom: 12,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "10px 12px",
+                    border: "1px solid #93c5fd",
+                    background: "#dbeafe",
+                    color: "#1e40af",
+                    borderRadius: 8,
+                    fontSize: 14
+                  }}
+                >
+                  <span>
+                    ✅ This submission has been <strong>sent to the Coordinator</strong>. Further edits are disabled.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowSubmittedAlert(false)}
+                    style={{
+                      marginLeft: 12,
+                      border: "none",
+                      background: "transparent",
+                      cursor: "pointer",
+                      fontSize: 16,
+                      color: "#1e40af"
+                    }}
+                    aria-label="Dismiss"
+                    title="Dismiss"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+
+              {!isTeacher && submissionStatus >= 2 && showSubmittedAlert && (
+                <div
+                  className="alert info"
+                  style={{
+                    marginBottom: 12,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "10px 12px",
+                    border: "1px solid #93c5fd",
+                    background: "#dbeafe",
+                    color: "#1e40af",
+                    borderRadius: 8,
+                    fontSize: 14
+                  }}
+                >
+                  <span>
+                    ✅ This submission has been <strong>sent to the Principal</strong> for approval. Further edits are disabled.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowSubmittedAlert(false)}
+                    style={{
+                      marginLeft: 12,
+                      border: "none",
+                      background: "transparent",
+                      cursor: "pointer",
+                      fontSize: 16,
+                      color: "#1e40af"
+                    }}
+                    aria-label="Dismiss"
+                    title="Dismiss"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
 
               <form onSubmit={onSubmit}>
                 {isTeacher ? (
@@ -369,7 +661,7 @@ function AccomplishmentReport() {
                     {/* TEACHER VIEW */}
                     <div className="form-row">
                       <label htmlFor="teacherTitle">Title:</label>
-                      <input type="text" required />
+                      <input type="text" required disabled={submissionStatus >= 2} />
                     </div>
                     <div className="form-row">
                       <label htmlFor="teacherPictures">Upload Image(s):</label>
@@ -380,6 +672,7 @@ function AccomplishmentReport() {
                         accept="image/*"
                         multiple
                         onChange={handleFiles}
+                        disabled={submissionStatus >= 2}
                       />
                     </div>
 
@@ -406,6 +699,7 @@ function AccomplishmentReport() {
                                 type="button"
                                 className="btn tiny"
                                 onClick={() => removeNewFileAt(i)}
+                                disabled={submissionStatus >= 2}
                               >
                                 Remove
                               </button>
@@ -424,6 +718,7 @@ function AccomplishmentReport() {
                         value={narrative}
                         onChange={(e) => setNarrative(e.target.value)}
                         required
+                        disabled={submissionStatus >= 2}
                       />
                     </div>
                   </>
@@ -439,6 +734,7 @@ function AccomplishmentReport() {
                         value={activity.activityName}
                         onChange={(e) => setActivity((p) => ({ ...p, activityName: e.target.value }))}
                         required
+                        disabled={submissionStatus >= 2}
                       />
                     </div>
 
@@ -451,6 +747,7 @@ function AccomplishmentReport() {
                         value={activity.facilitators}
                         onChange={(e) => setActivity((p) => ({ ...p, facilitators: e.target.value }))}
                         required
+                        disabled={submissionStatus >= 2}
                       />
                     </div>
 
@@ -463,6 +760,7 @@ function AccomplishmentReport() {
                         value={activity.objectives}
                         onChange={(e) => setActivity((p) => ({ ...p, objectives: e.target.value }))}
                         required
+                        disabled={submissionStatus >= 2}
                       />
                     </div>
 
@@ -478,6 +776,7 @@ function AccomplishmentReport() {
                             value={activity.date}
                             onChange={(e) => setActivity((p) => ({ ...p, date: e.target.value }))}
                             required
+                            disabled={submissionStatus >= 2}
                           />
                         </div>
                         <div className="form-row">
@@ -489,6 +788,7 @@ function AccomplishmentReport() {
                             value={activity.time}
                             onChange={(e) => setActivity((p) => ({ ...p, time: e.target.value }))}
                             required
+                            disabled={submissionStatus >= 2}
                           />
                         </div>
                         <div className="form-row">
@@ -500,6 +800,7 @@ function AccomplishmentReport() {
                             value={activity.venue}
                             onChange={(e) => setActivity((p) => ({ ...p, venue: e.target.value }))}
                             required
+                            disabled={submissionStatus >= 2}
                           />
                         </div>
                         <div className="form-row">
@@ -511,6 +812,7 @@ function AccomplishmentReport() {
                             value={activity.keyResult}
                             onChange={(e) => setActivity((p) => ({ ...p, keyResult: e.target.value }))}
                             required
+                            disabled={submissionStatus >= 2}
                           />
                         </div>
                       </div>
@@ -525,6 +827,7 @@ function AccomplishmentReport() {
                         value={activity.personsInvolved}
                         onChange={(e) => setActivity((p) => ({ ...p, personsInvolved: e.target.value }))}
                         required
+                        disabled={submissionStatus >= 2}
                       />
                     </div>
 
@@ -537,6 +840,7 @@ function AccomplishmentReport() {
                         value={activity.expenses}
                         onChange={(e) => setActivity((p) => ({ ...p, expenses: e.target.value }))}
                         required
+                        disabled={submissionStatus >= 2}
                       />
                     </div>
 
@@ -549,6 +853,7 @@ function AccomplishmentReport() {
                         accept="image/*"
                         multiple
                         onChange={handleFiles}
+                        disabled={submissionStatus >= 2}
                       />
                     </div>
 
@@ -593,11 +898,12 @@ function AccomplishmentReport() {
                         value={narrative}
                         onChange={(e) => setNarrative(e.target.value)}
                         required
+                        disabled={submissionStatus >= 2}
                       />
                     </div>
 
                     <div className="form-row">
-                      <button className="btn primary" disabled={saving}>
+                      <button className="btn primary" disabled={saving || submissionStatus >= 2}>
                         {saving ? "Saving…" : "Save Changes"}
                       </button>
                     </div>
@@ -606,7 +912,7 @@ function AccomplishmentReport() {
 
                 {isTeacher && (
                   <div className="form-row">
-                    <button className="btn primary" disabled={saving}>
+                    <button className="btn primary" disabled={saving || submissionStatus >= 2}>
                       {saving ? "Saving…" : "Save Changes"}
                     </button>
                   </div>
@@ -616,6 +922,117 @@ function AccomplishmentReport() {
           </div>
         </div>
       </div>
+
+      {showConsolidate && (
+        <div className="modal-overlay">
+          <div className="import-popup" style={{ maxWidth: 800, width: "90%" }}>
+            <div className="popup-header">
+              <h2>Consolidate Accomplishment Reports</h2>
+              <button className="close-button" onClick={() => setShowConsolidate(false)}>X</button>
+            </div>
+            <hr />
+            {!!error && (
+              <div style={{ marginBottom: 10, color: '#b91c1c', background: '#fee2e2', border: '1px solid #fecaca', padding: 8, borderRadius: 6 }}>
+                {error}
+              </div>
+            )}
+            <div style={{ maxHeight: 420, overflowY: "auto" }}>
+              {peerGroups.length === 0 ? (
+                <p style={{ opacity: 0.8 }}>No submitted peer reports to consolidate.</p>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #e5e7eb" }}>Title</th>
+                      <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #e5e7eb" }}>Images</th>
+                      <th style={{ padding: 8, borderBottom: "1px solid #e5e7eb" }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {peerGroups.map((g, i) => {
+                      const extractNarrative = (submission) => {
+                        const f = parseFields(submission) || {};
+                        const form = f._form || {};
+                        const inner = form.fields || {};
+                        const t = submission?.narrative
+                          || submission?.text
+                          || f.narrative
+                          || f.text
+                          || form.narrative
+                          || form.text
+                          || inner.narrative
+                          || inner.text
+                          || "";
+                        return String(t).trim();
+                      };
+
+                      const hasNarr = (g?.submissions || []).some(s => !!extractNarrative(s));
+
+                      const narrativeCount = (g?.submissions || []).reduce((count, s) => {
+                        return count + (extractNarrative(s) ? 1 : 0);
+                      }, 0);
+
+                      const narrativePreviews = (g?.submissions || []).map((s) => {
+                        const t = extractNarrative(s);
+                        if (!t) return "";
+                        const trimmed = t.replace(/\s+/g, " ");
+                        return trimmed.length > 140 ? `${trimmed.slice(0, 140)}…` : trimmed;
+                      }).filter(Boolean);
+                      return (
+                        <tr key={g.title + i}>
+                          <td style={{ padding: 8, verticalAlign: "top" }}>
+                            <strong>{g.title}</strong>
+                            <div style={{ opacity: 0.7, fontSize: 12 }}>
+                              {(g.submissions?.length || 0)} submission(s)
+                              {narrativeCount ? ` \u2022 ${narrativeCount} narrative(s)` : ""}
+                            </div>
+                            {narrativePreviews.length > 0 && (
+                              <div style={{ marginTop: 6, maxHeight: 96, overflowY: 'auto', paddingRight: 4 }}>
+                                {narrativePreviews.slice(0, 3).map((p, idx) => (
+                                  <div key={idx} style={{ fontSize: 12, color: '#334155', lineHeight: 1.4, marginBottom: 4 }}>
+                                    — {p}
+                                  </div>
+                                ))}
+                                {narrativePreviews.length > 3 && (
+                                  <div style={{ fontSize: 12, color: '#64748b' }}>…and {narrativePreviews.length - 3} more</div>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: 8 }}>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                              {(g.images || []).map((nm, idx) => (
+                                <img key={nm + idx} src={`${API_BASE}/uploads/accomplishments/${nm}`} alt={nm} style={{ width: 80, height: 60, objectFit: "cover", borderRadius: 4, border: "1px solid #e5e7eb" }} />
+                              ))}
+                            </div>
+                          </td>
+                          <td style={{ padding: 8, width: 260, textAlign: "right", display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                            <button className="btn" onClick={() => summarizePeers(g.title)} disabled={aiLoading || !hasNarr} title={!hasNarr ? 'No narratives to summarize in this group' : undefined}>{aiLoading ? 'Summarizing…' : 'AI Summary'}</button>
+                            <button className="btn primary" onClick={() => consolidateByTitle(g.title)}>Consolidate Images ({narrativeCount})</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {aiSummary && (
+              <div style={{ marginTop: 12, background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8, padding: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <strong>AI Summary Preview</strong>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="btn" onClick={undoInsertSummary}>Undo</button>
+                    <button className="btn primary" onClick={insertSummaryIntoNarrative}>Insert into Narrative</button>
+                  </div>
+                </div>
+                <div style={{ whiteSpace: 'pre-wrap', marginTop: 8 }}>{aiSummary}</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 }

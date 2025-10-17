@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import Header from "../../components/shared/Header.jsx";
 import Sidebar from "../../components/shared/SidebarCoordinator.jsx";
 import SidebarPrincipal from "../../components/shared/SidebarPrincipal.jsx";
@@ -50,6 +50,8 @@ function SetReport() {
 
   // NEW: prevent double-submit
   const [submitting, setSubmitting] = useState(false);
+  const [teacherMenuOpen, setTeacherMenuOpen] = useState(false);
+  const teacherMenuRef = useRef(null);
 
   // Preview image resolver
   const previewSrc = useMemo(() => {
@@ -57,6 +59,19 @@ function SetReport() {
     const cat = TEMPLATE_MAP[String(selectedCategory)];
     return cat ? cat[String(selectedSubCategory)] || "" : "";
   }, [selectedCategory, selectedSubCategory]);
+
+  // Merge teachers + coordinators for principals
+  const selectableUsers = useMemo(() => {
+    const base = Array.isArray(users) ? users : [];
+    if (!isPrincipal) return base;
+    const extra = Array.isArray(coordinators) ? coordinators : [];
+    const byId = new Map();
+    [...base, ...extra].forEach((u) => {
+      if (!u || u.user_id == null) return;
+      byId.set(u.user_id, u);
+    });
+    return Array.from(byId.values());
+  }, [isPrincipal, users, coordinators]);
 
   // ✅ Load logged-in user
   useEffect(() => {
@@ -298,6 +313,29 @@ function SetReport() {
     }
   };
 
+  // --- Teacher multi-select helpers ---
+  const toggleTeacher = (userId) => {
+    setSelectedTeachers((prev) =>
+      prev.includes(userId)
+        ? prev.filter((id) => id !== userId)
+        : prev.concat(userId)
+    );
+  };
+  const selectAllTeachers = () => setSelectedTeachers(selectableUsers.map((u) => u.user_id));
+  const clearAllTeachers = () => setSelectedTeachers([]);
+
+  // Close teacher menu on outside click
+  useEffect(() => {
+    function onDocClick(e) {
+      if (!teacherMenuOpen) return;
+      if (teacherMenuRef.current && !teacherMenuRef.current.contains(e.target)) {
+        setTeacherMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [teacherMenuOpen]);
+
   return (
     <>
       <Header userText={user ? user.name : "Guest"} />
@@ -342,18 +380,95 @@ function SetReport() {
                   ))}
                 </select>
 
-                <label>Select Teacher:</label>
-                <select
-                  value={selectedTeacher}
-                  onChange={(e) => setSelectedTeacher(e.target.value)}
-                >
-                  <option value="">Select Teacher</option>
-                  {users.map((u) => (
-                    <option key={u.user_id} value={u.user_id}>
-                      {u.name}
-                    </option>
-                  ))}
-                </select>
+                {/* Teachers multi-select dropdown placed in same row */}
+                <label>Teachers:</label>
+                <div ref={teacherMenuRef} style={{ position: "relative", width: "100%" }}>
+                  <button
+                    type="button"
+                    onClick={() => setTeacherMenuOpen((v) => !v)}
+                    aria-haspopup="listbox"
+                    aria-expanded={teacherMenuOpen}
+                    style={{
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "6px 10px",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: 4,
+                      background: "#fff",
+                      cursor: "pointer",
+                    }}
+                    title={selectedTeachers.length ? selectableUsers.filter(u => selectedTeachers.includes(u.user_id)).map(u => u.name).join(", ") : "Select Teacher"}
+                  >
+                    {selectedTeachers.length
+                      ? selectableUsers.filter(u => selectedTeachers.includes(u.user_id)).map(u => u.name).join(", ")
+                      : "Select Teacher"}
+                  </button>
+                  {teacherMenuOpen && (
+                    <div
+                      role="listbox"
+                      style={{
+                        position: "absolute",
+                        top: "100%",
+                        left: 0,
+                        width: "100%",
+                        maxHeight: 260,
+                        overflowY: "auto",
+                        background: "#fff",
+                        border: "1px solid #cbd5e1",
+                        borderRadius: 4,
+                        boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
+                        zIndex: 20,
+                        marginTop: 4,
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderBottom: "1px solid #e5e7eb", background: "#f8fafc", whiteSpace: "nowrap" }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", margin: 0 }}>
+                          <input
+                            type="checkbox"
+                          checked={selectedTeachers.length === selectableUsers.length && selectableUsers.length > 0}
+                            onChange={(e) => (e.target.checked ? selectAllTeachers() : clearAllTeachers())}
+                          />
+                          <span style={{ fontWeight: 600 }}>Select all</span>
+                        </label>
+                        <span style={{ marginLeft: "auto", fontSize: 12, opacity: 0.7 }}>{selectedTeachers.length} selected</span>
+                        <button type="button" onClick={clearAllTeachers} style={{ fontSize: 12, padding: "4px 6px" }}>Clear</button>
+                      </div>
+                      <div style={{ padding: "4px 6px" }}>
+                        {selectableUsers.map((u) => {
+                          const checked = selectedTeachers.includes(u.user_id);
+                          return (
+                            <div
+                              key={u.user_id}
+                              onClick={() => toggleTeacher(u.user_id)}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                padding: "6px 8px",
+                                cursor: "pointer",
+                                borderRadius: 4,
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                background: checked ? "#3b82f6" : "transparent",
+                                color: checked ? "#ffffff" : "inherit",
+                                marginBottom: 2,
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                readOnly
+                                checked={checked}
+                                style={{ pointerEvents: "none" }}
+                              />
+                              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{u.name}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {selectedCategory && (

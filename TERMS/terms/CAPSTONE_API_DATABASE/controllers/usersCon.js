@@ -16,6 +16,20 @@ export const getTeachers = (req, res) => {
   });
 };
 
+/** List COORDINATORS only (for dropdowns) */
+export const getCoordinators = (req, res) => {
+  const sql = `
+    SELECT user_id, name
+    FROM user_details
+    WHERE LOWER(role) = 'coordinator'
+    ORDER BY name ASC
+  `;
+  db.query(sql, (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(results);
+  });
+};
+
 /** CREATE user (Admin only - for manual user creation) */
 export const createUser = (req, res) => {
   const { google_id, email, name, role } = req.body;

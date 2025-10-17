@@ -3,12 +3,37 @@ import Header from "../../components/shared/Header.jsx";
 import Sidebar from "../../components/shared/SidebarPrincipal.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import "../Teacher/LAEMPLReport.css";
+import "./ForApprovalData.css";
 import Modal from "react-modal";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
 
-const SUBMISSION_ID =
-  new URLSearchParams(window.location.search).get("id") || "10";
+// Get submission ID from URL - use multiple methods for reliability
+const getSubmissionId = () => {
+  // Method 1: URLSearchParams
+  const urlParams = new URLSearchParams(window.location.search);
+  const idFromParams = urlParams.get("id");
+  
+  // Method 2: Direct URL parsing
+  const urlMatch = window.location.href.match(/[?&]id=(\d+)/);
+  const idFromUrl = urlMatch ? urlMatch[1] : null;
+  
+  // Method 3: Check if we're in a React Router context
+  const idFromHash = window.location.hash.match(/[?&]id=(\d+)/);
+  const idFromHashMatch = idFromHash ? idFromHash[1] : null;
+  
+  console.log('URL parsing debug:');
+  console.log('- Full URL:', window.location.href);
+  console.log('- Search params:', window.location.search);
+  console.log('- Hash:', window.location.hash);
+  console.log('- ID from URLSearchParams:', idFromParams);
+  console.log('- ID from URL regex:', idFromUrl);
+  console.log('- ID from hash regex:', idFromHashMatch);
+  
+  return idFromParams || idFromUrl || idFromHashMatch;
+};
+
+const SUBMISSION_ID = getSubmissionId();
 
 const TRAITS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
 
@@ -52,9 +77,124 @@ function ForApprovalData() {
   const [reasonErr, setReasonErr] = useState("");                     // NEW
   const [isApproveOpen, setIsApproveOpen] = useState(false);          // NEW
 
+  // NEW: submission data state
+  const [submissionData, setSubmissionData] = useState(null);
+  const [submissionType, setSubmissionType] = useState(null); // 'LAEMPL' or 'ACCOMPLISHMENT'
+  const [submissionLoading, setSubmissionLoading] = useState(true);
+  const [submissionError, setSubmissionError] = useState(null);
+  const [currentSubmissionId, setCurrentSubmissionId] = useState(SUBMISSION_ID);
+
   useEffect(() => {
     Modal.setAppElement("#root");
   }, []);
+
+  // Re-check URL parameters on component mount
+  useEffect(() => {
+    const recheckId = getSubmissionId();
+    console.log('Re-checking submission ID on mount:', recheckId);
+    if (recheckId && recheckId !== currentSubmissionId) {
+      setCurrentSubmissionId(recheckId);
+    }
+  }, []);
+
+  // NEW: Fetch submission data and determine type
+  useEffect(() => {
+      const fetchSubmissionData = async () => {
+        const submissionId = currentSubmissionId || SUBMISSION_ID;
+        console.log('Using submission ID:', submissionId);
+        
+        if (!submissionId) {
+          setSubmissionError("No submission ID provided in the URL. Please go back to the For Approval list and try again.");
+          setSubmissionLoading(false);
+          return;
+        }
+
+      try {
+        setSubmissionLoading(true);
+        setSubmissionError(null);
+
+        // Try to fetch submission data from multiple endpoints
+        let data = null;
+        let response = null;
+        let lastError = null;
+
+        console.log(`URL: ${window.location.href}`);
+        console.log(`URL Search Params: ${window.location.search}`);
+        console.log(`Attempting to fetch submission with ID: ${submissionId}`);
+
+        // First try accomplishment endpoint
+        try {
+          console.log(`Trying accomplishment endpoint: ${API_BASE}/reports/accomplishment/${submissionId}`);
+          response = await fetch(`${API_BASE}/reports/accomplishment/${submissionId}`, {
+            credentials: "include"
+          });
+          console.log(`Accomplishment endpoint response status: ${response.status}`);
+          
+          if (response.ok) {
+            data = await response.json();
+            setSubmissionType('ACCOMPLISHMENT');
+            console.log('Successfully fetched from accomplishment endpoint');
+          } else {
+            lastError = `Accomplishment endpoint returned ${response.status}`;
+          }
+        } catch (error) {
+          console.log("Accomplishment endpoint failed:", error.message);
+          lastError = error.message;
+        }
+
+        // If accomplishment endpoint failed, try submissions endpoint
+        if (!data) {
+          try {
+            console.log(`Trying submissions endpoint: ${API_BASE}/submissions/${submissionId}`);
+            response = await fetch(`${API_BASE}/submissions/${submissionId}`, {
+              credentials: "include"
+            });
+            console.log(`Submissions endpoint response status: ${response.status}`);
+            
+            if (response.ok) {
+              data = await response.json();
+              console.log('Successfully fetched from submissions endpoint');
+              
+              // Determine submission type based on fields
+              const fields = data.fields || {};
+              if (fields.type === 'ACCOMPLISHMENT') {
+                setSubmissionType('ACCOMPLISHMENT');
+              } else if (fields._form || fields._answers) {
+                setSubmissionType('LAEMPL');
+              } else {
+                // Default to LAEMPL for backward compatibility
+                setSubmissionType('LAEMPL');
+              }
+            } else {
+              lastError = `Submissions endpoint returned ${response.status}`;
+            }
+          } catch (error) {
+            console.log("Submissions endpoint also failed:", error.message);
+            lastError = error.message;
+          }
+        }
+
+        if (!data) {
+          const errorMessage = `Failed to fetch submission with ID ${submissionId}. ${lastError || 'Unknown error'}`;
+          console.error(errorMessage);
+          throw new Error(errorMessage);
+        }
+
+        console.log('Submission data fetched successfully:', data);
+        console.log('Fields data:', data.fields);
+        console.log('Activity data:', data.fields?.activity);
+        setSubmissionData(data);
+
+      } catch (error) {
+        console.error("Error fetching submission data:", error);
+        setSubmissionError(error.message);
+      } finally {
+        setSubmissionLoading(false);
+      }
+    };
+
+    fetchSubmissionData();
+  }, [currentSubmissionId]);
 
   // table state
   const [data, setData] = useState(() =>
@@ -242,6 +382,99 @@ function ForApprovalData() {
   const role = (user?.role || "").toLowerCase();
   const isPrincipal = role === "principal";
 
+  // NEW: Component to display accomplishment report data
+  const AccomplishmentReportDisplay = ({ submissionData }) => {
+    if (!submissionData || !submissionData.fields) {
+      return <div>No accomplishment data available</div>;
+    }
+
+    const fields = submissionData.fields;
+    const activity = fields.activity || {};
+
+    return (
+      <div className="accomplishment-display">
+        <h3>Accomplishment Report Details</h3>
+        
+        <div className="report-section">
+          <h4>Activity Information</h4>
+          <div className="field-group">
+            <div className="field">
+              <label>Activity Name:</label>
+              <span>{activity.activityName || 'Not provided'}</span>
+            </div>
+            <div className="field">
+              <label>Facilitators:</label>
+              <span>{activity.facilitators || 'Not provided'}</span>
+            </div>
+            <div className="field">
+              <label>Objectives:</label>
+              <span>{activity.objectives || 'Not provided'}</span>
+            </div>
+            <div className="field">
+              <label>Date:</label>
+              <span>{activity.date || 'Not provided'}</span>
+            </div>
+            <div className="field">
+              <label>Time:</label>
+              <span>{activity.time || 'Not provided'}</span>
+            </div>
+            <div className="field">
+              <label>Venue:</label>
+              <span>{activity.venue || 'Not provided'}</span>
+            </div>
+            <div className="field">
+              <label>Key Results:</label>
+              <span>{activity.keyResult || 'Not provided'}</span>
+            </div>
+            <div className="field">
+              <label>Persons Involved:</label>
+              <span>{activity.personsInvolved || 'Not provided'}</span>
+            </div>
+            <div className="field">
+              <label>Expenses:</label>
+              <span>{activity.expenses || 'Not provided'}</span>
+            </div>
+          </div>
+        </div>
+
+        {fields.images && fields.images.length > 0 && (
+          <div className="report-section">
+            <h4>Images</h4>
+            <div className="images-grid">
+              {fields.images.map((image, index) => (
+                <div key={index} className="image-item">
+                  <img 
+                    src={`${API_BASE}/uploads/accomplishments/${image}`} 
+                    alt={`Activity image ${index + 1}`}
+                    style={{ maxWidth: '200px', maxHeight: '200px', objectFit: 'cover' }}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {fields.narrative && (
+          <div className="report-section">
+            <h4>Narrative</h4>
+            <div className="narrative-content">
+              {fields.narrative}
+            </div>
+          </div>
+        )}
+
+        {fields.coordinator_notes && (
+          <div className="report-section">
+            <h4>Coordinator Notes</h4>
+            <div className="coordinator-notes">
+              {fields.coordinator_notes}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   useEffect(() => {
     const fetchUser = async () => {
       try {
@@ -273,20 +506,84 @@ function ForApprovalData() {
   };
   const closeApproveModal = () => setIsApproveOpen(false);             // NEW
 
-  // NEW: modal confirms (no API)
-  const handleRejectSubmit = (e) => {
+  // NEW: modal confirms with API calls
+  const handleRejectSubmit = async (e) => {
     e.preventDefault();
     if (!rejectReason.trim()) {
       setReasonErr("Please provide a reason.");
       return;
     }
-    setMsg("Submission rejected (local state only).");
-    setIsRejectOpen(false);
+
+    try {
+      setSaving(true);
+      
+      // Update submission status to rejected (4) using PATCH
+      const submissionId = currentSubmissionId || SUBMISSION_ID;
+      const endpoint = submissionType === 'ACCOMPLISHMENT' 
+        ? `${API_BASE}/reports/accomplishment/${submissionId}`
+        : `${API_BASE}/submissions/${submissionId}`;
+      
+      const response = await fetch(endpoint, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          status: 4, // Rejected status
+          rejection_reason: rejectReason
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to reject submission');
+      }
+
+      setMsg("Submission rejected successfully.");
+      setIsRejectOpen(false);
+      setRejectReason("");
+      setReasonErr("");
+    } catch (error) {
+      console.error("Error rejecting submission:", error);
+      setErr("Failed to reject submission. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleApproveConfirm = () => {                                  // NEW
-    setMsg("Submission approved (local state only).");
-    setIsApproveOpen(false);
+  const handleApproveConfirm = async () => {
+    try {
+      setSaving(true);
+      
+      // Update submission status to approved (3) using PATCH
+      const submissionId = currentSubmissionId || SUBMISSION_ID;
+      const endpoint = submissionType === 'ACCOMPLISHMENT' 
+        ? `${API_BASE}/reports/accomplishment/${submissionId}`
+        : `${API_BASE}/submissions/${submissionId}`;
+      
+      const response = await fetch(endpoint, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          status: 3 // Approved status
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to approve submission');
+      }
+
+      setMsg("Submission approved successfully.");
+      setIsApproveOpen(false);
+    } catch (error) {
+      console.error("Error approving submission:", error);
+      setErr("Failed to approve submission. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -300,62 +597,106 @@ function ForApprovalData() {
         )}
         <div className="dashboard-content">
           <div className="dashboard-main">
-            <h2>LAEMPL - (Teacher's Name)</h2>
+            <h2>
+              {submissionType === 'ACCOMPLISHMENT' 
+                ? 'Accomplishment Report' 
+                : 'LAEMPL - (Teacher\'s Name)'
+              }
+            </h2>
           </div>
 
           <div className="content">
+            {submissionLoading && <div className="ok-text" style={{ marginTop: 8 }}>Loading submission data...</div>}
+            {submissionError && (
+              <div className="error-container" style={{ marginTop: 8, padding: '20px', backgroundColor: '#f8d7da', border: '1px solid #f5c6cb', borderRadius: '4px' }}>
+                <div className="error-text" style={{ color: '#721c24', fontWeight: 'bold', marginBottom: '10px' }}>
+                  Error: {submissionError}
+                </div>
+                <div style={{ color: '#721c24', marginBottom: '15px' }}>
+                  The submission with ID {currentSubmissionId || SUBMISSION_ID} could not be found. This might be because:
+                  <ul style={{ marginTop: '10px', paddingLeft: '20px' }}>
+                    <li>The submission was deleted or doesn't exist</li>
+                    <li>You don't have permission to view this submission</li>
+                    <li>The submission ID is incorrect</li>
+                  </ul>
+                </div>
+                <button 
+                  onClick={() => window.history.back()} 
+                  style={{ 
+                    padding: '8px 16px', 
+                    backgroundColor: '#007bff', 
+                    color: 'white', 
+                    border: 'none', 
+                    borderRadius: '4px', 
+                    cursor: 'pointer' 
+                  }}
+                >
+                  ← Go Back to For Approval
+                </button>
+              </div>
+            )}
             {loading && <div className="ok-text" style={{ marginTop: 8 }}>Loading...</div>}
             {!!msg && <div className="ok-text" style={{ marginTop: 8 }}>{msg}</div>}
             {!!err && <div className="error-text" style={{ marginTop: 8 }}>{err}</div>}
 
-            <div className="table-wrap">
-              <table className="laempl-table">
-                <caption>Grade 1 - LAEMPL</caption>
-                <thead>
-                  <tr>
-                    <th scope="col" className="row-head">&nbsp;</th>
-                    {COLS.map((col) => (
-                      <th key={col.key} scope="col">{col.label}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {TRAITS.map((trait) => (
-                    <tr key={trait}>
-                      <th scope="row" className="row-head">{trait}</th>
+            {submissionType === 'ACCOMPLISHMENT' ? (
+              <AccomplishmentReportDisplay submissionData={submissionData} />
+            ) : (
+              <div className="table-wrap">
+                <table className="laempl-table">
+                  <caption>Grade 1 - LAEMPL</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col" className="row-head">&nbsp;</th>
                       {COLS.map((col) => (
-                        <td key={col.key}>
-                          <input
-                            type="number"
-                            inputMode="numeric"
-                            min={COL_RULES[col.key]?.[0]}
-                            max={COL_RULES[col.key]?.[1]}
-                            step="1"
-                            value={data[trait][col.key]}
-                            onChange={(e) => handleChange(trait, col.key, e.target.value)}
-                            className="cell-input"
-                            disabled={isDisabled}
-                          />
-                        </td>
+                        <th key={col.key} scope="col">{col.label}</th>
                       ))}
                     </tr>
-                  ))}
-
-                  <tr className="total-row">
-                    <th scope="row" className="row-head">Total</th>
-                    {COLS.map((col) => (
-                      <td key={col.key} className="total-cell">{totals[col.key]}</td>
+                  </thead>
+                  <tbody>
+                    {TRAITS.map((trait) => (
+                      <tr key={trait}>
+                        <th scope="row" className="row-head">{trait}</th>
+                        {COLS.map((col) => (
+                          <td key={col.key}>
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              min={COL_RULES[col.key]?.[0]}
+                              max={COL_RULES[col.key]?.[1]}
+                              step="1"
+                              value={data[trait][col.key]}
+                              onChange={(e) => handleChange(trait, col.key, e.target.value)}
+                              className="cell-input"
+                              disabled={isDisabled}
+                            />
+                          </td>
+                        ))}
+                      </tr>
                     ))}
-                  </tr>
-                </tbody>
-              </table>
-            </div>
 
-            {/* Approve and Reject buttons */}
-            <div className="table-actions">
-              <button type="button" onClick={openRejectModal}>Reject</button>
-            <button type="button" onClick={openApproveModal}>Approve</button>
-            </div>
+                    <tr className="total-row">
+                      <th scope="row" className="row-head">Total</th>
+                      {COLS.map((col) => (
+                        <td key={col.key} className="total-cell">{totals[col.key]}</td>
+                      ))}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Approve and Reject buttons - only show if no error */}
+            {!submissionError && (
+              <div className="table-actions">
+                <button type="button" onClick={openRejectModal} disabled={saving || submissionLoading}>
+                  {saving ? "Processing..." : "Reject"}
+                </button>
+                <button type="button" onClick={openApproveModal} disabled={saving || submissionLoading}>
+                  {saving ? "Processing..." : "Approve"}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -408,11 +749,11 @@ function ForApprovalData() {
           )}
 
           <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "flex-end" }}>
-            <button type="button" onClick={closeRejectModal}>
+            <button type="button" onClick={closeRejectModal} disabled={saving}>
               Cancel
             </button>
             <button type="submit" disabled={saving}>
-              Submit Feedback
+              {saving ? "Rejecting..." : "Submit Feedback"}
             </button>
           </div>
         </form>
@@ -428,11 +769,11 @@ function ForApprovalData() {
         <h3 style={{ marginTop: 0 }}>Approve Submission</h3>
         <p>Are you sure you want to approve this submission?</p>
         <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "flex-end" }}>
-          <button type="button" onClick={closeApproveModal}>
+          <button type="button" onClick={closeApproveModal} disabled={saving}>
             Cancel
           </button>
-          <button type="button" onClick={handleApproveConfirm}>
-            Yes
+          <button type="button" onClick={handleApproveConfirm} disabled={saving}>
+            {saving ? "Approving..." : "Yes"}
           </button>
         </div>
       </Modal>

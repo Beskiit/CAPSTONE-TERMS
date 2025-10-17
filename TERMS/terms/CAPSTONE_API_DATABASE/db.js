@@ -34,3 +34,26 @@ database.getConnection((err, connection) => {
 });
 
 export default database;
+
+// Initialize essential tables if they do not exist (lightweight, idempotent)
+const initSql = `
+  CREATE TABLE IF NOT EXISTS notifications (
+    notification_id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    message TEXT,
+    type VARCHAR(64) DEFAULT NULL,
+    ref_type VARCHAR(64) DEFAULT NULL,
+    ref_id INT DEFAULT NULL,
+    is_read TINYINT(1) NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_notifications_user_id (user_id),
+    INDEX idx_notifications_ref (ref_type, ref_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+`;
+
+database.query(initSql, (err) => {
+  if (err) {
+    console.error('Failed to ensure notifications table exists:', err);
+  }
+});

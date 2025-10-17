@@ -15,6 +15,8 @@ function AssignedReportData() {
     const [submission, setSubmission] = useState(null);
     const [error, setError] = useState("");
     const [retryCount, setRetryCount] = useState(0);
+    const [submitting, setSubmitting] = useState(false);
+    const [submitMessage, setSubmitMessage] = useState("");
 
     const role = (user?.role || "").toLowerCase();
     const isCoordinator = role === "coordinator";
@@ -90,10 +92,56 @@ function AssignedReportData() {
         switch (status) {
             case 0: return 'Draft';
             case 1: return 'Pending';
-            case 2: return 'Submitted';
+            case 2: return 'Completed';
             case 3: return 'Approved';
             case 4: return 'Rejected';
             default: return 'Unknown';
+        }
+    };
+
+    const handleSubmitToPrincipal = async () => {
+        if (!submissionId) return;
+        
+        try {
+            setSubmitting(true);
+            setSubmitMessage("");
+            
+            const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
+            
+            const response = await fetch(`${API_BASE}/submissions/${submissionId}/submit-to-principal`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                credentials: 'include',
+                body: JSON.stringify({
+                    coordinator_notes: 'Submitted by coordinator for principal approval'
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || 'Failed to submit to principal');
+            }
+
+            const result = await response.json();
+            setSubmitMessage(result.message || 'Successfully submitted to principal!');
+            
+            // Refresh the submission data to show updated status
+            const updatedSubmission = await fetch(`${API_BASE}/submissions/${submissionId}`, {
+                credentials: "include"
+            });
+            
+            if (updatedSubmission.ok) {
+                const updatedData = await updatedSubmission.json();
+                setSubmission(updatedData);
+            }
+            
+        } catch (err) {
+            console.error('Error submitting to principal:', err);
+            setSubmitMessage(`Error: ${err.message}`);
+        } finally {
+            setSubmitting(false);
         }
     };
 
@@ -251,6 +299,35 @@ function AssignedReportData() {
                                             </div>
                                         </div>
                                     )}
+                                </div>
+                            </div>
+                        )}
+                        
+                        {/* Submit to Principal Section */}
+                        {isCoordinator && submission && submission.status === 1 && (
+                            <div className="submit-section">
+                                <h3>Submit to Principal</h3>
+                                <p>This submission is ready to be submitted to the principal for approval.</p>
+                                {submitMessage && (
+                                    <div className={`message ${submitMessage.includes('Error') ? 'error' : 'success'}`}>
+                                        {submitMessage}
+                                    </div>
+                                )}
+                                <button 
+                                    onClick={handleSubmitToPrincipal}
+                                    disabled={submitting}
+                                    className="submit-button"
+                                >
+                                    {submitting ? 'Submitting...' : 'Submit to Principal'}
+                                </button>
+                            </div>
+                        )}
+                        
+                        {/* Show status if already completed and ready for principal review */}
+                        {submission && submission.status === 2 && (
+                            <div className="status-info">
+                                <div className="info-message">
+                                    <strong>Status:</strong> This submission has been completed and is ready for principal review.
                                 </div>
                             </div>
                         )}

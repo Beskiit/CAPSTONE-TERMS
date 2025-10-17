@@ -8,6 +8,7 @@ import Sidebar from '../../components/shared/SidebarCoordinator.jsx';
 import Submitted from '../../assets/submitted.svg';
 import Pending from '../../assets/pending.svg';
 import Approved from '../../assets/approved.svg';
+import DeadlineComponent from "../Teacher/DeadlineComponent.jsx";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
 
@@ -165,49 +166,6 @@ function CalendarComponent() {
   return (
     <div className="calendar-container">
       <Calendar onChange={onChange} value={date} />
-    </div>
-  );
-}
-
-function DeadlineComponent({ deadlines = [] }) {
-  // The API already filters for upcoming deadlines, so we don't need to filter again
-  const filteredDeadlines = deadlines;
-
-  const fmtDateTime = (iso) => {
-    if (!iso) return "";
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return "";
-    return d.toLocaleString("en-PH", {
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true,
-    });
-  };
-
-  return (
-    <div className="deadline-component">
-      <h4>Upcoming Deadlines</h4>
-      <hr />
-      <div className="deadline-container">
-        {Array.isArray(filteredDeadlines) && filteredDeadlines.length > 0 ? (
-          filteredDeadlines.map((d) => (
-            <div key={d.submission_id || d.report_assignment_id} className="deadline-item">
-              <p className="deadline-title">{d.title || "Untitled Report"}</p>
-              <div className="deadline-details">
-                <p>Due: {fmtDateTime(d.to_date)} </p>
-                <p style={{ fontSize: 12, opacity: 0.8 }}>
-                  Opens: {fmtDateTime(d.from_date)}
-                </p>
-              </div>
-            </div>
-          ))
-        ) : (
-          <p style={{ opacity: 0.8 }}>No upcoming deadlines 🎉</p>
-        )}
-      </div>
     </div>
   );
 }

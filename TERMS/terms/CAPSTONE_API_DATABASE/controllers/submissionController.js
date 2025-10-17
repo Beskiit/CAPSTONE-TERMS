@@ -1,5 +1,6 @@
 import db from '../db.js';
 import pool from '../db.js';
+import { createNotification } from './notificationsController.js';
 // --- helpers ---
 const safeParseJSON = (val, fallback = null) => {
   try {
@@ -98,7 +99,7 @@ export const getSubmissionsByUser = (req, res) => {
 export const getSubmission = (req, res) => {
   const { id } = req.params;
   const sql = `
-    SELECT s.submission_id, s.category_id, s.submitted_by, s.status,
+    SELECT s.submission_id, s.report_assignment_id, s.category_id, s.submitted_by, s.status,
            s.number_of_submission, s.value,
            DATE_FORMAT(s.date_submitted, '%m/%d/%Y %H:%i:%s') AS date_submitted,
            s.fields
@@ -173,6 +174,28 @@ export const submitAnswers = (req, res) => {
         if (fErr) return res.status(500).send('Database error: ' + fErr);
         const out = { ...fRes[0] };
         try { out.fields = typeof out.fields === 'string' ? JSON.parse(out.fields) : out.fields; } catch {}
+        // Notify assigner on first submit (status 2)
+        const becameSubmitted = Number.isInteger(requestedStatus) ? requestedStatus === 2 : (currentStatus < 2);
+        if (becameSubmitted && out?.submission_id) {
+          const metaSql = `
+            SELECT ra.given_by, ra.title
+            FROM submission s
+            JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
+            WHERE s.submission_id = ?
+          `;
+          db.query(metaSql, [id], (mErr, mRows) => {
+            if (!mErr && mRows?.length) {
+              const meta = mRows[0];
+              createNotification(meta.given_by, {
+                title: `Report submitted: ${meta.title}`,
+                message: `A teacher submitted a report for your review.`,
+                type: 'report_submitted',
+                ref_type: 'submission',
+                ref_id: Number(id)
+              });
+            }
+          });
+        }
         return res.json(out);
       });
     });
@@ -412,6 +435,28 @@ export const patchMPSBySubmissionId = (req, res) => {
         if (fErr) return res.status(500).send('Database error: ' + fErr);
         const out = { ...fRes[0] };
         try { out.fields = typeof out.fields === 'string' ? JSON.parse(out.fields) : out.fields; } catch {}
+        // Notify assigner on first submit (status 2)
+        const becameSubmitted = Number.isInteger(requestedStatus) ? requestedStatus === 2 : (currentStatus < 2);
+        if (becameSubmitted && out?.submission_id) {
+          const metaSql = `
+            SELECT ra.given_by, ra.title
+            FROM submission s
+            JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
+            WHERE s.submission_id = ?
+          `;
+          db.query(metaSql, [id], (mErr, mRows) => {
+            if (!mErr && mRows?.length) {
+              const meta = mRows[0];
+              createNotification(meta.given_by, {
+                title: `Report submitted: ${meta.title}`,
+                message: `A teacher submitted an MPS report for your review.`,
+                type: 'report_submitted',
+                ref_type: 'submission',
+                ref_id: Number(id)
+              });
+            }
+          });
+        }
         return res.json(out);
       });
     });
@@ -427,5 +472,188 @@ export const deleteSubmission = (req, res) => {
   db.query(sql, [id], (err) => {
     if (err) return res.status(500).send('Delete failed: ' + err);
     res.send(`Submission with ID ${id} has been deleted.`);
+  });
+};
+
+/**
+ * POST /submissions/:id/submit-to-principal
+ * Allows coordinators to submit accomplishment reports to principal for approval
+ */
+export const submitToPrincipal = (req, res) => {
+  const { id } = req.params;
+  const { coordinator_notes } = req.body || {};
+
+  // First, check if the submission exists and get its current status
+  const selectSql = `
+    SELECT s.submission_id, s.status, s.fields, s.submitted_by, s.value,
+           ud.name as submitted_by_name, ud.role as submitted_by_role
+    FROM submission s
+    LEFT JOIN user_details ud ON s.submitted_by = ud.user_id
+    WHERE s.submission_id = ?
+  `;
+
+  db.query(selectSql, [id], (selErr, selRes) => {
+    if (selErr) return res.status(500).send('Database error: ' + selErr);
+    if (!selRes.length) return res.status(404).send('Submission not found.');
+
+    const submission = selRes[0];
+    const currentStatus = Number(submission.status) || 0;
+
+    // Check if submission is already approved (status 3) or rejected (status 4)
+    if (currentStatus >= 3) {
+      return res.status(400).send('This submission has already been processed by the principal.');
+    }
+
+    // Check if submission is at least completed by teacher (status 2)
+    if (currentStatus < 2) {
+      return res.status(400).send('Submission must be completed by teacher before coordinator can submit to principal.');
+    }
+
+    // Update submission status to "Completed" (status 2) - ready for principal review
+    const updateSql = `
+      UPDATE submission 
+      SET status = 2, 
+          date_submitted = NOW(),
+          fields = JSON_SET(
+            COALESCE(fields, '{}'), 
+            '$.coordinator_notes', ?,
+            '$.submitted_to_principal_at', ?
+          )
+      WHERE submission_id = ?
+    `;
+
+    const submittedAt = new Date().toISOString();
+    const fieldsUpdate = [
+      coordinator_notes || '',
+      submittedAt,
+      id
+    ];
+
+    db.query(updateSql, fieldsUpdate, (updErr) => {
+      if (updErr) return res.status(500).send('Update failed: ' + updErr);
+
+    // Notify principal (assigner) that coordinator submitted to principal
+    const metaSql = `
+      SELECT ra.given_by, ra.title
+      FROM submission s
+      JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
+      WHERE s.submission_id = ?
+    `;
+    db.query(metaSql, [id], (mErr, mRows) => {
+      if (!mErr && mRows?.length) {
+        const meta = mRows[0];
+        const payload = {
+          title: `For approval: ${meta.title}`,
+          message: `A coordinator forwarded a submission for your approval.`,
+          type: 'for_approval',
+          ref_type: 'submission',
+          ref_id: Number(id)
+        };
+        // Notify the assigner (often the principal)
+        createNotification(meta.given_by, payload);
+        // Also notify all principals (fallback), excluding the assigner to avoid duplicates
+        db.query(`SELECT user_id FROM user_details WHERE LOWER(role)='principal'`, [], (pErr, pRows) => {
+          if (pErr || !pRows?.length) return;
+          pRows.forEach((row) => {
+            if (Number(row.user_id) !== Number(meta.given_by)) {
+              createNotification(row.user_id, payload);
+            }
+          });
+        });
+      }
+    });
+
+      // Return updated submission data
+      const fetchSql = `
+        SELECT s.submission_id, s.category_id, s.submitted_by, s.status, s.number_of_submission,
+               s.value, DATE_FORMAT(s.date_submitted, '%Y-%m-%d %H:%i:%s') AS date_submitted,
+               s.fields, ud.name as submitted_by_name
+        FROM submission s
+        LEFT JOIN user_details ud ON s.submitted_by = ud.user_id
+        WHERE s.submission_id = ?
+      `;
+
+      db.query(fetchSql, [id], (fErr, fRes) => {
+        if (fErr) return res.status(500).send('Database error: ' + fErr);
+        
+        const out = { ...fRes[0] };
+        try { 
+          out.fields = typeof out.fields === 'string' ? JSON.parse(out.fields) : out.fields; 
+        } catch {}
+        
+        res.json({
+          success: true,
+          message: 'Submission successfully submitted to principal for approval.',
+          submission: out
+        });
+      });
+    });
+  });
+};
+
+/**
+ * GET /submissions/for-principal-approval
+ * Returns submissions that were assigned BY the current principal and are ready for principal approval (status 2)
+ */
+export const getSubmissionsForPrincipalApproval = (req, res) => {
+  const principalId = req.user?.user_id;
+  
+  if (!principalId) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  const sql = `
+    SELECT 
+      s.submission_id,
+      s.category_id,
+      s.submitted_by,
+      s.status,
+      s.number_of_submission,
+      s.value as title,
+      DATE_FORMAT(s.date_submitted, '%Y-%m-%d %H:%i:%s') AS date_submitted,
+      s.fields,
+      ud.name as submitted_by_name,
+      ud.role as submitted_by_role,
+      c.category_name,
+      ra.title as assignment_title,
+      ra.to_date as due_date,
+      ra.given_by as assigned_by_principal
+    FROM submission s
+    LEFT JOIN user_details ud ON s.submitted_by = ud.user_id
+    LEFT JOIN category c ON s.category_id = c.category_id
+    LEFT JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
+    WHERE s.status = 2 
+      AND ra.given_by = ?
+    ORDER BY s.date_submitted DESC
+  `;
+
+  db.query(sql, [principalId], (err, results) => {
+    if (err) return res.status(500).send('Database error: ' + err);
+    
+    // Parse fields for each submission
+    const submissions = results.map(row => {
+      const out = { ...row };
+      try { 
+        out.fields = typeof out.fields === 'string' ? JSON.parse(out.fields) : out.fields; 
+      } catch {
+        out.fields = {};
+      }
+      return out;
+    });
+    
+    res.json(submissions);
+  });
+};
+
+// GET /submissions/by-assignment/:id/mine → returns current user's submission_id for given report_assignment_id
+export const getMySubmissionForAssignment = (req, res) => {
+  const userId = req.user?.user_id;
+  const { id } = req.params; // report_assignment_id
+  if (!userId) return res.status(401).json({ error: 'Authentication required' });
+  const sql = `SELECT submission_id FROM submission WHERE report_assignment_id = ? AND submitted_by = ? LIMIT 1`;
+  db.query(sql, [id, userId], (err, rows) => {
+    if (err) return res.status(500).send('Database error: ' + err);
+    if (!rows || !rows.length) return res.status(404).json({ error: 'Submission not found' });
+    res.json({ submission_id: rows[0].submission_id });
   });
 };

@@ -2,6 +2,7 @@
 import express from "express";
 import {
   getTeachers,
+  getCoordinators,
   createUser,
   getUsers,
   getUser,
@@ -39,6 +40,14 @@ router.get(
   requireAuth,
   requireAnyRole(["principal", "coordinator", "admin"]),
   getTeachers
+);
+
+/** GET /users/coordinators  (principal/admin) */
+router.get(
+  "/coordinators",
+  requireAuth,
+  requireAnyRole(["principal", "admin"]),
+  getCoordinators
 );
 
 /** GET /users/:id  (any authenticated) */

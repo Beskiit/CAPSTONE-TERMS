@@ -18,22 +18,21 @@ import mpsRoutes from "./routes/mpsRoutes.js";
 import accomplishmentRouter from "./routes/accomplishmentRoutes.js";
 import reportStatus from "./routes/reportStatusRoutes.js";
 import reportCountsRoutes from "./routes/reportCountsRoutes.js";
-
-import { report } from "process";
+import notificationsRouter from "./routes/notifications.js";
+import aiRouter from "./routes/ai.js";
 
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
 
-// ---- Env-driven URLs ----
+/* ----------------- Env URLs ----------------- */
 const IS_PROD = process.env.NODE_ENV === "production";
-// Default to production frontend URL
 const FRONTEND_URL = (process.env.FRONTEND_URL || "https://your-frontend-domain.com").replace(/\/$/, "");
 const PUBLIC_URL = (process.env.PUBLIC_URL || `http://localhost:${PORT}`).replace(/\/$/, "");
 
-// if you later set secure cookies, this helps behind Nginx/HTTPS
+/* trust proxy for secure cookies behind nginx */
 app.set("trust proxy", 1);
 
-/* ----------------- MySQL pool (mysql, callback API) ----------------- */
+/* ----------------- MySQL pool ----------------- */
 const pool = mysql.createPool({
   host: process.env.DB_HOST || "localhost",
   user: process.env.DB_USER || "root",
@@ -55,14 +54,12 @@ pool.getConnection((err, conn) => {
 const BASE_ALLOWED = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
-  "https://terms-api.kiri8tives.com",
+  "https://terms-api.kiri8tives.com", // (backend) allowed for diagnostics
   "http://127.0.0.1:5000",
 ];
 
 const ALLOWED_ORIGINS = Array.from(
-  new Set(
-    [...BASE_ALLOWED, FRONTEND_URL, PUBLIC_URL].filter(Boolean).map((u) => u.replace(/\/$/, ""))
-  )
+  new Set([...BASE_ALLOWED, FRONTEND_URL, PUBLIC_URL].filter(Boolean).map(u => u.replace(/\/$/, "")))
 );
 
 app.use(
@@ -86,8 +83,9 @@ app.options(
   })
 );
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Increase JSON/body limits to accommodate AI summarize payloads
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
 /* ----------------- Sessions + Passport ----------------- */
 app.use(
@@ -95,20 +93,20 @@ app.use(
     secret: process.env.SESSION_SECRET || "secret",
     resave: false,
     saveUninitialized: false,
-    // cookie: { secure: IS_PROD, sameSite: "lax" }, // enable after HTTPS
+    // cookie: { secure: IS_PROD, sameSite: "lax" }, // enable when HTTPS is on
   })
 );
 
 app.use(passport.initialize());
 app.use(passport.session());
 
-/* ----------------- Passport Google Strategy ----------------- */
+/* ----------------- Google OAuth ----------------- */
 passport.use(
   new GoogleStrategy(
     {
       clientID: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: `${PUBLIC_URL}/auth/google/callback`, // ← now env-driven
+      callbackURL: `${PUBLIC_URL}/auth/google/callback`,
     },
     (accessToken, refreshToken, profile, done) => {
       const email =
@@ -157,7 +155,6 @@ passport.use(
                     conn.release();
                     return done(err2);
                   }
-                  dbUser.google_id = googleId;
                   finish();
                 }
               );
@@ -174,12 +171,9 @@ passport.use(
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((user, done) => done(null, user));
 
-/* ----------------- Routes ----------------- */
-
-// Health first
+/* ----------------- Health + Root ----------------- */
 app.get("/health", (_req, res) => res.send("ok"));
 
-// 🔁 Root
 app.get("/", (req, res) => {
   if (process.env.NODE_ENV === "production") return res.send("API online");
   if (!req.isAuthenticated?.()) return res.redirect(FRONTEND_URL);
@@ -196,14 +190,13 @@ app.get("/", (req, res) => {
   }
 });
 
-// 🔑 Auth routes
+/* ----------------- Auth endpoints ----------------- */
 app.get("/auth/google", passport.authenticate("google", { scope: ["profile", "email"] }));
 
 app.get(
   "/auth/google/callback",
   passport.authenticate("google", { failureRedirect: `${FRONTEND_URL}` }),
   (req, res) => {
-    // Redirect to frontend based on user role
     switch (req.user.role) {
       case "admin":
         return res.redirect(`${FRONTEND_URL}/DashboardAdmin`);
@@ -231,27 +224,32 @@ app.post("/auth/logout", (req, res, next) => {
   });
 });
 
-// Existing routers
+/* ----------------- Static uploads ----------------- */
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+fs.mkdirSync(path.resolve("uploads/accomplishments"), { recursive: true });
+
+/* ----------------- App routes ----------------- */
 app.use("/users", usersRouter);
 app.use("/reports", reportAssignmentRouter);
 app.use("/categories", categoryRouter);
 app.use("/subcategories", subCategoryRouter);
 app.use("/submissions", submissionsRouter);
 app.use("/mps", mpsRoutes);
-app.use("/reports/accomplishment", accomplishmentRouter);
-app.use("/uploads", express.static(path.resolve("uploads")));
-fs.mkdirSync(path.resolve("uploads/accomplishments"), { recursive: true });
 
-// If you already use '/reports/status' for other routes, this fits right in:
+// 🔹 This is the base your React uses: `${API_BASE}/reports/accomplishment`
+app.use("/reports/accomplishment", accomplishmentRouter);
+
+// Counts first (more specific), then status
 app.use("/reports/status/count", reportCountsRoutes);
 app.use("/reports/status", reportStatus);
+app.use("/notifications", notificationsRouter);
+app.use("/ai", aiRouter);
 
-// 404
+/* ----------------- 404 + Error ----------------- */
 app.use((req, res, _next) => {
   res.status(404).json({ error: "Not Found", path: req.originalUrl });
 });
 
-// Error handler
 app.use((err, req, res, _next) => {
   const origin = req.headers.origin;
   if (ALLOWED_ORIGINS.includes((origin || "").replace(/\/$/, ""))) {

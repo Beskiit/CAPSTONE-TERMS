@@ -1,4 +1,5 @@
 import db from "../db.js";
+import { createNotificationsBulk } from './notificationsController.js';
 
 const TRAITS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
 const COLS   = ["m","f","total","mean","median","pl","mps","sd","target","hs","ls"];
@@ -159,10 +160,24 @@ export const giveMPSReport = (req, res) => {
                 res.status(500).send("Commit failed: " + cErr)
               );
             }
-            return res.status(201).json({
-              report_assignment_id,
-              submissions_created: recipients.length,
-              assigned
+            const nameSql = `SELECT name FROM user_details WHERE user_id = ? LIMIT 1`;
+            db.query(nameSql, [given_by], (_e, nRows) => {
+              const giverName = (nRows && nRows[0] && nRows[0].name) ? nRows[0].name : 'Coordinator';
+              const notifications = recipients.map((uid) => ({
+                user_id: uid,
+                title: `New report assigned: ${title}`,
+                message: `Assigned by ${giverName} — due on ${to_date}.`,
+                type: 'report_assigned',
+                ref_type: 'report_assignment',
+                ref_id: report_assignment_id,
+              }));
+              createNotificationsBulk(notifications, () => {
+              return res.status(201).json({
+                report_assignment_id,
+                submissions_created: recipients.length,
+                assigned
+              });
+              });
             });
           });
         }
