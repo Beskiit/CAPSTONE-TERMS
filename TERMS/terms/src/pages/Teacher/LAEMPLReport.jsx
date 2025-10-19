@@ -97,6 +97,23 @@ function LAEMPLReport() {
 
   const canSubmit = !!SUBMISSION_ID && !saving;
 
+  // Validation function for LAEMPL report
+  const validateLAEMPLForm = () => {
+    const errors = [];
+    
+    // Check if all required fields are filled
+    TRAITS.forEach(trait => {
+      COLS.forEach(col => {
+        const value = data[trait][col.key];
+        if (value === "" || value == null || value === undefined) {
+          errors.push(`${trait} - ${col.label} is required`);
+        }
+      });
+    });
+    
+    return errors;
+  };
+
   const onSubmit = async () => {
     if (!SUBMISSION_ID) {
       setErr("Missing submission id. Open this page with ?id=<submission_id> from the assignment link.");
@@ -104,6 +121,13 @@ function LAEMPLReport() {
     }
     if (isDisabled) {
       setErr("This submission is locked and cannot be changed.");
+      return;
+    }
+
+    // Validate form before saving
+    const validationErrors = validateLAEMPLForm();
+    if (validationErrors.length > 0) {
+      setErr(`Please fill all required fields: ${validationErrors.slice(0, 3).join(", ")}${validationErrors.length > 3 ? "..." : ""}`);
       return;
     }
 
@@ -410,11 +434,36 @@ function LAEMPLReport() {
   const mpsToTotals = () =>
     Object.fromEntries(COLS_MPS.map(c => [c.key, Number(mpsTotals[c.key] || 0)]));
 
+  // Validation function for MPS form in LAEMPL report
+  const validateMPSFormInLAEMPL = () => {
+    const errors = [];
+    
+    // Check if all required fields are filled
+    TRAITS_MPS.forEach(trait => {
+      COLS_MPS.forEach(col => {
+        const value = mpsData[trait][col.key];
+        if (value === "" || value == null || value === undefined) {
+          errors.push(`${trait} - ${col.label} is required`);
+        }
+      });
+    });
+    
+    return errors;
+  };
+
   const onSubmitMps = async () => {
     if (mpsDisabled) {
       setMpsErr("This submission is locked and cannot be changed.");
       return;
     }
+    
+    // Validate form before saving
+    const validationErrors = validateMPSFormInLAEMPL();
+    if (validationErrors.length > 0) {
+      setMpsErr(`Please fill all required fields: ${validationErrors.slice(0, 3).join(", ")}${validationErrors.length > 3 ? "..." : ""}`);
+      return;
+    }
+    
     setMpsSaving(true);
     setMpsMsg("");
     setMpsErr("");
@@ -566,9 +615,9 @@ function LAEMPLReport() {
       <Header userText={user ? user.name : "Guest"} />
       <div className="dashboard-container">
         {isTeacher ? (
-          <Sidebar activeLink="LAEMPL" />
+          <Sidebar activeLink="LAEMPL & MPS" />
         ) : (
-          <SidebarCoordinator activeLink="LAEMPL" />
+          <SidebarCoordinator activeLink="LAEMPL & MPS" />
         )}
         <div className="dashboard-content">
           <div className="dashboard-main">

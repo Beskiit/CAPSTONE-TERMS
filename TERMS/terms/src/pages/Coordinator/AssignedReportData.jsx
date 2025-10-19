@@ -5,6 +5,8 @@ import SidebarPrincipal from "../../components/shared/SidebarPrincipal";
 import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Header from "../../components/shared/Header";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
+import toast from "react-hot-toast";
 
 function AssignedReportData() {
     const navigate = useNavigate();
@@ -17,6 +19,14 @@ function AssignedReportData() {
     const [retryCount, setRetryCount] = useState(0);
     const [submitting, setSubmitting] = useState(false);
     const [submitMessage, setSubmitMessage] = useState("");
+
+    // New states for assignment navigation
+    const [allSubmissions, setAllSubmissions] = useState([]);
+    const [currentIndex, setCurrentIndex] = useState(0);
+    const [assignmentInfo, setAssignmentInfo] = useState(null);
+
+    // Confirmation Modal
+    const [showSubmitModal, setShowSubmitModal] = useState(false);
 
     const role = (user?.role || "").toLowerCase();
     const isCoordinator = role === "coordinator";
@@ -39,54 +49,208 @@ function AssignedReportData() {
     }, []);
 
     useEffect(() => {
-        const fetchSubmission = async () => {
+        const fetchAssignmentData = async () => {
             if (!submissionId) return;
+            
+            // Check if we already have this submission in our allSubmissions array
+            if (allSubmissions.length > 0) {
+                const existingSubmission = allSubmissions.find(sub => sub.submission_id == submissionId);
+                if (existingSubmission) {
+                    console.log('Submission already loaded, using existing data');
+                    setSubmission(existingSubmission);
+                    
+                    // Update current index
+                    const newIndex = allSubmissions.findIndex(sub => sub.submission_id == submissionId);
+                    setCurrentIndex(newIndex >= 0 ? newIndex : 0);
+                    return;
+                }
+            }
             
             try {
                 setLoading(true);
                 setError("");
                 const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
                 
-                // Add timeout to prevent hanging requests
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-                
+                // First, try to fetch the individual submission to get assignment info
                 const res = await fetch(`${API_BASE}/submissions/${submissionId}`, {
-                    credentials: "include",
-                    signal: controller.signal
+                    credentials: "include"
                 });
                 
-                clearTimeout(timeoutId);
-                
                 if (!res.ok) {
-                    if (res.status === 404) {
-                        setError("Submission not found. Please check if the submission ID is correct.");
-                    } else if (res.status === 500) {
-                        setError("Server error. Please try again later.");
-                    } else {
-                        setError("Failed to load submission. Please try again.");
-                    }
+                    setError("Submission not found.");
                     return;
                 }
                 
-                const data = await res.json();
-                setSubmission(data);
-            } catch (err) {
-                if (err.name === 'AbortError') {
-                    setError("Request timed out. Please check your connection and try again.");
-                } else {
-                    setError("Error loading submission. Please try again.");
+                const submissionData = await res.json();
+                setSubmission(submissionData);
+                
+                // Fetch all submissions for this user and filter by assignment
+                let assignmentReports = [];
+                
+                try {
+                    const submissionsRes = await fetch(`${API_BASE}/reports/assigned_by/${user?.user_id}`, {
+                        credentials: "include"
+                    });
+                    
+                    if (submissionsRes.ok) {
+                        const allReports = await submissionsRes.json();
+                        console.log('All reports from assigned_by endpoint:', allReports.length);
+                        
+                        // Filter reports for the same assignment
+                        assignmentReports = allReports.filter(report => 
+                            report.report_assignment_id == submissionData.report_assignment_id
+                        );
+                        
+                        console.log('Assignment ID we\'re looking for:', submissionData.report_assignment_id);
+                        console.log('Found submissions for assignment:', assignmentReports.length);
+                        console.log('Assignment reports:', assignmentReports);
+                        
+                        // Debug: show all assignment IDs in the reports
+                        const allAssignmentIds = allReports.map(r => r.report_assignment_id);
+                        console.log('All assignment IDs in reports:', [...new Set(allAssignmentIds)]);
+                    }
+                } catch (err) {
+                    console.log('Error fetching assignment submissions:', err);
                 }
-                console.error("Error fetching submission:", err);
+                
+                console.log('Assignment ID from submission:', submissionData.report_assignment_id);
+                console.log('Final assignment reports:', assignmentReports);
+                
+                if (assignmentReports.length > 0) {
+                    
+                    // Always set assignment info if we have it
+                    if (submissionData.report_assignment_id) {
+                        setAssignmentInfo({
+                            assignment_title: submissionData.assignment_title || submissionData.value || 'Report Assignment',
+                            category_name: submissionData.category_name || 'Unknown Category',
+                            sub_category_name: submissionData.sub_category_name || 'Unknown Sub-Category',
+                            due_date: submissionData.due_date,
+                            to_date: submissionData.to_date
+                        });
+                    }
+                    
+                    if (assignmentReports.length > 1) {
+                        setAllSubmissions(assignmentReports);
+                        
+                        // Find current submission index
+                        const currentIdx = assignmentReports.findIndex(report => 
+                            report.submission_id == submissionId
+                        );
+                        setCurrentIndex(currentIdx >= 0 ? currentIdx : 0);
+                        
+                        console.log('Navigation enabled - multiple submissions found');
+                    } else {
+                        // Single submission, but still show assignment info
+                        setAllSubmissions([submissionData]);
+                        setCurrentIndex(0);
+                        console.log('Single submission - no navigation needed');
+                    }
+                } else {
+                    // Fallback to single submission
+                    console.log('No other submissions found, using single submission');
+                    setAllSubmissions([submissionData]);
+                    setCurrentIndex(0);
+                    
+                    // Still set assignment info
+                    if (submissionData.report_assignment_id) {
+                        setAssignmentInfo({
+                            assignment_title: submissionData.assignment_title || submissionData.value || 'Report Assignment',
+                            category_name: submissionData.category_name || 'Unknown Category',
+                            sub_category_name: submissionData.sub_category_name || 'Unknown Sub-Category',
+                            due_date: submissionData.due_date,
+                            to_date: submissionData.to_date
+                        });
+                    }
+                }
+            } catch (err) {
+                setError("Error loading data. Please try again.");
+                console.error("Error fetching assignment data:", err);
             } finally {
                 setLoading(false);
             }
         };
 
-        if (submissionId) {
-            fetchSubmission();
+        if (submissionId && user?.user_id) {
+            fetchAssignmentData();
         }
-    }, [submissionId, retryCount]);
+    }, [submissionId, user?.user_id, retryCount]);
+
+    // Navigation functions
+    const goToNext = async () => {
+        if (currentIndex < allSubmissions.length - 1) {
+            const nextIndex = currentIndex + 1;
+            const nextSubmission = allSubmissions[nextIndex];
+            
+            console.log('Navigating to next submission:', nextSubmission.submission_id);
+            
+            setCurrentIndex(nextIndex);
+            
+            // Fetch full submission details for the new submission
+            try {
+                setLoading(true);
+                const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
+                const res = await fetch(`${API_BASE}/submissions/${nextSubmission.submission_id}`, {
+                    credentials: "include"
+                });
+                
+                if (res.ok) {
+                    const fullSubmissionData = await res.json();
+                    setSubmission(fullSubmissionData);
+                    console.log('Fetched full data for submission:', nextSubmission.submission_id);
+                } else {
+                    console.error('Failed to fetch submission details');
+                    setSubmission(nextSubmission); // Fallback to basic data
+                }
+            } catch (err) {
+                console.error('Error fetching submission details:', err);
+                setSubmission(nextSubmission); // Fallback to basic data
+            } finally {
+                setLoading(false);
+            }
+            
+            // Update URL without triggering a page reload
+            const newUrl = `/AssignedReportData/${nextSubmission.submission_id}`;
+            window.history.pushState(null, '', newUrl);
+        }
+    };
+
+    const goToPrevious = async () => {
+        if (currentIndex > 0) {
+            const prevIndex = currentIndex - 1;
+            const prevSubmission = allSubmissions[prevIndex];
+            
+            console.log('Navigating to previous submission:', prevSubmission.submission_id);
+            
+            setCurrentIndex(prevIndex);
+            
+            // Fetch full submission details for the new submission
+            try {
+                setLoading(true);
+                const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
+                const res = await fetch(`${API_BASE}/submissions/${prevSubmission.submission_id}`, {
+                    credentials: "include"
+                });
+                
+                if (res.ok) {
+                    const fullSubmissionData = await res.json();
+                    setSubmission(fullSubmissionData);
+                    console.log('Fetched full data for submission:', prevSubmission.submission_id);
+                } else {
+                    console.error('Failed to fetch submission details');
+                    setSubmission(prevSubmission); // Fallback to basic data
+                }
+            } catch (err) {
+                console.error('Error fetching submission details:', err);
+                setSubmission(prevSubmission); // Fallback to basic data
+            } finally {
+                setLoading(false);
+            }
+            
+            // Update URL without triggering a page reload
+            const newUrl = `/AssignedReportData/${prevSubmission.submission_id}`;
+            window.history.pushState(null, '', newUrl);
+        }
+    };
 
     const getStatusText = (status) => {
         switch (status) {
@@ -126,6 +290,7 @@ function AssignedReportData() {
 
             const result = await response.json();
             setSubmitMessage(result.message || 'Successfully submitted to principal!');
+            toast.success(result.message || 'Successfully submitted to principal!');
             
             // Refresh the submission data to show updated status
             const updatedSubmission = await fetch(`${API_BASE}/submissions/${submissionId}`, {
@@ -140,9 +305,19 @@ function AssignedReportData() {
         } catch (err) {
             console.error('Error submitting to principal:', err);
             setSubmitMessage(`Error: ${err.message}`);
+            toast.error(`Error: ${err.message}`);
         } finally {
             setSubmitting(false);
         }
+    };
+
+    const handleSubmitConfirmation = () => {
+        setShowSubmitModal(true);
+    };
+
+    const handleSubmitConfirm = async () => {
+        setShowSubmitModal(false);
+        await handleSubmitToPrincipal();
     };
 
     if (loading) {
@@ -220,6 +395,36 @@ function AssignedReportData() {
                 <div className="dashboard-content">
                     <div className="dashboard-main">
                         <h2>Submitted Report Details</h2>
+                        
+                        {/* Assignment Navigation */}
+                        {assignmentInfo && (
+                            <div className="assignment-navigation">
+                                <div className="assignment-info">
+                                    <h3>{assignmentInfo.assignment_title}</h3>
+                                    <p>{assignmentInfo.category_name} - {assignmentInfo.sub_category_name}</p>
+                                </div>
+                                <div className="submission-navigation">
+                                    <button 
+                                        onClick={goToPrevious} 
+                                        disabled={currentIndex === 0}
+                                        className="nav-button prev-button"
+                                    >
+                                        ← Previous
+                                    </button>
+                                    <span className="submission-counter">
+                                        {currentIndex + 1} of {allSubmissions.length}
+                                    </span>
+                                    <button 
+                                        onClick={goToNext} 
+                                        disabled={currentIndex === allSubmissions.length - 1}
+                                        className="nav-button next-button"
+                                    >
+                                        Next →
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                        
                         <div className="submission-details">
                             <div className="detail-row">
                                 <label>Submission ID:</label>
@@ -314,7 +519,7 @@ function AssignedReportData() {
                                     </div>
                                 )}
                                 <button 
-                                    onClick={handleSubmitToPrincipal}
+                                    onClick={handleSubmitConfirmation}
                                     disabled={submitting}
                                     className="submit-button"
                                 >
@@ -338,6 +543,18 @@ function AssignedReportData() {
                     </div>
                 </div>
             </div> 
+
+            {/* Confirmation Modal */}
+            <ConfirmationModal
+                isOpen={showSubmitModal}
+                onClose={() => setShowSubmitModal(false)}
+                onConfirm={handleSubmitConfirm}
+                title="Submit to Principal"
+                message="Are you sure you want to submit this report to the principal? Once submitted, the principal will review and approve or reject the submission."
+                confirmText="Submit to Principal"
+                cancelText="Cancel"
+                type="warning"
+            />
         </>
     )
 }

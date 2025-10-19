@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import Header from "../../components/shared/Header.jsx";
 import Sidebar from "../../components/shared/SidebarCoordinator.jsx";
 import SidebarPrincipal from "../../components/shared/SidebarPrincipal.jsx";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
+import toast from "react-hot-toast";
 import "./SetReport.css";
 import Laempl from "../../assets/templates/LAEMPL.png";
 import AccomplishmentReport from "../../assets/templates/accomplishment-report.png";
@@ -9,8 +11,6 @@ import AccomplishmentReport from "../../assets/templates/accomplishment-report.p
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "http://localhost:5000").replace(/\/$/, "");
 console.log(import.meta.env.VITE_API_BASE);
-
-
 
 // Preview mapping (category_id → sub_category_id → image)
 const TEMPLATE_MAP = {
@@ -52,6 +52,9 @@ function SetReport() {
   const [submitting, setSubmitting] = useState(false);
   const [teacherMenuOpen, setTeacherMenuOpen] = useState(false);
   const teacherMenuRef = useRef(null);
+
+  // Confirmation Modal
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   // Preview image resolver
   const previewSrc = useMemo(() => {
@@ -178,36 +181,43 @@ function SetReport() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (submitting) return; // guard against double-click
+
+    // Basic validation
+    if (!user?.user_id) {
+      toast.error("User not loaded yet. Please try again in a moment.");
+      return;
+    }
+    if (!selectedCategory || !selectedSubCategory || !dueDate) {
+      toast.error("Please complete Category, Sub-Category, and Due Date.");
+      return;
+    }
+
+    // Validate teacher selection based on workflow
+    if (workflowType === "direct") {
+      if (!selectedTeacher && selectedTeachers.length === 0) {
+        toast.error("Please select at least one teacher.");
+        return;
+      }
+    } else if (workflowType === "coordinated") {
+      if (!selectedCoordinator) {
+        toast.error("Please select a coordinator for the coordinated workflow.");
+        return;
+      }
+      if (!selectedTeacher && selectedTeachers.length === 0) {
+        toast.error("Please select at least one teacher.");
+        return;
+      }
+    }
+
+    // Show confirmation modal
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirmSubmit = async () => {
+    setShowConfirmModal(false);
     setSubmitting(true);
 
     try {
-      // Basic validation
-      if (!user?.user_id) {
-        alert("User not loaded yet. Please try again in a moment.");
-        return;
-      }
-      if (!selectedCategory || !selectedSubCategory || !dueDate) {
-        alert("Please complete Category, Sub-Category, and Due Date.");
-        return;
-      }
-
-      // Validate teacher selection based on workflow
-      if (workflowType === "direct") {
-        if (!selectedTeacher && selectedTeachers.length === 0) {
-          alert("Please select at least one teacher.");
-          return;
-        }
-      } else if (workflowType === "coordinated") {
-        if (!selectedCoordinator) {
-          alert("Please select a coordinator for the coordinated workflow.");
-          return;
-        }
-        if (!selectedTeacher && selectedTeachers.length === 0) {
-          alert("Please select at least one teacher.");
-          return;
-        }
-      }
-
       const reportType = detectReportType(subCategories, selectedSubCategory);
 
       // FIX: map attempts to INT or NULL (NULL = unlimited)
@@ -273,7 +283,7 @@ function SetReport() {
 
       if (!res.ok) {
         const errText = await res.text();
-        alert("Failed to set report: " + errText);
+        toast.error("Failed to set report: " + errText);
         return;
       }
 
@@ -288,11 +298,7 @@ function SetReport() {
         ? ` Created ${data.submission_ids.length} submission record(s).`
         : "";
 
-      alert(
-        `${workflowMessage} Assignment ID: ${
-          data.report_assignment_id ?? "(created)"
-        }.${subCount}`
-      );
+      toast.success(`Report has been set successfully!`);
 
       // Optional: reset form
       setSelectedTeacher("");
@@ -307,7 +313,7 @@ function SetReport() {
       setAllowLate(false);
     } catch (err) {
       console.error("Error submitting report:", err);
-      alert("Error submitting report. Check console.");
+      toast.error("Error submitting report. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -384,84 +390,68 @@ function SetReport() {
                 <label>Teachers:</label>
                 <div ref={teacherMenuRef} style={{ position: "relative", width: "100%" }}>
                   <button
+                    className="teacher-trigger"
                     type="button"
                     onClick={() => setTeacherMenuOpen((v) => !v)}
                     aria-haspopup="listbox"
                     aria-expanded={teacherMenuOpen}
-                    style={{
-                      width: "100%",
-                      textAlign: "left",
-                      padding: "6px 10px",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: 4,
-                      background: "#fff",
-                      cursor: "pointer",
-                    }}
-                    title={selectedTeachers.length ? selectableUsers.filter(u => selectedTeachers.includes(u.user_id)).map(u => u.name).join(", ") : "Select Teacher"}
+                    title={
+                      selectedTeachers.length
+                        ? selectableUsers
+                            .filter(u => selectedTeachers.includes(u.user_id))
+                            .map(u => u.name)
+                            .join(", ")
+                        : "Select Teacher"
+                    }
                   >
-                    {selectedTeachers.length
-                      ? selectableUsers.filter(u => selectedTeachers.includes(u.user_id)).map(u => u.name).join(", ")
-                      : "Select Teacher"}
+                    <span className="teacher-trigger-label">
+                      {selectedTeachers.length
+                        ? selectableUsers
+                            .filter(u => selectedTeachers.includes(u.user_id))
+                            .map(u => u.name)
+                            .join(", ")
+                        : "Select Teacher"}
+                    </span>
                   </button>
                   {teacherMenuOpen && (
                     <div
                       role="listbox"
-                      style={{
-                        position: "absolute",
-                        top: "100%",
-                        left: 0,
-                        width: "100%",
-                        maxHeight: 260,
-                        overflowY: "auto",
-                        background: "#fff",
-                        border: "1px solid #cbd5e1",
-                        borderRadius: 4,
-                        boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
-                        zIndex: 20,
-                        marginTop: 4,
-                      }}
+                      className="teacher-menu"
                     >
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderBottom: "1px solid #e5e7eb", background: "#f8fafc", whiteSpace: "nowrap" }}>
-                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", margin: 0 }}>
+                      <div className="teacher-menu-header">
+                        <label>
                           <input
+                            className="menu-checkbox"
                             type="checkbox"
-                          checked={selectedTeachers.length === selectableUsers.length && selectableUsers.length > 0}
+                            checked={selectedTeachers.length === selectableUsers.length && selectableUsers.length > 0}
                             onChange={(e) => (e.target.checked ? selectAllTeachers() : clearAllTeachers())}
                           />
-                          <span style={{ fontWeight: 600 }}>Select all</span>
+                          <span>Select all</span>
                         </label>
-                        <span style={{ marginLeft: "auto", fontSize: 12, opacity: 0.7 }}>{selectedTeachers.length} selected</span>
-                        <button type="button" onClick={clearAllTeachers} style={{ fontSize: 12, padding: "4px 6px" }}>Clear</button>
+                        <span className="teacher-menu-count">
+                          {selectedTeachers.length} selected
+                        </span>
+                        <button type="button" onClick={clearAllTeachers} className="teacher-menu-clear">
+                          Clear
+                        </button>
                       </div>
-                      <div style={{ padding: "4px 6px" }}>
+
+                      <div className="teacher-menu-content">
                         {selectableUsers.map((u) => {
                           const checked = selectedTeachers.includes(u.user_id);
                           return (
                             <div
                               key={u.user_id}
                               onClick={() => toggleTeacher(u.user_id)}
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 8,
-                                padding: "6px 8px",
-                                cursor: "pointer",
-                                borderRadius: 4,
-                                whiteSpace: "nowrap",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                background: checked ? "#3b82f6" : "transparent",
-                                color: checked ? "#ffffff" : "inherit",
-                                marginBottom: 2,
-                              }}
+                              className={`teacher-menu-item ${checked ? 'selected' : ''}`}
                             >
                               <input
+                                className="menu-checkbox"
                                 type="checkbox"
                                 readOnly
                                 checked={checked}
-                                style={{ pointerEvents: "none" }}
                               />
-                              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{u.name}</span>
+                              <span>{u.name}</span>
                             </div>
                           );
                         })}
@@ -558,6 +548,18 @@ function SetReport() {
           </div>
         </div>
       </div>
+
+      {/* Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={showConfirmModal}
+        onClose={() => setShowConfirmModal(false)}
+        onConfirm={handleConfirmSubmit}
+        title="Set Report Schedule"
+        message="Are you sure you want to set this report schedule? This will assign the report to the selected teachers and they will be notified."
+        confirmText="Set Schedule"
+        cancelText="Cancel"
+        type="info"
+      />
     </>
   );
 }

@@ -34,7 +34,9 @@ export const getUpcomingDeadlinesByUser = (req, res) => {
       ra.sub_category_id,
       c.category_name,
       sc.sub_category_name,
-      st.value AS status_value
+      st.value AS status_value,
+      s.status,
+      s.fields
     FROM submission s
     JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
     JOIN status st ON st.status_id = s.status
@@ -42,13 +44,36 @@ export const getUpcomingDeadlinesByUser = (req, res) => {
     LEFT JOIN sub_category sc ON sc.sub_category_id = ra.sub_category_id
     WHERE s.submitted_by = ?
       AND ra.to_date >= NOW()                -- still open
-      AND (LOWER(st.value) = 'pending' OR s.status = 1)  -- pending/not finished
+      AND (LOWER(st.value) = 'pending' OR s.status = 1 OR s.status = 4)  -- pending/not finished/rejected
     ORDER BY ra.to_date ASC, ra.report_assignment_id ASC
   `;
   db.query(sql, [id], (err, rows) => {
     if (err) return res.status(500).send("DB error: " + err);
+    
+    // Process rows to add rejection information
+    const processedRows = (rows || []).map(row => {
+      const processedRow = { ...row };
+      
+      // Parse fields to get rejection information
+      try {
+        const fields = typeof row.fields === 'string' ? JSON.parse(row.fields) : row.fields || {};
+        processedRow.rejection_reason = fields.rejection_reason;
+        processedRow.extended_due_date = fields.extended_due_date;
+        processedRow.original_due_date = fields.original_due_date;
+        processedRow.rejected_at = fields.rejected_at;
+      } catch (e) {
+        // If parsing fails, set empty values
+        processedRow.rejection_reason = null;
+        processedRow.extended_due_date = null;
+        processedRow.original_due_date = null;
+        processedRow.rejected_at = null;
+      }
+      
+      return processedRow;
+    });
+    
     // Return empty list with 200 so frontend can show friendly message
-    return res.json(rows || []);
+    return res.json(processedRows);
   });
 };
 

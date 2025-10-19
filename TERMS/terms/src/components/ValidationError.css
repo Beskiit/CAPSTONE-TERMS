@@ -1,0 +1,158 @@
+/* ValidationError component styles */
+.validation-error {
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 16px 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.validation-error-icon {
+  font-size: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.validation-error-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.validation-error-title {
+  font-weight: 600;
+  color: #dc2626;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.validation-error-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.validation-error-item {
+  color: #dc2626;
+  font-size: 14px;
+  line-height: 1.5;
+  margin-bottom: 4px;
+  padding-left: 8px;
+  position: relative;
+}
+
+.validation-error-item::before {
+  content: "•";
+  color: #dc2626;
+  font-weight: bold;
+  position: absolute;
+  left: 0;
+}
+
+.validation-error-item:last-child {
+  margin-bottom: 0;
+}
+
+.validation-error-more {
+  color: #9ca3af;
+  font-size: 13px;
+  font-style: italic;
+  margin-top: 4px;
+}
+
+.validation-error-more::before {
+  content: "•";
+  color: #9ca3af;
+  font-weight: bold;
+  position: absolute;
+  left: 0;
+}
+
+/* Compact variant */
+.validation-error.compact {
+  padding: 12px;
+  margin: 12px 0;
+}
+
+.validation-error.compact .validation-error-title {
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.validation-error.compact .validation-error-item {
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+/* Inline variant */
+.validation-error.inline {
+  background-color: transparent;
+  border: none;
+  padding: 8px 0;
+  margin: 8px 0;
+  box-shadow: none;
+}
+
+.validation-error.inline .validation-error-title {
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.validation-error.inline .validation-error-item {
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+/* Success state (when errors are resolved) */
+.validation-error.success {
+  background-color: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.validation-error.success .validation-error-title {
+  color: #16a34a;
+}
+
+.validation-error.success .validation-error-item {
+  color: #16a34a;
+}
+
+.validation-error.success .validation-error-item::before {
+  color: #16a34a;
+}
+
+/* Animation for error appearance */
+.validation-error {
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .validation-error {
+    padding: 12px;
+    margin: 12px 0;
+  }
+  
+  .validation-error-title {
+    font-size: 13px;
+  }
+  
+  .validation-error-item {
+    font-size: 13px;
+  }
+}

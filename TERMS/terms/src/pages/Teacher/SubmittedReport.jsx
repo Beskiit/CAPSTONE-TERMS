@@ -107,6 +107,18 @@ function SubmittedReport() {
                                                      submission.status === 3 ? 'Approved' : 
                                                      submission.status === 4 ? 'Rejected' : 'Unknown'}
                                                 </span>
+                                                {submission.status === 4 && submission.fields?.rejection_reason && (
+                                                    <div className="rejection-details">
+                                                        <small className="rejection-reason">
+                                                            Reason: {submission.fields.rejection_reason}
+                                                        </small>
+                                                        {submission.fields.extended_due_date && (
+                                                            <small className="extended-deadline">
+                                                                New deadline: {new Date(submission.fields.extended_due_date).toLocaleDateString()}
+                                                            </small>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </td>
                                             <td>{submission.date_submitted || 'Not submitted'}</td>
                                             <td>Assignment #{submission.report_assignment_id || 'N/A'}</td>

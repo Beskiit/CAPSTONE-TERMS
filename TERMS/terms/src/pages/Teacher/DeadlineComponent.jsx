@@ -78,29 +78,48 @@ export default function DeadlineComponent({ deadlines = [] }) {
         {/* Always-scrollable list */}
         <div className="deadline-list">
           {visible.length > 0 ? (
-            visible.map((d, idx) => (
-              <a
-                key={d.submission_id || d.report_assignment_id || idx}
-                className="deadline-item"
-                role="button"
-                tabIndex={0}
-                onClick={() => goToTemplate(d)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    goToTemplate(d);
-                  }
-                }}
-              >
-                <p className="deadline-title">{d.title || "Untitled Report"}</p>
-                <div className="deadline-details">
-                  <p>Due: {fmtDateTime(d.to_date)}</p>
-                  <p style={{ fontSize: 12, opacity: 0.8 }}>
-                    Opens: {fmtDateTime(d.from_date)}
+            visible.map((d, idx) => {
+              const isRejected = d.status === 4;
+              const extendedDueDate = d.extended_due_date ? new Date(d.extended_due_date) : null;
+              const displayDueDate = extendedDueDate || new Date(d.to_date);
+              
+              return (
+                <a
+                  key={d.submission_id || d.report_assignment_id || idx}
+                  className={`deadline-item ${isRejected ? 'rejected' : ''}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => goToTemplate(d)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      goToTemplate(d);
+                    }
+                  }}
+                >
+                  <p className="deadline-title">
+                    {d.title || "Untitled Report"}
+                    {isRejected && <span className="rejected-badge">REJECTED</span>}
                   </p>
-                </div>
-              </a>
-            ))
+                  <div className="deadline-details">
+                    <p>
+                      Due: {fmtDateTime(displayDueDate)}
+                      {isRejected && extendedDueDate && (
+                        <span className="extended-info"> (Extended)</span>
+                      )}
+                    </p>
+                    {isRejected && d.rejection_reason && (
+                      <p className="rejection-reason" style={{ fontSize: 11, color: '#dc2626', marginTop: 4 }}>
+                        Reason: {d.rejection_reason}
+                      </p>
+                    )}
+                    <p style={{ fontSize: 12, opacity: 0.8 }}>
+                      Opens: {fmtDateTime(d.from_date)}
+                    </p>
+                  </div>
+                </a>
+              );
+            })
           ) : (
             <p style={{ opacity: 0.8, margin: 0 }}>No upcoming deadlines 🎉</p>
           )}

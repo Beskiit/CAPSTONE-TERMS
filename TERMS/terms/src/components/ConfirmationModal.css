@@ -1,0 +1,156 @@
+/* Modal Overlay */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  padding: 20px;
+}
+
+/* Modal Content */
+.modal-content {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  max-width: 400px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+/* Modal Header */
+.modal-header {
+  display: flex;
+  align-items: center;
+  padding: 24px 24px 16px 24px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.modal-icon {
+  font-size: 24px;
+  margin-right: 12px;
+}
+
+.modal-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0;
+}
+
+/* Modal Body */
+.modal-body {
+  padding: 16px 24px;
+}
+
+.modal-message {
+  color: #6b7280;
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Modal Footer */
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 24px 24px 24px;
+}
+
+/* Buttons */
+.btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+  min-width: 80px;
+}
+
+.btn-cancel {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.btn-cancel:hover {
+  background: #e5e7eb;
+}
+
+.btn-confirm {
+  color: white;
+}
+
+.btn-warning {
+  background: #f59e0b;
+}
+
+.btn-warning:hover {
+  background: #d97706;
+}
+
+.btn-danger {
+  background: #ef4444;
+}
+
+.btn-danger:hover {
+  background: #dc2626;
+}
+
+.btn-info {
+  background: #3b82f6;
+}
+
+.btn-info:hover {
+  background: #2563eb;
+}
+
+.btn-success {
+  background: #10b981;
+}
+
+.btn-success:hover {
+  background: #059669;
+}
+
+/* Modal Types */
+.modal-warning .modal-icon {
+  color: #f59e0b;
+}
+
+.modal-danger .modal-icon {
+  color: #ef4444;
+}
+
+.modal-info .modal-icon {
+  color: #3b82f6;
+}
+
+.modal-success .modal-icon {
+  color: #10b981;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  .modal-content {
+    margin: 20px;
+    max-width: none;
+  }
+  
+  .modal-footer {
+    flex-direction: column;
+  }
+  
+  .btn {
+    width: 100%;
+  }
+}

@@ -123,6 +123,27 @@ body{
   padding: 1rem;
   background-color: white;
   border-radius: .5rem;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* Custom scrollbar for deadline component */
+.deadline-component::-webkit-scrollbar {
+  width: 6px;
+}
+
+.deadline-component::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.deadline-component::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.deadline-component::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
 }
 
 /* React Calendar Customization */
@@ -135,8 +156,12 @@ body{
 }
 
 .react-calendar__navigation {
-  color: #fff;
+  color: #000 !important; /* Make header text black */
   border-radius: 1rem 1rem 0 0;
+}
+
+.react-calendar__navigation button {
+  color: #000 !important; /* Make navigation buttons black */
 }
 
 .react-calendar__month-view__weekdays {
@@ -149,6 +174,7 @@ body{
   background: none;
   color: #223861;
   border-radius: 0.5rem;
+  position: relative;
 }
 
 .react-calendar__tile--active {
@@ -159,5 +185,26 @@ body{
 .react-calendar__tile--now {
   background: #FF8686;
   color: #fff;
+}
+
+/* Deadline styling */
+.react-calendar__tile--deadline {
+  font-weight: bold !important;
+  background: #fff3cd !important;
+  border: 2px solid #ffc107 !important;
+  color: #856404 !important;
+}
+
+.react-calendar__tile--deadline:hover {
+  background: #ffeaa7 !important;
+}
+
+.deadline-indicator {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  color: #dc3545;
+  font-size: 8px;
+  font-weight: bold;
 }
 

@@ -102,8 +102,18 @@ export const getSubmission = (req, res) => {
     SELECT s.submission_id, s.report_assignment_id, s.category_id, s.submitted_by, s.status,
            s.number_of_submission, s.value,
            DATE_FORMAT(s.date_submitted, '%m/%d/%Y %H:%i:%s') AS date_submitted,
-           s.fields
+           s.fields,
+           ra.title AS assignment_title,
+           ra.instruction,
+           DATE_FORMAT(ra.from_date, '%m/%d/%Y') AS from_date,
+           DATE_FORMAT(ra.to_date, '%m/%d/%Y') AS to_date,
+           ra.allow_late,
+           c.category_name,
+           sc.sub_category_name
     FROM submission s
+    JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
+    LEFT JOIN category c ON ra.category_id = c.category_id
+    LEFT JOIN sub_category sc ON ra.sub_category_id = sc.sub_category_id
     WHERE s.submission_id = ?
   `;
   db.query(sql, [id], (err, results) => {
@@ -655,5 +665,325 @@ export const getMySubmissionForAssignment = (req, res) => {
     if (err) return res.status(500).send('Database error: ' + err);
     if (!rows || !rows.length) return res.status(404).json({ error: 'Submission not found' });
     res.json({ submission_id: rows[0].submission_id });
+  });
+};
+
+/**
+ * PATCH /submissions/:id
+ * Generic endpoint for updating submission status and other fields
+ */
+export const patchSubmission = (req, res) => {
+  const { id } = req.params;
+  const { status, rejection_reason, coordinator_notes } = req.body;
+
+  console.log('PATCH submission request:', {
+    id,
+    status,
+    rejection_reason,
+    coordinator_notes,
+    body: req.body
+  });
+
+  if (!id) {
+    return res.status(400).send('Submission ID is required');
+  }
+
+  // Build update query dynamically
+  const updates = [];
+  const values = [];
+
+  if (status !== undefined) {
+    updates.push('status = ?');
+    values.push(status);
+  }
+
+  if (rejection_reason !== undefined) {
+    updates.push('fields = JSON_SET(COALESCE(fields, "{}"), "$.rejection_reason", ?)');
+    values.push(rejection_reason);
+  }
+
+  if (coordinator_notes !== undefined) {
+    updates.push('fields = JSON_SET(COALESCE(fields, "{}"), "$.coordinator_notes", ?)');
+    values.push(coordinator_notes);
+  }
+
+  if (updates.length === 0) {
+    return res.status(400).send('No fields provided for update');
+  }
+
+  // Add submission ID to values
+  values.push(id);
+
+  const sql = `UPDATE submission SET ${updates.join(', ')} WHERE submission_id = ?`;
+
+  db.query(sql, values, (err, result) => {
+    if (err) return res.status(500).send('Update failed: ' + err);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).send('Submission not found');
+    }
+
+    // If status is 4 (rejected), implement rejection workflow
+    if (status === 4) {
+      handleRejectionWorkflow(id, rejection_reason, res);
+    } else {
+      // Return updated submission
+      const fetchSql = `
+        SELECT s.submission_id, s.category_id, s.submitted_by, s.status, s.number_of_submission,
+               s.value, DATE_FORMAT(s.date_submitted, '%Y-%m-%d %H:%i:%s') AS date_submitted,
+               s.fields, ud.name as submitted_by_name
+        FROM submission s
+        LEFT JOIN user_details ud ON s.submitted_by = ud.user_id
+        WHERE s.submission_id = ?
+      `;
+
+      db.query(fetchSql, [id], (fErr, fRes) => {
+        if (fErr) return res.status(500).send('Failed to fetch updated submission: ' + fErr);
+        
+        const submission = normalizeFields(fRes[0]);
+        res.json({
+          message: 'Submission updated successfully',
+          submission: submission
+        });
+      });
+    }
+  });
+};
+
+/**
+ * PATCH /submissions/:id/formdata
+ * Handle FormData submissions (for coordinator forms with images)
+ */
+export const patchSubmissionFormData = (req, res) => {
+  const { id } = req.params;
+  
+  if (!id) {
+    return res.status(400).send('Submission ID is required');
+  }
+
+  // Debug: Log the received data
+  console.log('Received FormData:', req.body);
+  console.log('Files:', req.files);
+  console.log('Files length:', req.files ? req.files.length : 'no files');
+
+  // Extract form data from req.body (FormData is automatically parsed by express)
+  const narrative = req.body.narrative;
+  const title = req.body.title;
+  const status = req.body.status;
+  const activityName = req.body.activityName;
+  const facilitators = req.body.facilitators;
+  const objectives = req.body.objectives;
+  const date = req.body.date;
+  const time = req.body.time;
+  const venue = req.body.venue;
+  const keyResult = req.body.keyResult;
+  const personsInvolved = req.body.personsInvolved;
+  const expenses = req.body.expenses;
+  const existingImagesJson = req.body.existingImages;
+
+  // Get current submission data
+  const selectSql = `SELECT status, fields FROM submission WHERE submission_id = ?`;
+  db.query(selectSql, [id], (selErr, selRes) => {
+    if (selErr) return res.status(500).send('Database error: ' + selErr);
+    if (!selRes.length) return res.status(404).send('Submission not found.');
+
+    const currentStatus = Number(selRes[0].status) || 0;
+    let current = {};
+    
+    try {
+      current = typeof selRes[0].fields === 'string'
+        ? JSON.parse(selRes[0].fields)
+        : (selRes[0].fields || {});
+    } catch { 
+      current = {}; 
+    }
+
+    // Build new answers object with coordinator data
+    const newAnswers = {
+      ...(current._answers || {}),
+      ...(narrative && { narrative }),
+      ...(title && { title }),
+      ...(activityName && { activityName }),
+      ...(facilitators && { facilitators }),
+      ...(objectives && { objectives }),
+      ...(date && { date }),
+      ...(time && { time }),
+      ...(venue && { venue }),
+      ...(keyResult && { keyResult }),
+      ...(personsInvolved && { personsInvolved }),
+      ...(expenses && { expenses })
+    };
+
+    const next = {
+      _form: current._form || { title: '', fields: [] },
+      _answers: newAnswers,
+    };
+
+    // Handle existing images (including consolidated ones)
+    let finalImages = current._answers?.images || [];
+    
+    if (existingImagesJson) {
+      try {
+        const existingImages = JSON.parse(existingImagesJson);
+        console.log('Received existing images:', existingImages);
+        finalImages = existingImages;
+      } catch (e) {
+        console.error('Error parsing existing images:', e);
+      }
+    }
+    
+    // Handle new file uploads if any
+    const files = req.files || [];
+    console.log('Processing files:', files);
+    if (files.length > 0) {
+      const imageUrls = files.map(file => ({
+        url: `/uploads/accomplishments/${file.filename}`,
+        filename: file.originalname
+      }));
+      console.log('Created image URLs:', imageUrls);
+      finalImages = [...finalImages, ...imageUrls];
+      console.log('Updated images array:', finalImages);
+    } else {
+      console.log('No files to process');
+    }
+    
+    // Set the final images array
+    next._answers.images = finalImages;
+
+    // Decide the new status
+    let newStatusClause = '';
+    const params = [JSON.stringify(next)];
+    if (Number.isInteger(Number(status))) {
+      newStatusClause = ', status = ?';
+      params.push(Number(status));
+    } else if (currentStatus < 2) {
+      newStatusClause = ', status = 2';
+    }
+
+    const updateSql = `UPDATE submission SET fields = ?, date_submitted = NOW()${newStatusClause} WHERE submission_id = ?`;
+    params.push(id);
+
+    console.log('Final data being stored:', JSON.stringify(next, null, 2));
+
+    db.query(updateSql, params, (updErr) => {
+      if (updErr) return res.status(500).send('Update failed: ' + updErr);
+
+      // Return success response
+      res.json({
+        message: 'Submission updated successfully',
+        submission_id: id,
+        status: Number(status) || (currentStatus < 2 ? 2 : currentStatus)
+      });
+    });
+  });
+};
+
+/**
+ * Handle rejection workflow: set status to 1 (draft), extend deadline, and notify
+ */
+const handleRejectionWorkflow = (submissionId, rejectionReason, res) => {
+  console.log('Handling rejection workflow:', {
+    submissionId,
+    rejectionReason,
+    rejectionReasonType: typeof rejectionReason
+  });
+  
+  // Get submission details and assignment info
+  const getDetailsSql = `
+    SELECT s.submission_id, s.submitted_by, s.report_assignment_id, s.fields,
+           ra.title as assignment_title, ra.to_date as original_due_date,
+           ud.name as submitted_by_name, ud.email as submitted_by_email
+    FROM submission s
+    JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
+    LEFT JOIN user_details ud ON s.submitted_by = ud.user_id
+    WHERE s.submission_id = ?
+  `;
+
+  db.query(getDetailsSql, [submissionId], (err, results) => {
+    if (err) return res.status(500).send('Failed to get submission details: ' + err);
+    
+    if (results.length === 0) {
+      return res.status(404).send('Submission not found');
+    }
+
+    const submission = results[0];
+    const originalDueDate = new Date(submission.original_due_date);
+    
+    // Extend deadline by 7 days from original due date
+    const extendedDueDate = new Date(originalDueDate);
+    extendedDueDate.setDate(extendedDueDate.getDate() + 7);
+    
+    // Update submission status to 1 (draft) and extend deadline
+    const updateSql = `
+      UPDATE submission 
+      SET status = 1,
+          fields = JSON_SET(
+            COALESCE(fields, '{}'),
+            '$.rejection_reason', ?,
+            '$.rejected_at', ?,
+            '$.extended_due_date', ?,
+            '$.original_due_date', ?
+          )
+      WHERE submission_id = ?
+    `;
+
+    const rejectedAt = new Date().toISOString();
+    const updateValues = [
+      rejectionReason,
+      rejectedAt,
+      extendedDueDate.toISOString(),
+      originalDueDate.toISOString(),
+      submissionId
+    ];
+
+    console.log('Updating submission with rejection data:', {
+      submissionId,
+      rejectionReason,
+      rejectedAt,
+      extendedDueDate: extendedDueDate.toISOString(),
+      originalDueDate: originalDueDate.toISOString(),
+      updateValues
+    });
+
+    db.query(updateSql, updateValues, (updateErr, updateResult) => {
+      if (updateErr) return res.status(500).send('Failed to update submission: ' + updateErr);
+
+      // Update the report assignment deadline
+      const updateAssignmentSql = `
+        UPDATE report_assignment 
+        SET to_date = ?
+        WHERE report_assignment_id = ?
+      `;
+
+      db.query(updateAssignmentSql, [extendedDueDate, submission.report_assignment_id], (assignErr) => {
+        if (assignErr) {
+          console.error('Failed to update assignment deadline:', assignErr);
+          // Continue with notification even if assignment update fails
+        }
+
+        // Notify the teacher/coordinator about the rejection
+        const notificationPayload = {
+          title: `Report Rejected: ${submission.assignment_title}`,
+          message: `Your report has been rejected. Reason: ${rejectionReason}. New deadline: ${extendedDueDate.toLocaleDateString()}`,
+          type: 'rejection',
+          ref_type: 'submission',
+          ref_id: Number(submissionId)
+        };
+
+        // Notify the submitter
+        createNotification(submission.submitted_by, notificationPayload);
+
+        // Return success response
+        res.json({
+          message: 'Report rejected successfully. Deadline extended by 7 days.',
+          submission: {
+            submission_id: submissionId,
+            status: 1,
+            extended_due_date: extendedDueDate.toISOString(),
+            rejection_reason: rejectionReason
+          }
+        });
+      });
+    });
   });
 };

@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from "react";
 import Header from "../../components/shared/Header.jsx";
 import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
+import toast from "react-hot-toast";
 import "./LAEMPLReport.css";
 import "../../components/shared/StatusBadges.css";
 import { useLocation } from "react-router-dom";
@@ -132,6 +134,9 @@ function MPSReport() {
   const [importMsg, setImportMsg] = useState(null);
   const fileInputRef = useRef(null);
 
+  // Confirmation Modal
+  const [showSubmitModal, setShowSubmitModal] = useState(false);
+
   useEffect(() => {
     (async () => {
       try {
@@ -202,6 +207,23 @@ function MPSReport() {
   const toTotals = () =>
     Object.fromEntries(COLS_MPS.map(col => [col.key, Number(totals[col.key] || 0)]));
 
+  // Validation function for MPS report
+  const validateMPSForm = () => {
+    const errors = [];
+    
+    // Check if all required fields are filled
+    TRAITS_MPS.forEach(trait => {
+      COLS_MPS.forEach(col => {
+        const value = data[trait][col.key];
+        if (value === "" || value == null || value === undefined) {
+          errors.push(`${trait} - ${col.label} is required`);
+        }
+      });
+    });
+    
+    return errors;
+  };
+
   // ---- save/submit (status handled server-side; this just sends fields)
   const submitMPS = async () => {
     if (isDisabled) {
@@ -212,6 +234,15 @@ function MPSReport() {
       setSaveMsg("Error: Missing submission id.");
       return;
     }
+    
+    // Validate form before saving
+    const validationErrors = validateMPSForm();
+    if (validationErrors.length > 0) {
+      setSaveMsg(`Please fill all required fields: ${validationErrors.slice(0, 3).join(", ")}${validationErrors.length > 3 ? "..." : ""}`);
+      toast.error("Please fill all required fields before saving");
+      return;
+    }
+    
     setSaving(true);
     setSaveMsg(null);
     try {
@@ -231,10 +262,12 @@ function MPSReport() {
       }
       const json = await res.json();
       setSaveMsg("Saved successfully.");
+      toast.success("MPS report saved successfully!");
       if (typeof json?.status !== "undefined") setStatus(json.status);
       setEditOverride(false);
     } catch (err) {
       setSaveMsg(`Error: ${err.message}`);
+      toast.error(`Error: ${err.message}`);
     } finally {
       setSaving(false);
     }
@@ -250,6 +283,15 @@ function MPSReport() {
       setSaveMsg("Error: Missing submission id.");
       return;
     }
+    
+    // Validate form before submitting to coordinator
+    const validationErrors = validateMPSForm();
+    if (validationErrors.length > 0) {
+      setSaveMsg(`Please fill all required fields before submitting: ${validationErrors.slice(0, 3).join(", ")}${validationErrors.length > 3 ? "..." : ""}`);
+      toast.error("Please fill all required fields before submitting");
+      return;
+    }
+    
     setSaving(true);
     setSaveMsg(null);
     try {
@@ -268,14 +310,24 @@ function MPSReport() {
         throw new Error(txt || `HTTP ${res.status}`);
       }
       const json = await res.json();
-      setSaveMsg("Report submitted to coordinator successfully!");
+      toast.success("Report submitted to coordinator successfully!");
       if (typeof json?.status !== "undefined") setStatus(json.status);
       setEditOverride(false);
     } catch (err) {
       setSaveMsg(`Error: ${err.message}`);
+      toast.error(`Error: ${err.message}`);
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSubmitConfirmation = () => {
+    setShowSubmitModal(true);
+  };
+
+  const handleSubmitConfirm = async () => {
+    setShowSubmitModal(false);
+    await submitToCoordinator();
   };
 
   // ---- IMPORT helpers
@@ -555,7 +607,7 @@ function MPSReport() {
               <button type="button" disabled={saving || isDisabled} onClick={submitMPS}>
                 {saving ? "Saving..." : "Save as Draft"}
               </button>
-              <button type="button" disabled={saving || isDisabled} onClick={submitToCoordinator} className="submit-button">
+              <button type="button" disabled={saving || isDisabled} onClick={handleSubmitConfirmation} className="submit-button">
                 {saving ? "Submitting..." : "Submit to Coordinator"}
               </button>
               <button type="button" onClick={handleClear}>Clear Table</button>
@@ -578,6 +630,18 @@ function MPSReport() {
           </div>
         </div>
       </div>
+
+      {/* Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={showSubmitModal}
+        onClose={() => setShowSubmitModal(false)}
+        onConfirm={handleSubmitConfirm}
+        title="Submit to Coordinator"
+        message="Are you sure you want to submit this MPS report to the coordinator? Once submitted, you won't be able to make changes."
+        confirmText="Submit to Coordinator"
+        cancelText="Cancel"
+        type="warning"
+      />
     </>
   );
 }

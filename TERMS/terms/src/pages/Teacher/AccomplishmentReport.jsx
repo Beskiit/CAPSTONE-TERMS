@@ -3,11 +3,13 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import Header from "../../components/shared/Header.jsx";
 import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
+import { ConfirmationModal, SubmissionConfirmation } from "../../components/ConfirmationModal";
+import toast from "react-hot-toast";
 import "./AccomplishmentReport.css";
 
 // Always strip trailing slash on base, then build our own paths.
 const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
-const BASE = `${API_BASE}/reports/accomplishment`; // <-- matches your Postman endpoint
+const BASE = `${API_BASE}/submissions`; // <-- Updated to use submissions endpoint
 
 function normalizeImages(images) {
   if (!Array.isArray(images)) return [];
@@ -48,10 +50,13 @@ function AccomplishmentReport() {
 
   // --- Form state (shared) ---
   const [narrative, setNarrative] = useState("");
+  const [title, setTitle] = useState("");
 
   // Teacher/Coordinator uploads
   const [existingImages, setExistingImages] = useState([]); // {url, filename}[]
   const [newFiles, setNewFiles] = useState([]); // File[]
+  const [imagesConsolidated, setImagesConsolidated] = useState(false); // Track if images were consolidated
+  const [rejectionReason, setRejectionReason] = useState(""); // Store rejection reason
 
   // Coordinator-only fields (not required for save here)
   const [activity, setActivity] = useState({
@@ -83,6 +88,10 @@ function AccomplishmentReport() {
   const [aiSummary, setAiSummary] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [prevNarrative, setPrevNarrative] = useState("");
+
+  // Confirmation Modals
+  const [showCoordinatorModal, setShowCoordinatorModal] = useState(false);
+  const [showPrincipalModal, setShowPrincipalModal] = useState(false);
 
   // --- Load user for role guard ---
   useEffect(() => {
@@ -117,12 +126,20 @@ function AccomplishmentReport() {
 
         const n =
           data?.narrative ??
+          data?.fields?._answers?.narrative ??
           data?.fields?.narrative ??
           data?.fields?.text ??
           "";
 
+        const t =
+          data?.title ??
+          data?.fields?._answers?.title ??
+          data?.assignment_title ??
+          "";
+
         const imgs =
           data?.images ??
+          data?.fields?._answers?.images ??
           data?.fields?.images ??
           data?.fields?.photos ??
           [];
@@ -134,23 +151,48 @@ function AccomplishmentReport() {
 
         if (!alive) return;
         setNarrative(String(n || ""));
-        setExistingImages(normalizeImages(imgs));
+        setTitle(String(t || ""));
+        
+        // Only set images if they haven't been consolidated recently
+        if (!imagesConsolidated) {
+          setExistingImages(normalizeImages(imgs));
+        }
+        
         setSubmissionStatus(statusFromApi);
         setReportAssignmentId(data?.report_assignment_id ?? null); // <-- NEW
 
-        // Prefill coordinator fields if your API returns them under fields.*
+        // Prefill coordinator fields from the _answers object
+        const answers = data?.fields?._answers || {};
+        console.log('Loading submission data:', {
+          fields: data?.fields,
+          answers: answers,
+          assignment_title: data?.assignment_title
+        });
+        
         setActivity((prev) => ({
           ...prev,
-          activityName: data?.fields?.activityName || "",
-          facilitators: data?.fields?.facilitators || "",
-          objectives: data?.fields?.objectives || "",
-          date: data?.fields?.date || "",
-          time: data?.fields?.time || "",
-          venue: data?.fields?.venue || "",
-          keyResult: data?.fields?.keyResult || "",
-          personsInvolved: data?.fields?.personsInvolved || "",
-          expenses: data?.fields?.expenses || "",
+          activityName: answers.activityName || "",
+          facilitators: answers.facilitators || "",
+          objectives: answers.objectives || "",
+          date: answers.date || "",
+          time: answers.time || "",
+          venue: answers.venue || "",
+          keyResult: answers.keyResult || "",
+          personsInvolved: answers.personsInvolved || "",
+          expenses: answers.expenses || "",
         }));
+
+        // Load rejection reason if the submission was rejected
+        const rejectionReason = data?.fields?.rejection_reason || answers.rejection_reason || "";
+        console.log('Loading rejection reason:', {
+          submissionStatus: statusFromApi,
+          dataFields: data?.fields,
+          answers: answers,
+          rejectionReason: rejectionReason,
+          isRejected: statusFromApi === 4
+        });
+        setRejectionReason(rejectionReason);
+
       } catch (e) {
         if (!alive) return;
         setError(e.message || "Failed to load submission");
@@ -179,11 +221,37 @@ function AccomplishmentReport() {
     setNewFiles((prev) => prev.filter((_, i) => i !== idx));
   };
 
+  // Validation function
+  const validateForm = () => {
+    const errors = [];
+    
+    // Check if narrative is empty or too short
+    if (!narrative || narrative.trim().length < 10) {
+      errors.push("Narrative must be at least 10 characters long");
+    }
+    
+    // Check if there are no images (both existing and new)
+    if (existingImages.length === 0 && newFiles.length === 0) {
+      errors.push("At least one image is required");
+    }
+    
+    return errors;
+  };
+
   const onSubmit = async (e) => {
     e?.preventDefault?.();
 
-    if (isTeacher && submissionStatus >= 2) {
+    // Allow editing if status is 4 (rejected) - rejected reports can be edited
+    if (isTeacher && submissionStatus >= 2 && submissionStatus !== 4) {
       setError("This report has already been submitted to the coordinator.");
+      return;
+    }
+
+    // Validate form before saving
+    const validationErrors = validateForm();
+    if (validationErrors.length > 0) {
+      setError(validationErrors.join(". "));
+      toast.error(validationErrors.join(". "));
       return;
     }
 
@@ -194,9 +262,16 @@ function AccomplishmentReport() {
     try {
       const fd = new FormData();
       fd.append("narrative", narrative);
+      fd.append("title", title);
+      
+      // Include existing images (including consolidated ones) in the submission
+      if (existingImages.length > 0) {
+        fd.append("existingImages", JSON.stringify(existingImages));
+      }
+      
       for (const f of newFiles) fd.append("images", f);
 
-      const res = await fetch(`${BASE}/${submissionId}`, {
+      const res = await fetch(`${BASE}/${submissionId}/formdata`, {
         method: "PATCH",
         body: fd,
         credentials: "include",
@@ -214,19 +289,31 @@ function AccomplishmentReport() {
         }));
         setExistingImages((prev) => prev.concat(appended));
         setNewFiles([]);
+        setImagesConsolidated(false); // Reset flag when new images are added
       }
 
       setSuccess("Saved!");
+      toast.success("Report saved successfully!");
     } catch (e2) {
       setError(e2.message || "Save failed");
+      toast.error(e2.message || "Save failed");
     } finally {
       setSaving(false);
     }
   };
 
   const onSubmitToCoordinator = async () => {
-    if (submissionStatus >= 2) {
+    // Allow resubmission for rejected reports (status 4)
+    if (submissionStatus >= 2 && submissionStatus !== 4) {
       setError("This report is already submitted to the coordinator.");
+      return;
+    }
+
+    // Validate form before submitting to coordinator
+    const validationErrors = validateForm();
+    if (validationErrors.length > 0) {
+      setError(validationErrors.join(". "));
+      toast.error(validationErrors.join(". "));
       return;
     }
 
@@ -237,10 +324,17 @@ function AccomplishmentReport() {
     try {
       const fd = new FormData();
       fd.append("narrative", narrative);
+      fd.append("title", title);
       fd.append("status", "2");
+      
+      // Include existing images (including consolidated ones) in the submission
+      if (existingImages.length > 0) {
+        fd.append("existingImages", JSON.stringify(existingImages));
+      }
+      
       for (const f of newFiles) fd.append("images", f);
 
-      const res = await fetch(`${BASE}/${submissionId}`, {
+      const res = await fetch(`${BASE}/${submissionId}/formdata`, {
         method: "PATCH",
         body: fd,
         credentials: "include",
@@ -258,11 +352,13 @@ function AccomplishmentReport() {
         const appended = newFiles.map((f) => ({ url: URL.createObjectURL(f), filename: f.name }));
         setExistingImages((prev) => prev.concat(appended));
         setNewFiles([]);
+        setImagesConsolidated(false); // Reset flag when new images are added
       }
 
       setSuccess("Report submitted to coordinator successfully!");
       setSubmissionStatus(2);
       setShowSubmitToast(true);
+      toast.success("Report submitted to coordinator successfully!");
 
       // Show an alert summarizing what was passed to the coordinator
       try {
@@ -273,15 +369,25 @@ function AccomplishmentReport() {
           imagesCount,
           reportAssignmentId,
         };
-        alert(`Submitted to Coordinator:\n${JSON.stringify(payloadPreview, null, 2)}`);
+        console.log(`Submitted to Coordinator:`, payloadPreview);
       } catch (_) {
         // no-op if alert construction fails
       }
     } catch (e2) {
       setError(e2.message || "Submit failed");
+      toast.error(e2.message || "Submit failed");
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleCoordinatorConfirmation = () => {
+    setShowCoordinatorModal(true);
+  };
+
+  const handleCoordinatorSubmit = async () => {
+    setShowCoordinatorModal(false);
+    await onSubmitToCoordinator();
   };
 
   const onGenerate = () => {
@@ -291,8 +397,17 @@ function AccomplishmentReport() {
     alert("Export: hook this to your export endpoint when ready.");
   };
   const onSubmitToPrincipal = async () => {
-    if (submissionStatus >= 2) {
+    // Allow resubmission for rejected reports (status 4)
+    if (submissionStatus >= 2 && submissionStatus !== 4) {
       setError("This report is already submitted to the principal.");
+      return;
+    }
+
+    // Validate form before submitting to principal
+    const validationErrors = validateForm();
+    if (validationErrors.length > 0) {
+      setError(validationErrors.join(". "));
+      toast.error(validationErrors.join(". "));
       return;
     }
 
@@ -303,6 +418,7 @@ function AccomplishmentReport() {
     try {
       const fd = new FormData();
       fd.append("narrative", narrative);
+      fd.append("title", title);
       fd.append("status", "2"); // Set status to completed (ready for principal review)
       
       // Add coordinator activity data
@@ -316,9 +432,14 @@ function AccomplishmentReport() {
       fd.append("personsInvolved", activity.personsInvolved);
       fd.append("expenses", activity.expenses);
       
+      // Include existing images (including consolidated ones) in the submission
+      if (existingImages.length > 0) {
+        fd.append("existingImages", JSON.stringify(existingImages));
+      }
+      
       for (const f of newFiles) fd.append("images", f);
 
-      const res = await fetch(`${BASE}/${submissionId}`, {
+      const res = await fetch(`${BASE}/${submissionId}/formdata`, {
         method: "PATCH",
         body: fd,
         credentials: "include",
@@ -333,16 +454,28 @@ function AccomplishmentReport() {
         const appended = newFiles.map((f) => ({ url: URL.createObjectURL(f), filename: f.name }));
         setExistingImages((prev) => prev.concat(appended));
         setNewFiles([]);
+        setImagesConsolidated(false); // Reset flag when new images are added
       }
 
       setSuccess("Report submitted to principal successfully!");
       setSubmissionStatus(2);
       setShowSubmitToast(true);
+      toast.success("Report submitted to principal successfully!");
     } catch (e2) {
       setError(e2.message || "Submit to principal failed");
+      toast.error(e2.message || "Submit to principal failed");
     } finally {
       setSaving(false);
     }
+  };
+
+  const handlePrincipalConfirmation = () => {
+    setShowPrincipalModal(true);
+  };
+
+  const handlePrincipalSubmit = async () => {
+    setShowPrincipalModal(false);
+    await onSubmitToPrincipal();
   };
 
   const onSubmitFinal = () => onSubmit(); // reuse for now
@@ -353,8 +486,8 @@ function AccomplishmentReport() {
     try {
       // Use report_assignment_id so we fetch peers from the correct assignment
       const url = reportAssignmentId
-        ? `${BASE}/${submissionId}/peers?ra=${encodeURIComponent(reportAssignmentId)}`
-        : `${BASE}/${submissionId}/peers`;
+        ? `${API_BASE}/reports/accomplishment/${submissionId}/peers?ra=${encodeURIComponent(reportAssignmentId)}`
+        : `${API_BASE}/reports/accomplishment/${submissionId}/peers`;
       
       const res = await fetch(url, { credentials: "include" });
       if (!res.ok) {
@@ -376,7 +509,7 @@ function AccomplishmentReport() {
 
   const consolidateByTitle = async (title) => {
     try {
-      const res = await fetch(`${BASE}/${submissionId}/consolidate`, {
+      const res = await fetch(`${API_BASE}/reports/accomplishment/${submissionId}/consolidate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -387,7 +520,14 @@ function AccomplishmentReport() {
         throw new Error(`Consolidate failed: ${res.status} ${txt}`);
       }
       const out = await res.json();
-      setExistingImages(normalizeImages(out.images || []));
+      console.log('Consolidate response:', out);
+      console.log('Consolidate images:', out.images);
+      console.log('Normalized images:', normalizeImages(out.images || []));
+      
+      const normalizedImages = normalizeImages(out.images || []);
+      setExistingImages(normalizedImages);
+      setImagesConsolidated(true); // Mark that images were consolidated
+      console.log('Set existingImages to:', normalizedImages);
       setSuccess(`Consolidated ${out.count || (out.images||[]).length} images into this report.`);
       setShowConsolidate(false);
     } catch (e) {
@@ -519,12 +659,12 @@ function AccomplishmentReport() {
                   )}
 
                   <button onClick={onExport}>Export</button>
-                  <button onClick={onSubmit} disabled={saving || submissionStatus >= 2}>
+                  <button onClick={onSubmit} disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}>
                     {saving ? "Saving…" : "Save Draft"}
                   </button>
                   <button
-                    onClick={onSubmitToCoordinator}
-                    disabled={saving || submissionStatus >= 2}
+                    onClick={handleCoordinatorConfirmation}
+                    disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}
                     className="submit-button"
                   >
                     {saving ? "Submitting…" : "Submit to Coordinator"}
@@ -568,7 +708,7 @@ function AccomplishmentReport() {
                   )}
 
                   <button onClick={onExport}>Export</button>
-                  <button onClick={onSubmitToPrincipal} disabled={saving || submissionStatus >= 2}>
+                  <button onClick={handlePrincipalConfirmation} disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}>
                     {saving ? "Submitting…" : "Submit to Principal"}
                   </button>
                   <button onClick={openConsolidate}>Consolidate</button>
@@ -579,7 +719,7 @@ function AccomplishmentReport() {
             <div className="accomplishment-report-container">
               <h3>Activity Completion Report</h3>
 
-              {isTeacher && submissionStatus >= 2 && showSubmittedAlert && (
+              {isTeacher && submissionStatus >= 2 && submissionStatus !== 4 && showSubmittedAlert && (
                 <div
                   className="alert info"
                   style={{
@@ -617,7 +757,73 @@ function AccomplishmentReport() {
                 </div>
               )}
 
-              {!isTeacher && submissionStatus >= 2 && showSubmittedAlert && (
+              {isTeacher && submissionStatus === 4 && showSubmittedAlert && (
+                <div
+                  className="alert warning"
+                  style={{
+                    marginBottom: 12,
+                    padding: "12px 16px",
+                    border: "1px solid #dc2626",
+                    background: "#fef2f2",
+                    color: "#991b1b",
+                    borderRadius: 8,
+                    fontSize: 14
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: "bold", marginBottom: "8px", display: "flex", alignItems: "center" }}>
+                        ⚠️ <span style={{ marginLeft: "6px" }}>Report Rejected</span>
+                      </div>
+                      <div style={{ marginBottom: "8px" }}>
+                        This submission has been <strong>rejected</strong>. Please review the feedback below and make necessary changes. You can now edit this report.
+                      </div>
+                      {rejectionReason ? (
+                        <div style={{
+                          padding: "8px 12px",
+                          background: "#ffffff",
+                          border: "1px solid #fecaca",
+                          borderRadius: "6px",
+                          fontSize: "13px",
+                          color: "#7f1d1d"
+                        }}>
+                          <strong>Feedback:</strong> {rejectionReason}
+                        </div>
+                      ) : (
+                        <div style={{
+                          padding: "8px 12px",
+                          background: "#ffffff",
+                          border: "1px solid #fecaca",
+                          borderRadius: "6px",
+                          fontSize: "13px",
+                          color: "#7f1d1d"
+                        }}>
+                          <strong>No specific feedback provided.</strong> Please review the report and make necessary improvements.
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowSubmittedAlert(false)}
+                      style={{
+                        marginLeft: 12,
+                        border: "none",
+                        background: "transparent",
+                        cursor: "pointer",
+                        fontSize: 16,
+                        color: "#991b1b",
+                        padding: "4px"
+                      }}
+                      aria-label="Dismiss"
+                      title="Dismiss"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!isTeacher && submissionStatus >= 2 && submissionStatus !== 4 && showSubmittedAlert && (
                 <div
                   className="alert info"
                   style={{
@@ -655,13 +861,87 @@ function AccomplishmentReport() {
                 </div>
               )}
 
+              {!isTeacher && submissionStatus === 4 && showSubmittedAlert && (
+                <div
+                  className="alert warning"
+                  style={{
+                    marginBottom: 12,
+                    padding: "12px 16px",
+                    border: "1px solid #dc2626",
+                    background: "#fef2f2",
+                    color: "#991b1b",
+                    borderRadius: 8,
+                    fontSize: 14
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: "bold", marginBottom: "8px", display: "flex", alignItems: "center" }}>
+                        ⚠️ <span style={{ marginLeft: "6px" }}>Report Rejected by Principal</span>
+                      </div>
+                      <div style={{ marginBottom: "8px" }}>
+                        This submission has been <strong>rejected by the Principal</strong>. Please review the feedback below and make necessary changes. You can now edit this report.
+                      </div>
+                      {rejectionReason ? (
+                        <div style={{
+                          padding: "8px 12px",
+                          background: "#ffffff",
+                          border: "1px solid #fecaca",
+                          borderRadius: "6px",
+                          fontSize: "13px",
+                          color: "#7f1d1d"
+                        }}>
+                          <strong>Principal's Feedback:</strong> {rejectionReason}
+                        </div>
+                      ) : (
+                        <div style={{
+                          padding: "8px 12px",
+                          background: "#ffffff",
+                          border: "1px solid #fecaca",
+                          borderRadius: "6px",
+                          fontSize: "13px",
+                          color: "#7f1d1d"
+                        }}>
+                          <strong>No specific feedback provided.</strong> Please review the report and make necessary improvements.
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowSubmittedAlert(false)}
+                      style={{
+                        marginLeft: 12,
+                        border: "none",
+                        background: "transparent",
+                        cursor: "pointer",
+                        fontSize: 16,
+                        color: "#991b1b",
+                        padding: "4px"
+                      }}
+                      aria-label="Dismiss"
+                      title="Dismiss"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+              )}
+
+
               <form onSubmit={onSubmit}>
                 {isTeacher ? (
                   <>
                     {/* TEACHER VIEW */}
                     <div className="form-row">
                       <label htmlFor="teacherTitle">Title:</label>
-                      <input type="text" required disabled={submissionStatus >= 2} />
+                      <input 
+                        type="text" 
+                        id="teacherTitle"
+                        value={title}
+                        onChange={(e) => setTitle(e.target.value)}
+                        required 
+                        disabled={submissionStatus >= 2 && submissionStatus !== 4} 
+                      />
                     </div>
                     <div className="form-row">
                       <label htmlFor="teacherPictures">Upload Image(s):</label>
@@ -672,34 +952,34 @@ function AccomplishmentReport() {
                         accept="image/*"
                         multiple
                         onChange={handleFiles}
-                        disabled={submissionStatus >= 2}
+                        disabled={submissionStatus >= 2 && submissionStatus !== 4}
                       />
                     </div>
 
                     {(existingImages.length > 0 || newFiles.length > 0) && (
                       <div className="thumbs">
-                        {existingImages.map((img) => (
+                        {existingImages.map((img, index) => (
                           <div key={img.url + img.filename} className="thumb">
                             <img src={img.url} alt={img.filename} />
-                            <div className="thumb-meta">
-                              <span className="filename" title={img.filename}>
-                                {img.filename}
-                              </span>
-                            </div>
+                            <button
+                              type="button"
+                              className="remove-image-btn"
+                              onClick={() => setExistingImages(prev => prev.filter((_, i) => i !== index))}
+                              title="Remove image"
+                            >
+                              X
+                            </button>
                           </div>
                         ))}
                         {newFiles.map((f, i) => (
                           <div key={`new-${i}`} className="thumb">
                             <img src={URL.createObjectURL(f)} alt={f.name} />
                             <div className="thumb-meta">
-                              <span className="filename" title={f.name}>
-                                {f.name}
-                              </span>
                               <button
                                 type="button"
                                 className="btn tiny"
                                 onClick={() => removeNewFileAt(i)}
-                                disabled={submissionStatus >= 2}
+                                disabled={submissionStatus >= 2 && submissionStatus !== 4}
                               >
                                 Remove
                               </button>
@@ -718,7 +998,7 @@ function AccomplishmentReport() {
                         value={narrative}
                         onChange={(e) => setNarrative(e.target.value)}
                         required
-                        disabled={submissionStatus >= 2}
+                        disabled={submissionStatus >= 2 && submissionStatus !== 4}
                       />
                     </div>
                   </>
@@ -734,7 +1014,7 @@ function AccomplishmentReport() {
                         value={activity.activityName}
                         onChange={(e) => setActivity((p) => ({ ...p, activityName: e.target.value }))}
                         required
-                        disabled={submissionStatus >= 2}
+                        disabled={submissionStatus >= 2 && submissionStatus !== 4}
                       />
                     </div>
 
@@ -747,7 +1027,7 @@ function AccomplishmentReport() {
                         value={activity.facilitators}
                         onChange={(e) => setActivity((p) => ({ ...p, facilitators: e.target.value }))}
                         required
-                        disabled={submissionStatus >= 2}
+                        disabled={submissionStatus >= 2 && submissionStatus !== 4}
                       />
                     </div>
 
@@ -760,7 +1040,7 @@ function AccomplishmentReport() {
                         value={activity.objectives}
                         onChange={(e) => setActivity((p) => ({ ...p, objectives: e.target.value }))}
                         required
-                        disabled={submissionStatus >= 2}
+                        disabled={submissionStatus >= 2 && submissionStatus !== 4}
                       />
                     </div>
 
@@ -776,7 +1056,7 @@ function AccomplishmentReport() {
                             value={activity.date}
                             onChange={(e) => setActivity((p) => ({ ...p, date: e.target.value }))}
                             required
-                            disabled={submissionStatus >= 2}
+                            disabled={submissionStatus >= 2 && submissionStatus !== 4}
                           />
                         </div>
                         <div className="form-row">
@@ -788,7 +1068,7 @@ function AccomplishmentReport() {
                             value={activity.time}
                             onChange={(e) => setActivity((p) => ({ ...p, time: e.target.value }))}
                             required
-                            disabled={submissionStatus >= 2}
+                            disabled={submissionStatus >= 2 && submissionStatus !== 4}
                           />
                         </div>
                         <div className="form-row">
@@ -800,7 +1080,7 @@ function AccomplishmentReport() {
                             value={activity.venue}
                             onChange={(e) => setActivity((p) => ({ ...p, venue: e.target.value }))}
                             required
-                            disabled={submissionStatus >= 2}
+                            disabled={submissionStatus >= 2 && submissionStatus !== 4}
                           />
                         </div>
                         <div className="form-row">
@@ -812,7 +1092,7 @@ function AccomplishmentReport() {
                             value={activity.keyResult}
                             onChange={(e) => setActivity((p) => ({ ...p, keyResult: e.target.value }))}
                             required
-                            disabled={submissionStatus >= 2}
+                            disabled={submissionStatus >= 2 && submissionStatus !== 4}
                           />
                         </div>
                       </div>
@@ -827,7 +1107,7 @@ function AccomplishmentReport() {
                         value={activity.personsInvolved}
                         onChange={(e) => setActivity((p) => ({ ...p, personsInvolved: e.target.value }))}
                         required
-                        disabled={submissionStatus >= 2}
+                        disabled={submissionStatus >= 2 && submissionStatus !== 4}
                       />
                     </div>
 
@@ -840,7 +1120,7 @@ function AccomplishmentReport() {
                         value={activity.expenses}
                         onChange={(e) => setActivity((p) => ({ ...p, expenses: e.target.value }))}
                         required
-                        disabled={submissionStatus >= 2}
+                        disabled={submissionStatus >= 2 && submissionStatus !== 4}
                       />
                     </div>
 
@@ -853,29 +1133,29 @@ function AccomplishmentReport() {
                         accept="image/*"
                         multiple
                         onChange={handleFiles}
-                        disabled={submissionStatus >= 2}
+                        disabled={submissionStatus >= 2 && submissionStatus !== 4}
                       />
                     </div>
 
                     {(existingImages.length > 0 || newFiles.length > 0) && (
                       <div className="thumbs">
-                        {existingImages.map((img) => (
+                        {existingImages.map((img, index) => (
                           <div key={img.url + img.filename} className="thumb">
                             <img src={img.url} alt={img.filename} />
-                            <div className="thumb-meta">
-                              <span className="filename" title={img.filename}>
-                                {img.filename}
-                              </span>
-                            </div>
+                            <button
+                              type="button"
+                              className="remove-image-btn"
+                              onClick={() => setExistingImages(prev => prev.filter((_, i) => i !== index))}
+                              title="Remove image"
+                            >
+                              ×
+                            </button>
                           </div>
                         ))}
                         {newFiles.map((f, i) => (
                           <div key={`new-${i}`} className="thumb">
                             <img src={URL.createObjectURL(f)} alt={f.name} />
                             <div className="thumb-meta">
-                              <span className="filename" title={f.name}>
-                                {f.name}
-                              </span>
                               <button
                                 type="button"
                                 className="btn tiny"
@@ -898,12 +1178,12 @@ function AccomplishmentReport() {
                         value={narrative}
                         onChange={(e) => setNarrative(e.target.value)}
                         required
-                        disabled={submissionStatus >= 2}
+                        disabled={submissionStatus >= 2 && submissionStatus !== 4}
                       />
                     </div>
 
                     <div className="form-row">
-                      <button className="btn primary" disabled={saving || submissionStatus >= 2}>
+                      <button className="btn primary" disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}>
                         {saving ? "Saving…" : "Save Changes"}
                       </button>
                     </div>
@@ -912,7 +1192,7 @@ function AccomplishmentReport() {
 
                 {isTeacher && (
                   <div className="form-row">
-                    <button className="btn primary" disabled={saving || submissionStatus >= 2}>
+                    <button className="btn primary" disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}>
                       {saving ? "Saving…" : "Save Changes"}
                     </button>
                   </div>
@@ -972,6 +1252,15 @@ function AccomplishmentReport() {
                         return count + (extractNarrative(s) ? 1 : 0);
                       }, 0);
 
+                      // Calculate image count from all submissions in this group
+                      const imageCount = (g?.submissions || []).reduce((count, s) => {
+                        const f = parseFields(s) || {};
+                        const answers = f._answers || {};
+                        const images = answers.images || [];
+                        console.log('Submission images:', { submission: s, fields: f, answers, images });
+                        return count + images.length;
+                      }, 0);
+
                       const narrativePreviews = (g?.submissions || []).map((s) => {
                         const t = extractNarrative(s);
                         if (!t) return "";
@@ -1001,14 +1290,40 @@ function AccomplishmentReport() {
                           </td>
                           <td style={{ padding: 8 }}>
                             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                              {(g.images || []).map((nm, idx) => (
-                                <img key={nm + idx} src={`${API_BASE}/uploads/accomplishments/${nm}`} alt={nm} style={{ width: 80, height: 60, objectFit: "cover", borderRadius: 4, border: "1px solid #e5e7eb" }} />
-                              ))}
+                              {(g?.submissions || []).map((s, sIdx) => {
+                                const f = parseFields(s) || {};
+                                const answers = f._answers || {};
+                                const images = answers.images || [];
+                                return images.map((img, imgIdx) => {
+                                  let imageUrl;
+                                  if (typeof img === 'string') {
+                                    imageUrl = `${API_BASE}/uploads/accomplishments/${img}`;
+                                  } else if (img.url) {
+                                    imageUrl = img.url.startsWith('/') ? `${API_BASE}${img.url}` : img.url;
+                                  } else if (img.filename) {
+                                    imageUrl = `${API_BASE}/uploads/accomplishments/${img.filename}`;
+                                  } else {
+                                    return null;
+                                  }
+                                  return (
+                                    <img 
+                                      key={`${sIdx}-${imgIdx}`} 
+                                      src={imageUrl} 
+                                      alt={`Image ${imgIdx + 1}`} 
+                                      style={{ width: 80, height: 60, objectFit: "cover", borderRadius: 4, border: "1px solid #e5e7eb" }}
+                                      onError={(e) => {
+                                        console.error('Image failed to load:', imageUrl);
+                                        e.target.style.display = 'none';
+                                      }}
+                                    />
+                                  );
+                                });
+                              }).flat()}
                             </div>
                           </td>
                           <td style={{ padding: 8, width: 260, textAlign: "right", display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                             <button className="btn" onClick={() => summarizePeers(g.title)} disabled={aiLoading || !hasNarr} title={!hasNarr ? 'No narratives to summarize in this group' : undefined}>{aiLoading ? 'Summarizing…' : 'AI Summary'}</button>
-                            <button className="btn primary" onClick={() => consolidateByTitle(g.title)}>Consolidate Images ({narrativeCount})</button>
+                            <button className="btn primary" onClick={() => consolidateByTitle(g.title)}>Consolidate Images ({imageCount})</button>
                           </td>
                         </tr>
                       );
@@ -1033,6 +1348,35 @@ function AccomplishmentReport() {
           </div>
         </div>
       )}
+
+      {/* Confirmation Modals */}
+      <ConfirmationModal
+        isOpen={showCoordinatorModal}
+        onClose={() => setShowCoordinatorModal(false)}
+        onConfirm={handleCoordinatorSubmit}
+        title="Submit to Coordinator"
+        message={submissionStatus === 4 ? 
+          "Are you sure you want to resubmit this report to the coordinator? This will send the updated report for review." :
+          "Are you sure you want to submit this report to the coordinator? Once submitted, you won't be able to make changes."
+        }
+        confirmText={submissionStatus === 4 ? "Resubmit to Coordinator" : "Submit to Coordinator"}
+        cancelText="Cancel"
+        type="warning"
+      />
+
+      <ConfirmationModal
+        isOpen={showPrincipalModal}
+        onClose={() => setShowPrincipalModal(false)}
+        onConfirm={handlePrincipalSubmit}
+        title="Submit to Principal"
+        message={submissionStatus === 4 ? 
+          "Are you sure you want to resubmit this report to the principal? This will send the updated report for review." :
+          "Are you sure you want to submit this report to the principal? Once submitted, you won't be able to make changes."
+        }
+        confirmText={submissionStatus === 4 ? "Resubmit to Principal" : "Submit to Principal"}
+        cancelText="Cancel"
+        type="warning"
+      />
     </>
   );
 }

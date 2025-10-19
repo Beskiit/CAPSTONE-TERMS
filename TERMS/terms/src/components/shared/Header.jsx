@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './SharedComponents.css';
 import DepedLogo from '../../assets/deped-logo.png';
-import Notification from '../../assets/notification.svg';
+import Notification from '../../assets/notification-bell.svg';
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
 

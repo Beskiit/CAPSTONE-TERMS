@@ -301,3 +301,156 @@ button {
   height: 30px;
   cursor: pointer;
 }
+
+/* Fix checkbox size inside the teacher multi-select only */
+.teacher-menu input.menu-checkbox {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  box-sizing: content-box;
+  appearance: auto;      /* keep native checkbox look */
+  vertical-align: middle;
+  margin: 0;
+  flex: 0 0 16px;        /* prevent flex shrink */
+}
+
+/* Fixed-size trigger for the teacher multi-select */
+.teacher-trigger {
+  width: 160px;       /* <-- fixed width */
+  height: 38px;       /* fixed height */
+  max-width: 260px;
+  max-height: 38px;
+  overflow: hidden;   /* prevent growth when many names */
+}
+
+/* Truncate long label text with ellipsis inside the trigger */
+.teacher-trigger-label {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+
+/* Fixed-size dropdown panel for the teacher multi-select */
+.teacher-menu {
+  width: 260px;       /* fixed width */
+  max-width: 260px;
+  height: 280px;      /* fixed height */
+  max-height: 280px;
+  overflow-y: auto;   /* scroll inside */
+  right: 0;           /* align to the right of the trigger */
+  left: auto;
+}
+
+/* Teacher dropdown styles */
+.teacher-trigger {
+  width: 160px;
+  text-align: left;
+  padding: 6px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.teacher-trigger-label {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teacher-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: auto;
+  width: 260px;
+  height: 280px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+  z-index: 20;
+  margin-top: 4px;
+}
+
+.teacher-menu-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #f8fafc;
+  white-space: nowrap;
+}
+
+.teacher-menu-header label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  margin: 0;
+}
+
+.teacher-menu-header span {
+  font-weight: 600;
+}
+
+.teacher-menu-count {
+  margin-left: auto;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.teacher-menu-clear {
+  font-size: 12px;
+  padding: 4px 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #6b7280;
+}
+
+.teacher-menu-clear:hover {
+  color: #374151;
+}
+
+.teacher-menu-content {
+  padding: 4px 6px;
+}
+
+.teacher-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.teacher-menu-item:hover {
+  background: #f3f4f6;
+}
+
+.teacher-menu-item.selected {
+  background: #3b82f6;
+  color: #ffffff;
+}
+
+.menu-checkbox {
+  pointer-events: none;
+}
+
+.teacher-menu-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

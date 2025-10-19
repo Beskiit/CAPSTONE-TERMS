@@ -44,3 +44,26 @@
   font-weight: 500;
   color: #333;
 }
+
+/* Rejection details styles */
+.rejection-details {
+  margin-top: 4px;
+  padding: 4px 8px;
+  background-color: #FEF2F2;
+  border: 1px solid #FECACA;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.rejection-reason {
+  display: block;
+  color: #DC2626;
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.extended-deadline {
+  display: block;
+  color: #059669;
+  font-weight: 500;
+}

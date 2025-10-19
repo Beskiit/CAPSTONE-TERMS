@@ -217,6 +217,7 @@ export const patchAccomplishmentSubmission = (req, res) => {
     narrative = null, 
     removeImages, 
     status,
+    rejection_reason,
     // Activity fields from coordinator
     activityName,
     facilitators,
@@ -229,6 +230,13 @@ export const patchAccomplishmentSubmission = (req, res) => {
     expenses
   } = req.body || {};
   const files = Array.isArray(req.files) ? req.files : [];
+
+  console.log('PATCH accomplishment request:', {
+    id,
+    status,
+    rejection_reason,
+    body: req.body
+  });
 
   const selectSql = `SELECT fields FROM submission WHERE submission_id = ?`;
   db.query(selectSql, [id], (selErr, rowsDb) => {
@@ -258,6 +266,8 @@ export const patchAccomplishmentSubmission = (req, res) => {
       narrative:
         narrative != null ? String(narrative) : current?.narrative || "",
       images: [...kept, ...addImages],
+      // Store rejection reason if provided
+      ...(rejection_reason !== undefined && { rejection_reason }),
       // Store activity data from coordinator
       activity: {
         activityName: activityName || current?.activity?.activityName || "",
@@ -564,6 +574,10 @@ export const consolidateAccomplishmentByTitle = (req, res) => {
   `;
   db.query(peersSql, [id, id], (err, rows) => {
     if (err) return res.status(500).send("DB error: " + err);
+    
+    console.log('Consolidation - Found peers:', rows.length);
+    console.log('Consolidation - Target title:', title);
+    
     const targetKey = String(title).trim().toLowerCase();
     const combined = new Set();
     for (const r of rows || []) {
@@ -572,8 +586,20 @@ export const consolidateAccomplishmentByTitle = (req, res) => {
         fieldsObj =
           typeof r.fields === "string" ? JSON.parse(r.fields) : r.fields || {};
       } catch {}
-      const imgs = Array.isArray(fieldsObj.images) ? fieldsObj.images : [];
-      const t = (r.title || fieldsObj.title || "").trim().toLowerCase();
+      // Look for images in the correct location: fields._answers.images
+      const answers = fieldsObj._answers || {};
+      const imgs = Array.isArray(answers.images) ? answers.images : [];
+      const t = (r.title || answers.title || fieldsObj.title || "").trim().toLowerCase();
+      
+      console.log('Peer submission:', {
+        submissionId: r.submission_id,
+        title: t,
+        targetKey,
+        matches: t === targetKey,
+        imagesCount: imgs.length,
+        images: imgs
+      });
+      
       if (t === targetKey) imgs.forEach((nm) => combined.add(nm));
     }
 
@@ -586,22 +612,30 @@ export const consolidateAccomplishmentByTitle = (req, res) => {
       try {
         current = JSON.parse(selRows[0].fields || "{}");
       } catch {}
-      const currImgs = Array.isArray(current.images) ? current.images : [];
+      // Look for current images in the correct location: fields._answers.images
+      const currentAnswers = current._answers || {};
+      const currImgs = Array.isArray(currentAnswers.images) ? currentAnswers.images : [];
       currImgs.forEach((nm) => combined.add(nm));
 
       const next = {
         ...(current || {}),
         type: "ACCOMPLISHMENT",
-        images: Array.from(combined),
+        _answers: {
+          ...(current._answers || {}),
+          images: Array.from(combined),
+        },
         meta: {
           ...(current?.meta || {}),
           consolidatedAt: new Date().toISOString(),
         },
       };
+      console.log('Final consolidated images:', Array.from(combined));
+      console.log('Final response:', { ok: true, images: next._answers.images, count: next._answers.images.length });
+      
       const updSql = `UPDATE submission SET fields = ? WHERE submission_id = ?`;
       db.query(updSql, [JSON.stringify(next), id], (updErr) => {
         if (updErr) return res.status(500).send("Update failed: " + updErr);
-        res.json({ ok: true, images: next.images, count: next.images.length });
+        res.json({ ok: true, images: next._answers.images, count: next._answers.images.length });
       });
     });
   });

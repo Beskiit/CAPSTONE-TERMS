@@ -6,6 +6,7 @@ import EyeOffIcon from './assets/eye-close.svg'
 import UserIcon from './assets/user.svg'
 import PasswordIcon from './assets/password.svg'
 import React, { useState } from 'react'
+import ToastProvider from './components/ToastProvider'
 
 // Dashboard components
 import DashboardTeacher from './pages/Teacher/DashboardTeacher.jsx'  
@@ -42,6 +43,7 @@ import ForApprovalData from './pages/Principal/ForApprovalData.jsx'
 function App() {
   return (
     <main>
+      <ToastProvider />
       <Routes>
           <Route path="/" element={<Login />} />
           <Route path="/DashboardTeacher" element={<DashboardTeacher />} />

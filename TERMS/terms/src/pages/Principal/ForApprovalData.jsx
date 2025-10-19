@@ -389,7 +389,21 @@ function ForApprovalData() {
     }
 
     const fields = submissionData.fields;
-    const activity = fields.activity || {};
+    const answers = fields._answers || {};
+    const activity = answers;
+    
+    console.log('Principal viewing accomplishment data:', {
+      submissionData,
+      fields,
+      answers,
+      activity,
+      images: answers.images
+    });
+    
+    // More detailed debugging
+    console.log('Full submission data structure:', JSON.stringify(submissionData, null, 2));
+    console.log('Fields structure:', JSON.stringify(fields, null, 2));
+    console.log('Answers structure:', JSON.stringify(answers, null, 2));
 
     return (
       <div className="accomplishment-display">
@@ -437,28 +451,55 @@ function ForApprovalData() {
           </div>
         </div>
 
-        {fields.images && fields.images.length > 0 && (
-          <div className="report-section">
-            <h4>Images</h4>
+        {/* Always show images section for debugging */}
+        <div className="report-section">
+          <h4>Images</h4>
+          {answers.images && answers.images.length > 0 ? (
             <div className="images-grid">
-              {fields.images.map((image, index) => (
-                <div key={index} className="image-item">
-                  <img 
-                    src={`${API_BASE}/uploads/accomplishments/${image}`} 
-                    alt={`Activity image ${index + 1}`}
-                    style={{ maxWidth: '200px', maxHeight: '200px', objectFit: 'cover' }}
-                  />
-                </div>
-              ))}
+              {answers.images.map((image, index) => {
+                // Handle both object format {url, filename} and string format
+                let imageUrl;
+                if (typeof image === 'string') {
+                  imageUrl = `${API_BASE}/uploads/accomplishments/${image}`;
+                } else if (image.url) {
+                  // If url starts with /, prepend API_BASE
+                  imageUrl = image.url.startsWith('/') 
+                    ? `${API_BASE}${image.url}`
+                    : image.url;
+                } else if (image.filename) {
+                  imageUrl = `${API_BASE}/uploads/accomplishments/${image.filename}`;
+                } else {
+                  console.warn('Unknown image format:', image);
+                  return null;
+                }
+                
+                console.log(`Loading image ${index}:`, { image, imageUrl });
+                
+                return (
+                  <div key={index} className="image-item">
+                    <img 
+                      src={imageUrl} 
+                      alt={`Activity image ${index + 1}`}
+                      style={{ maxWidth: '200px', maxHeight: '200px', objectFit: 'cover' }}
+                      onError={(e) => {
+                        console.error('Image failed to load:', imageUrl);
+                        e.target.style.display = 'none';
+                      }}
+                    />
+                  </div>
+                );
+              })}
             </div>
-          </div>
-        )}
+          ) : (
+            <p>No images found</p>
+          )}
+        </div>
 
-        {fields.narrative && (
+        {answers.narrative && (
           <div className="report-section">
             <h4>Narrative</h4>
             <div className="narrative-content">
-              {fields.narrative}
+              {answers.narrative}
             </div>
           </div>
         )}
