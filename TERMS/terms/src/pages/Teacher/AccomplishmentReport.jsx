@@ -4,6 +4,7 @@ import Header from "../../components/shared/Header.jsx";
 import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import { ConfirmationModal, SubmissionConfirmation } from "../../components/ConfirmationModal";
+import { normalizeImages, getImageUrl, debugImageUrl } from "../../utils/imageUtils.js";
 import toast from "react-hot-toast";
 import "./AccomplishmentReport.css";
 
@@ -11,23 +12,7 @@ import "./AccomplishmentReport.css";
 const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
 const BASE = `${API_BASE}/submissions`; // <-- Updated to use submissions endpoint
 
-function normalizeImages(images) {
-  if (!Array.isArray(images)) return [];
-  return images.map((img) => {
-    if (typeof img === "string") {
-      const isAbsolute = /^https?:\/\//i.test(img);
-      const hasSlash = img.includes("/");
-      const rel = isAbsolute ? img : (hasSlash ? img : `uploads/accomplishments/${img}`);
-      const url = isAbsolute ? rel : `${API_BASE}/${rel.replace(/^\/+/, "")}`;
-      return { url, filename: img.split("/").pop() || img };
-    }
-    const raw = img.url || img.path || img.src || (img.filename ? `uploads/accomplishments/${img.filename}` : "");
-    const isAbsolute = /^https?:\/\//i.test(raw);
-    const url = isAbsolute ? raw : (raw ? `${API_BASE}/${raw.replace(/^\/+/, "")}` : "");
-    const filename = img.filename || (raw ? raw.split("/").pop() : "");
-    return { url, filename };
-  });
-}
+// normalizeImages function moved to utils/imageUtils.js
 
 function AccomplishmentReport() {
   const [openPopup, setOpenPopup] = useState(false);
@@ -51,6 +36,15 @@ function AccomplishmentReport() {
   // --- Form state (shared) ---
   const [narrative, setNarrative] = useState("");
   const [title, setTitle] = useState("");
+
+  // Clean up blob URLs from existingImages
+  const cleanupBlobUrls = () => {
+    setExistingImages(prev => prev.filter(img => {
+      if (typeof img === 'string' && img.startsWith('blob:')) return false;
+      if (typeof img === 'object' && img.url && img.url.startsWith('blob:')) return false;
+      return true;
+    }));
+  };
 
   // Teacher/Coordinator uploads
   const [existingImages, setExistingImages] = useState([]); // {url, filename}[]
@@ -210,6 +204,11 @@ function AccomplishmentReport() {
     return () => clearTimeout(timer);
   }, [showSubmitToast]);
 
+  // Clean up blob URLs on component mount
+  useEffect(() => {
+    cleanupBlobUrls();
+  }, []);
+
   // --- Handlers ---
   const handleFiles = (e) => {
     const files = Array.from(e.target.files || []);
@@ -282,12 +281,27 @@ function AccomplishmentReport() {
         throw new Error(`PATCH ${submissionId} failed: ${res.status} ${text}`);
       }
 
+      // Get the updated submission data from the server response
+      const responseData = await res.json().catch(() => ({}));
+      console.log('Save response data:', responseData);
+      
       if (newFiles.length) {
-        const appended = newFiles.map((f) => ({
-          url: URL.createObjectURL(f),
-          filename: f.name,
-        }));
-        setExistingImages((prev) => prev.concat(appended));
+        // The server should have processed the uploads and returned proper URLs
+        // If the server returns image URLs, use those; otherwise use blob URLs temporarily
+        if (responseData.images && Array.isArray(responseData.images)) {
+          console.log('Server returned images:', responseData.images);
+          const serverImages = responseData.images.slice(-newFiles.length); // Get the newly uploaded images
+          console.log('Using server images:', serverImages);
+          setExistingImages((prev) => prev.concat(serverImages));
+        } else {
+          console.log('No server images returned, using blob URLs as fallback');
+          // Fallback to blob URLs if server doesn't return proper URLs
+          const appended = newFiles.map((f) => ({
+            url: URL.createObjectURL(f),
+            filename: f.name,
+          }));
+          setExistingImages((prev) => prev.concat(appended));
+        }
         setNewFiles([]);
         setImagesConsolidated(false); // Reset flag when new images are added
       }
@@ -345,12 +359,21 @@ function AccomplishmentReport() {
         throw new Error(`Submit failed: ${res.status} ${text}`);
       }
 
+      // Get the updated submission data from the server response
+      const responseData = await res.json().catch(() => ({}));
+
       // Capture values that are being sent to the coordinator for display
       const imagesCount = newFiles.length;
 
       if (newFiles.length) {
-        const appended = newFiles.map((f) => ({ url: URL.createObjectURL(f), filename: f.name }));
-        setExistingImages((prev) => prev.concat(appended));
+        // Use server URLs if available, otherwise fallback to blob URLs
+        if (responseData.images && Array.isArray(responseData.images)) {
+          const serverImages = responseData.images.slice(-newFiles.length);
+          setExistingImages((prev) => prev.concat(serverImages));
+        } else {
+          const appended = newFiles.map((f) => ({ url: URL.createObjectURL(f), filename: f.name }));
+          setExistingImages((prev) => prev.concat(appended));
+        }
         setNewFiles([]);
         setImagesConsolidated(false); // Reset flag when new images are added
       }
@@ -1139,21 +1162,43 @@ function AccomplishmentReport() {
 
                     {(existingImages.length > 0 || newFiles.length > 0) && (
                       <div className="thumbs">
-                        {existingImages.map((img, index) => (
-                          <div key={img.url + img.filename} className="thumb">
-                            <img src={img.url} alt={img.filename} />
-                            <button
-                              type="button"
-                              className="remove-image-btn"
-                              onClick={() => setExistingImages(prev => prev.filter((_, i) => i !== index))}
-                              title="Remove image"
-                            >
-                              ×
-                            </button>
-                          </div>
-                        ))}
+                        {existingImages
+                          .filter(img => {
+                            // Filter out blob URLs from display
+                            if (typeof img === 'string' && img.startsWith('blob:')) return false;
+                            if (typeof img === 'object' && img.url && img.url.startsWith('blob:')) return false;
+                            return true;
+                          })
+                          .map((img, index) => {
+                            // Use proper image URL and unique key
+                            const imageUrl = getImageUrl(img);
+                            const uniqueKey = img.filename || `img-${index}`;
+                            
+                            console.log('Displaying image:', { img, imageUrl, uniqueKey });
+                            
+                            return (
+                              <div key={uniqueKey} className="thumb">
+                                <img 
+                                  src={imageUrl} 
+                                  alt={img.filename}
+                                  onError={(e) => {
+                                    console.error('Image failed to load:', imageUrl);
+                                    console.error('Image object:', img);
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  className="remove-image-btn"
+                                  onClick={() => setExistingImages(prev => prev.filter((_, i) => i !== index))}
+                                  title="Remove image"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            );
+                          })}
                         {newFiles.map((f, i) => (
-                          <div key={`new-${i}`} className="thumb">
+                          <div key={`new-${i}-${f.name}`} className="thumb">
                             <img src={URL.createObjectURL(f)} alt={f.name} />
                             <div className="thumb-meta">
                               <button
@@ -1293,18 +1338,16 @@ function AccomplishmentReport() {
                               {(g?.submissions || []).map((s, sIdx) => {
                                 const f = parseFields(s) || {};
                                 const answers = f._answers || {};
-                                const images = answers.images || [];
+                                const images = (answers.images || []).filter(img => {
+                                  // Filter out blob URLs (temporary local URLs) from peer groups display
+                                  if (typeof img === 'string' && img.startsWith('blob:')) return false;
+                                  if (typeof img === 'object' && img.url && img.url.startsWith('blob:')) return false;
+                                  return true;
+                                });
                                 return images.map((img, imgIdx) => {
-                                  let imageUrl;
-                                  if (typeof img === 'string') {
-                                    imageUrl = `${API_BASE}/uploads/accomplishments/${img}`;
-                                  } else if (img.url) {
-                                    imageUrl = img.url.startsWith('/') ? `${API_BASE}${img.url}` : img.url;
-                                  } else if (img.filename) {
-                                    imageUrl = `${API_BASE}/uploads/accomplishments/${img.filename}`;
-                                  } else {
-                                    return null;
-                                  }
+                                  const imageUrl = getImageUrl(img);
+                                  if (!imageUrl) return null;
+                                  
                                   return (
                                     <img 
                                       key={`${sIdx}-${imgIdx}`} 
@@ -1313,6 +1356,7 @@ function AccomplishmentReport() {
                                       style={{ width: 80, height: 60, objectFit: "cover", borderRadius: 4, border: "1px solid #e5e7eb" }}
                                       onError={(e) => {
                                         console.error('Image failed to load:', imageUrl);
+                                        debugImageUrl(img, `Peer Group ${sIdx}-${imgIdx}`);
                                         e.target.style.display = 'none';
                                       }}
                                     />

@@ -836,10 +836,18 @@ export const patchSubmissionFormData = (req, res) => {
     const files = req.files || [];
     console.log('Processing files:', files);
     if (files.length > 0) {
-      const imageUrls = files.map(file => ({
-        url: `/uploads/accomplishments/${file.filename}`,
-        filename: file.originalname
-      }));
+      const imageUrls = files.map(file => {
+        console.log('File details:', {
+          originalname: file.originalname,
+          filename: file.filename,
+          path: file.path,
+          size: file.size
+        });
+        return {
+          url: `/uploads/accomplishments/${file.filename}`,
+          filename: file.filename
+        };
+      });
       console.log('Created image URLs:', imageUrls);
       finalImages = [...finalImages, ...imageUrls];
       console.log('Updated images array:', finalImages);
@@ -868,11 +876,12 @@ export const patchSubmissionFormData = (req, res) => {
     db.query(updateSql, params, (updErr) => {
       if (updErr) return res.status(500).send('Update failed: ' + updErr);
 
-      // Return success response
+      // Return success response with updated images
       res.json({
         message: 'Submission updated successfully',
         submission_id: id,
-        status: Number(status) || (currentStatus < 2 ? 2 : currentStatus)
+        status: Number(status) || (currentStatus < 2 ? 2 : currentStatus),
+        images: finalImages // Include the updated images array
       });
     });
   });

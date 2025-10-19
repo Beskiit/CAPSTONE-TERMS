@@ -2,3 +2,4 @@
   <circle cx="12" cy="12" r="10" fill="#FEE2E2" stroke="#DC2626" stroke-width="2"/>
   <path d="M8 8L16 16M16 8L8 16" stroke="#DC2626" stroke-width="2" stroke-linecap="round"/>
 </svg>
+
