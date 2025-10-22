@@ -30,6 +30,7 @@ function SetReport() {
   const [subCategories, setSubCategories] = useState([]);
   const [attempts, setAttempts] = useState("");
   const [allowLate, setAllowLate] = useState(false);
+  const [activeYearQuarter, setActiveYearQuarter] = useState({ year: 1, quarter: 1 });
 
   const [selectedCategory, setSelectedCategory] = useState("");
   const [selectedSubCategory, setSelectedSubCategory] = useState("");
@@ -91,6 +92,26 @@ function SetReport() {
       }
     };
     fetchUser();
+  }, []);
+
+  // ✅ Load active year and quarter
+  useEffect(() => {
+    const fetchActiveYearQuarter = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/admin/active-year-quarter-for-reports`, {
+          credentials: "include",
+        });
+        if (!res.ok) {
+          console.warn("No active year/quarter set, using defaults");
+          return;
+        }
+        const data = await res.json();
+        setActiveYearQuarter(data);
+      } catch (err) {
+        console.error("Failed to fetch active year/quarter:", err);
+      }
+    };
+    fetchActiveYearQuarter();
   }, []);
 
   // ✅ Load teachers (users)
@@ -235,8 +256,8 @@ function SetReport() {
         sub_category_id: Number(selectedSubCategory),
         given_by: Number(givenBy),
         assignees: recipients.map((x) => Number(x)),
-        quarter: 1,
-        year: 1,
+        quarter: activeYearQuarter.quarter,
+        year: activeYearQuarter.year,
         from_date: startDate || null,
         to_date: dueDate,
         instruction,
@@ -354,7 +375,7 @@ function SetReport() {
 
         <div className="dashboard-content">
           <div className="dashboard-main">
-            <h2>Set Reports</h2>
+            <h2>Set Report Schedule</h2>
 
             <form className="schedule-form" onSubmit={handleSubmit}>
               <div className="form-row allow-late-row">

@@ -187,11 +187,12 @@ export const giveAccomplishmentReport = (req, res) => {
 export const getAccomplishmentSubmission = (req, res) => {
   const { id } = req.params;
   const sql = `
-    SELECT submission_id, report_assignment_id, category_id, submitted_by, status, number_of_submission,
-           value, DATE_FORMAT(date_submitted,'%Y-%m-%d %H:%i:%s') AS date_submitted,
-           fields
-    FROM submission
-    WHERE submission_id = ?
+    SELECT s.submission_id, s.report_assignment_id, s.category_id, s.submitted_by, s.status, s.number_of_submission,
+           s.value, DATE_FORMAT(s.date_submitted,'%Y-%m-%d %H:%i:%s') AS date_submitted,
+           s.fields, ud.name AS submitted_by_name
+    FROM submission s
+    LEFT JOIN user_details ud ON s.submitted_by = ud.user_id
+    WHERE s.submission_id = ?
   `;
   db.query(sql, [id], (err, rows) => {
     if (err) return res.status(500).send("DB error: " + err);
@@ -230,13 +231,6 @@ export const patchAccomplishmentSubmission = (req, res) => {
     expenses
   } = req.body || {};
   const files = Array.isArray(req.files) ? req.files : [];
-
-  console.log('PATCH accomplishment request:', {
-    id,
-    status,
-    rejection_reason,
-    body: req.body
-  });
 
   const selectSql = `SELECT fields FROM submission WHERE submission_id = ?`;
   db.query(selectSql, [id], (selErr, rowsDb) => {
@@ -342,17 +336,74 @@ export const getAccomplishmentPeers = (req, res) => {
 
   // NOTE: exclude current submission when ra= is provided
   // Only get submissions from TEACHERS (role = 'teacher'), not coordinators
-  // But look for teacher submissions assigned by the current coordinator
+  // Look for ALL teacher submissions with status >= 2, regardless of coordinator
   const fetchSqlFromRA = `
     SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields
     FROM submission s
     JOIN user_details ud ON s.submitted_by = ud.user_id
     JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
-    WHERE ra.given_by = (SELECT submitted_by FROM submission WHERE submission_id = ?)
-      AND s.submission_id <> ?
+    WHERE s.submission_id <> ?
       AND s.status >= 2
       AND LOWER(ud.role) = 'teacher'
   `;
+  
+  console.log("=== DEBUGGING QUERY ===");
+  console.log("Query:", fetchSqlFromRA);
+  console.log("Parameters:", [ra, id]);
+  
+  // Debug: Check what coordinator created assignment 74
+  const coordinatorCheckSql = `SELECT given_by FROM report_assignment WHERE report_assignment_id = ?`;
+  db.query(coordinatorCheckSql, [ra], (err, coordinatorRows) => {
+    if (err) {
+      console.log("Error checking coordinator:", err);
+    } else {
+      console.log("=== COORDINATOR CHECK ===");
+      console.log("Assignment 74 coordinator:", coordinatorRows);
+      
+      // Debug: Check what coordinator created assignment 75 (teacher's assignment)
+      db.query(coordinatorCheckSql, ['75'], (err2, coordinatorRows2) => {
+        if (err2) {
+          console.log("Error checking coordinator for 75:", err2);
+        } else {
+          console.log("Assignment 75 coordinator:", coordinatorRows2);
+          console.log("Are coordinators the same?", coordinatorRows[0]?.given_by === coordinatorRows2[0]?.given_by);
+          
+          // Debug: Let's also check what the actual query is looking for
+          const testQuery = `
+            SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields, ud.role, ud.name, ra.given_by
+            FROM submission s
+            JOIN user_details ud ON s.submitted_by = ud.user_id
+            JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
+            WHERE ra.given_by = ?
+              AND s.status >= 2
+              AND LOWER(ud.role) = 'teacher'
+          `;
+          
+          db.query(testQuery, [coordinatorRows[0]?.given_by], (testErr, testRows) => {
+            if (testErr) {
+              console.log("Error in test query:", testErr);
+            } else {
+              console.log("=== TEST QUERY RESULTS ===");
+              console.log(`Found ${testRows?.length || 0} teacher submissions for coordinator ${coordinatorRows[0]?.given_by}`);
+              if (testRows && testRows.length > 0) {
+                testRows.forEach((row, idx) => {
+                  console.log(`Test Result ${idx + 1}:`, {
+                    submission_id: row.submission_id,
+                    report_assignment_id: row.report_assignment_id,
+                    title: row.title,
+                    status: row.status,
+                    role: row.role,
+                    name: row.name,
+                    given_by: row.given_by
+                  });
+                });
+              }
+            }
+          });
+        }
+      });
+    }
+  });
 
   // Debug: Let's also check what submissions exist for this assignment
   const debugSql = `
@@ -464,7 +515,7 @@ export const getAccomplishmentPeers = (req, res) => {
         }
         
         // Now run the actual query
-        db.query(sql, params, (err, rows) => {
+        db.query(sql, [ra, ra, id], (err, rows) => {
           console.log("Query result:", { err, rowCount: rows?.length, rows });
           if (err) return res.status(500).send("DB error: " + err);
           const groups = new Map();
@@ -474,7 +525,7 @@ export const getAccomplishmentPeers = (req, res) => {
               fieldsObj =
                 typeof r.fields === "string" ? JSON.parse(r.fields) : r.fields || {};
             } catch {}
-            const imgs = Array.isArray(fieldsObj.images) ? fieldsObj.images : [];
+            const imgs = Array.isArray(fieldsObj._answers?.images) ? fieldsObj._answers.images : [];
             const title = (r.title || fieldsObj.title || "Untitled").trim();
             const key = title.toLowerCase();
             const g =
@@ -547,7 +598,7 @@ export const getAccomplishmentPeers = (req, res) => {
     }
   };
 
-  if (ra) return run(fetchSqlFromRA, [id, id]);
+  if (ra) return run(fetchSqlFromRA, [id]);
   return run(fetchSqlFromSubmission, [id]);
 };
 
@@ -561,23 +612,18 @@ export const consolidateAccomplishmentByTitle = (req, res) => {
   const { title } = req.body || {};
   if (!title) return res.status(400).json({ error: "title is required" });
 
-  // Use the same logic as the peers query - find teacher submissions assigned by current coordinator
+  // Use the same logic as the peers query - find ALL teacher submissions with status >= 2
   const peersSql = `
     SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields
     FROM submission s
     JOIN user_details ud ON s.submitted_by = ud.user_id
     JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
-    WHERE ra.given_by = (SELECT submitted_by FROM submission WHERE submission_id = ?)
-      AND s.submission_id <> ?
+    WHERE s.submission_id <> ?
       AND s.status >= 2
       AND LOWER(ud.role) = 'teacher'
   `;
-  db.query(peersSql, [id, id], (err, rows) => {
+  db.query(peersSql, [id], (err, rows) => {
     if (err) return res.status(500).send("DB error: " + err);
-    
-    console.log('Consolidation - Found peers:', rows.length);
-    console.log('Consolidation - Target title:', title);
-    
     const targetKey = String(title).trim().toLowerCase();
     const combined = new Set();
     for (const r of rows || []) {
@@ -586,20 +632,8 @@ export const consolidateAccomplishmentByTitle = (req, res) => {
         fieldsObj =
           typeof r.fields === "string" ? JSON.parse(r.fields) : r.fields || {};
       } catch {}
-      // Look for images in the correct location: fields._answers.images
-      const answers = fieldsObj._answers || {};
-      const imgs = Array.isArray(answers.images) ? answers.images : [];
-      const t = (r.title || answers.title || fieldsObj.title || "").trim().toLowerCase();
-      
-      console.log('Peer submission:', {
-        submissionId: r.submission_id,
-        title: t,
-        targetKey,
-        matches: t === targetKey,
-        imagesCount: imgs.length,
-        images: imgs
-      });
-      
+      const imgs = Array.isArray(fieldsObj._answers?.images) ? fieldsObj._answers.images : [];
+      const t = (r.title || fieldsObj.title || "").trim().toLowerCase();
       if (t === targetKey) imgs.forEach((nm) => combined.add(nm));
     }
 
@@ -612,30 +646,22 @@ export const consolidateAccomplishmentByTitle = (req, res) => {
       try {
         current = JSON.parse(selRows[0].fields || "{}");
       } catch {}
-      // Look for current images in the correct location: fields._answers.images
-      const currentAnswers = current._answers || {};
-      const currImgs = Array.isArray(currentAnswers.images) ? currentAnswers.images : [];
+      const currImgs = Array.isArray(current.images) ? current.images : [];
       currImgs.forEach((nm) => combined.add(nm));
 
       const next = {
         ...(current || {}),
         type: "ACCOMPLISHMENT",
-        _answers: {
-          ...(current._answers || {}),
-          images: Array.from(combined),
-        },
+        images: Array.from(combined),
         meta: {
           ...(current?.meta || {}),
           consolidatedAt: new Date().toISOString(),
         },
       };
-      console.log('Final consolidated images:', Array.from(combined));
-      console.log('Final response:', { ok: true, images: next._answers.images, count: next._answers.images.length });
-      
       const updSql = `UPDATE submission SET fields = ? WHERE submission_id = ?`;
       db.query(updSql, [JSON.stringify(next), id], (updErr) => {
         if (updErr) return res.status(500).send("Update failed: " + updErr);
-        res.json({ ok: true, images: next._answers.images, count: next._answers.images.length });
+        res.json({ ok: true, images: next.images, count: next.images.length });
       });
     });
   });

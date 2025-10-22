@@ -145,3 +145,4 @@ export const validateForm = (formData, validationRules) => {
     errors
   };
 };
+

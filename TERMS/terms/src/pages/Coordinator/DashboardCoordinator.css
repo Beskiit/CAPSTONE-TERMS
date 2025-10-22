@@ -6,6 +6,24 @@ body{
   min-height: 100vh;
 }
 
+/* Clickable report styling */
+.clickable-report {
+  transition: all 0.2s ease-in-out;
+}
+
+.clickable-report:hover {
+  background-color: #f8f9fa;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.loading-message, .no-reports-message {
+  text-align: center;
+  padding: 2rem;
+  color: #6c757d;
+  font-style: italic;
+}
+
 .dashboard-container {
   display: flex;
   margin-top: 2.5rem;
@@ -59,6 +77,45 @@ body{
   padding: 1rem 1.5rem 1rem 1.5rem;
   background-color: white;
   border-radius: 1.5rem;
+  min-height: 200px;
+  max-height: 400px;
+}
+
+.approved-reports{
+  padding: 1rem 1.5rem 1rem 1.5rem;
+  background-color: white;
+  border-radius: 1.5rem;
+  min-height: 150px;
+  max-height: 300px;
+  margin-top: 1rem;
+}
+
+.reports-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* Custom scrollbar for reports list */
+.reports-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.reports-list::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.reports-list::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.reports-list::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
 }
 
 .calendar-container {
@@ -213,3 +270,86 @@ body{
   font-weight: bold;
 }
 
+/* === Compact list containers (override) === */
+
+/* Let the cards size to content instead of being tall boxes */
+.submitted-reports,
+.approved-reports {
+  min-height: 0;          /* override previous min-height */
+  max-height: none;       /* let content + list decide */
+  padding: 0.75rem 1rem;  /* slightly tighter padding */
+}
+
+/* Make only the list area short + scrollable */
+.submitted-reports .reports-list {
+  max-height: 180px;      /* adjust to taste */
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+
+.approved-reports .reports-list {
+  max-height: 100px;      /* smaller list height for the Approved section */
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+
+/* Tighter rows so each item uses less space */
+.submitted-reports-container {
+  padding: 0.25rem 0.5rem;
+}
+
+.submitted-report-title h4 {
+  margin: 0 0 2px;
+  font-size: 0.98rem;
+}
+
+.submitted-report-title p,
+.submitted-report-date p {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+/* Filter controls styling */
+.filter-controls {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 200px;
+}
+
+.filter-group label {
+  font-weight: 600;
+  color: #495057;
+  font-size: 0.9rem;
+}
+
+.filter-dropdown {
+  padding: 0.5rem;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  background-color: white;
+  font-size: 0.9rem;
+  color: #495057;
+  cursor: pointer;
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.filter-dropdown:focus {
+  outline: none;
+  border-color: #80bdff;
+  box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+.filter-dropdown:hover {
+  border-color: #adb5bd;
+}

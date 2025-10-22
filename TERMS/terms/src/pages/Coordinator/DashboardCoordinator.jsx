@@ -1,10 +1,12 @@
 import "./DashboardCoordinator.css";
 import React from 'react'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import Header from '../../components/shared/Header.jsx';
 import Sidebar from '../../components/shared/SidebarCoordinator.jsx';
+import QuarterEnumService from '../../services/quarterEnumService';
 import Submitted from '../../assets/submitted.svg';
 import Pending from '../../assets/pending.svg';
 import Approved from '../../assets/approved.svg';
@@ -14,6 +16,7 @@ import DeadlineComponent from "../Teacher/DeadlineComponent.jsx";
 const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
 
 function DashboardCoordinator() {
+  const navigate = useNavigate();
   const [user, setUser] = useState(null);
 
   // NEW: counts + deadlines
@@ -24,6 +27,17 @@ function DashboardCoordinator() {
     rejected: 0,
   });
   const [deadlines, setDeadlines] = useState([]);
+  const [submittedReports, setSubmittedReports] = useState([]);
+  const [approvedReports, setApprovedReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  
+  // Filter states
+  const [selectedSchoolYear, setSelectedSchoolYear] = useState('');
+  const [selectedQuarter, setSelectedQuarter] = useState('');
+  const [schoolYears, setSchoolYears] = useState([]);
+  const [quarters, setQuarters] = useState([]);
+  const [filteredSubmittedReports, setFilteredSubmittedReports] = useState([]);
+  const [filteredApprovedReports, setFilteredApprovedReports] = useState([]);
 
   // Load user (you already had this)
   useEffect(() => {
@@ -40,6 +54,30 @@ function DashboardCoordinator() {
       }
     };
     fetchUser();
+  }, []);
+
+  // Fetch school years and set static quarters
+  useEffect(() => {
+    const fetchSchoolYears = async () => {
+      try {
+        // Fetch school years
+        const schoolYearsRes = await fetch(`${API_BASE}/admin/school-years`, {
+          credentials: "include",
+        });
+        if (schoolYearsRes.ok) {
+          const schoolYearsData = await schoolYearsRes.json();
+          setSchoolYears(schoolYearsData);
+        }
+
+        // Set quarters using quarter enum service
+        const formattedQuarters = await QuarterEnumService.getFormattedQuarters();
+        setQuarters(formattedQuarters);
+      } catch (err) {
+        console.error("Failed to fetch school years:", err);
+      }
+    };
+
+    fetchSchoolYears();
   }, []);
 
   // After user loads, fetch counts
@@ -97,6 +135,127 @@ function DashboardCoordinator() {
     fetchDeadlines();
   }, [user]);
 
+  // Fetch submitted and approved reports data
+  useEffect(() => {
+    const fetchReportsData = async () => {
+      try {
+        setLoading(true);
+        
+        // Fetch reports submitted by this coordinator
+        if (user?.user_id) {
+          const reportsRes = await fetch(`${API_BASE}/reports/submitted_by/${user.user_id}`, {
+            credentials: "include",
+          });
+          if (reportsRes.ok) {
+            const reportsData = await reportsRes.json();
+            // Set all reports (for counting purposes)
+            setSubmittedReports(reportsData);
+            // Filter for approved reports (status 3) for display
+            const approvedOnly = reportsData.filter(report => report.status === 3);
+            setApprovedReports(approvedOnly);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch reports data:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (user) {
+      fetchReportsData();
+    }
+  }, [user]);
+
+  // Filter reports based on selected school year and quarter
+  useEffect(() => {
+    const filterReports = () => {
+      let filteredSubmitted = submittedReports;
+      let filteredApproved = approvedReports;
+
+      if (selectedSchoolYear && selectedQuarter) {
+        filteredSubmitted = submittedReports.filter(report => {
+          const reportYear = report.school_year;
+          const reportQuarter = report.quarter_name;
+          
+          // Find the selected school year object
+          const selectedYearObj = schoolYears.find(year => year.year_id.toString() === selectedSchoolYear);
+          const selectedQuarterObj = quarters.find(quarter => quarter.value.toString() === selectedQuarter);
+          
+          return reportYear === selectedYearObj?.school_year && 
+                 reportQuarter === selectedQuarterObj?.label;
+        });
+
+        filteredApproved = approvedReports.filter(report => {
+          const reportYear = report.school_year;
+          const reportQuarter = report.quarter_name;
+          
+          // Find the selected school year object
+          const selectedYearObj = schoolYears.find(year => year.year_id.toString() === selectedSchoolYear);
+          const selectedQuarterObj = quarters.find(quarter => quarter.value.toString() === selectedQuarter);
+          
+          return reportYear === selectedYearObj?.school_year && 
+                 reportQuarter === selectedQuarterObj?.label;
+        });
+      }
+
+      setFilteredSubmittedReports(filteredSubmitted);
+      setFilteredApprovedReports(filteredApproved);
+    };
+
+    filterReports();
+  }, [submittedReports, approvedReports, selectedSchoolYear, selectedQuarter, schoolYears, quarters]);
+
+  // Update counts based on filtered reports
+  useEffect(() => {
+    const updateFilteredCounts = () => {
+      // Total submitted = status 2 (submitted) + status 3 (approved)
+      const totalSubmitted = filteredSubmittedReports.filter(report => 
+        report.status === 2 || report.status === 3
+      ).length;
+      
+      // Pending = status 1 (pending)
+      const pending = filteredSubmittedReports.filter(report => 
+        report.status === 1
+      ).length;
+      
+      // Approved = status 3 (approved)
+      const approved = filteredSubmittedReports.filter(report => 
+        report.status === 3
+      ).length;
+      
+      // Rejected = status 4 (rejected)
+      const rejected = filteredSubmittedReports.filter(report => 
+        report.status === 4
+      ).length;
+
+      const filteredCounts = {
+        submitted: totalSubmitted,
+        approved: approved,
+        pending: pending,
+        rejected: rejected,
+      };
+      setCounts(filteredCounts);
+    };
+
+    updateFilteredCounts();
+  }, [filteredSubmittedReports]);
+
+  // Navigation handlers
+  const handleSubmittedReportClick = (report) => {
+    // Navigate to AssignedReportData for submitted reports
+    if (report.submission_id) {
+      navigate(`/AssignedReportData/${report.submission_id}`);
+    }
+  };
+
+  const handleApprovedReportClick = (report) => {
+    // Navigate to ViewSubmissionData for approved reports
+    if (report.submission_id) {
+      navigate(`/ViewSubmissionData?id=${report.submission_id}`);
+    }
+  };
+
   return (
     <>
       <Header userText={user ? user.name : "Guest"} />
@@ -142,18 +301,103 @@ function DashboardCoordinator() {
 
             <div className="submitted-reports">
               <h2>Submitted Reports</h2>
+              
+              {/* Filter dropdowns */}
+              <div className="filter-controls">
+                <div className="filter-group">
+                  <label htmlFor="school-year-filter">School Year:</label>
+                  <select 
+                    id="school-year-filter"
+                    value={selectedSchoolYear} 
+                    onChange={(e) => setSelectedSchoolYear(e.target.value)}
+                    className="filter-dropdown"
+                  >
+                    <option value="">All School Years</option>
+                    {schoolYears.map((year) => (
+                      <option key={year.year_id} value={year.year_id}>
+                        {year.school_year}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                
+                <div className="filter-group">
+                  <label htmlFor="quarter-filter">Quarter:</label>
+                  <select 
+                    id="quarter-filter"
+                    value={selectedQuarter} 
+                    onChange={(e) => setSelectedQuarter(e.target.value)}
+                    className="filter-dropdown"
+                  >
+                    <option value="">All Quarters</option>
+                    {quarters.map((quarter) => (
+                      <option key={quarter.value} value={quarter.value}>
+                        {quarter.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              
               <hr />
-              <div className="submitted-reports-container">
-                <div className="submitted-report-title">
-                  <h4>Quarterly Assessment Report</h4>
-                  <p>Intervention Report</p>
-                  <p>1st Quarter</p>
-                </div>
-                <div className="submitted-report-date">
-                  <p>SY: 2025-2026</p>
-                  <p>Date Given: May 06, 2025</p>
-                  <p>May 06, 2025</p>
-                </div>
+              <div className="reports-list">
+                {loading ? (
+                  <div className="loading-message">Loading submitted reports...</div>
+                ) : filteredSubmittedReports.length > 0 ? (
+                  filteredSubmittedReports.slice(0, 5).map((report, index) => (
+                    <div 
+                      key={report.submission_id || index} 
+                      className="submitted-reports-container clickable-report"
+                      onClick={() => handleSubmittedReportClick(report)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <div className="submitted-report-title">
+                        <h4>{report.assignment_title || 'Report'}</h4>
+                        <p>{report.category_name || 'Category'}</p>
+                        <p>{report.sub_category_name || 'Sub-Category'}</p>
+                      </div>
+                      <div className="submitted-report-date">
+                        <p>SY: {report.school_year || '2024-2025'}</p>
+                        <p>Date Submitted: {report.date_submitted || 'N/A'}</p>
+                        <p>Status: {report.status === 2 ? 'Submitted' : 'Unknown'}</p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="no-reports-message">No submitted reports found</div>
+                )}
+              </div>
+            </div>
+
+            <div className="approved-reports">
+              <h2>Approved Reports</h2>
+              <hr />
+              <div className="reports-list">
+                {loading ? (
+                  <div className="loading-message">Loading approved reports...</div>
+                ) : filteredApprovedReports.length > 0 ? (
+                  filteredApprovedReports.slice(0, 5).map((report, index) => (
+                    <div 
+                      key={report.submission_id || index} 
+                      className="submitted-reports-container clickable-report"
+                      onClick={() => handleApprovedReportClick(report)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <div className="submitted-report-title">
+                        <h4>{report.assignment_title || report.title || 'Report'}</h4>
+                        <p>{report.category_name || 'Category'}</p>
+                        <p>{report.sub_category_name || 'Sub-Category'}</p>
+                      </div>
+                      <div className="submitted-report-date">
+                        <p>SY: {report.school_year || '2024-2025'}</p>
+                        <p>Date Submitted: {report.date_submitted || 'N/A'}</p>
+                        <p>Status: Approved</p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="no-reports-message">No approved reports found</div>
+                )}
               </div>
             </div>
           </div>

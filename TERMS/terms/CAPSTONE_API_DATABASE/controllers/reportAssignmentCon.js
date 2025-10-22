@@ -1,6 +1,5 @@
 // controllers/reportAssignmentCon.js
 import db from '../db.js';
-import { createNotificationsBulk } from './notificationsController.js';
 
 /* =========================
    LIST / READ
@@ -282,27 +281,10 @@ export const giveReport = (req, res) => {
                   if (cErr) {
                     return conn.rollback(() => { conn.release(); res.status(500).send('Commit error: ' + cErr.message); });
                   }
-                  // After successful commit, create notifications for recipients
-                  // fetch assigner name for message context
-                  const nameSql = `SELECT name FROM user_details WHERE user_id = ? LIMIT 1`;
-                  conn.query(nameSql, [given_by], (_nErr, nRows) => {
-                    const giverName = (nRows && nRows[0] && nRows[0].name) ? nRows[0].name : 'Coordinator';
-                    const notifications = recipients.map((uid) => ({
-                      user_id: uid,
-                      title: `New report assigned: ${title}`,
-                      message: `Assigned by ${giverName} — due on ${to_date}.`,
-                      type: 'report_assigned',
-                      ref_type: 'report_assignment',
-                      ref_id: report_assignment_id,
-                    }));
-
-                    createNotificationsBulk(notifications, () => {
-                      conn.release();
-                      res.status(201).json({
-                        report_assignment_id,
-                        submission_ids: rows.map(r => r.submission_id)
-                      });
-                    });
+                  conn.release();
+                  res.status(201).json({
+                    report_assignment_id,
+                    submission_ids: rows.map(r => r.submission_id)
                   });
                 });
               }

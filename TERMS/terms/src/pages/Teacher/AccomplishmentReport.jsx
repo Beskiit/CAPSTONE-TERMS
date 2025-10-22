@@ -7,6 +7,8 @@ import { ConfirmationModal, SubmissionConfirmation } from "../../components/Conf
 import { normalizeImages, getImageUrl, debugImageUrl } from "../../utils/imageUtils.js";
 import toast from "react-hot-toast";
 import "./AccomplishmentReport.css";
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle, ImageRun } from "docx";
+import { saveAs } from "file-saver";
 
 // Always strip trailing slash on base, then build our own paths.
 const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
@@ -63,6 +65,7 @@ function AccomplishmentReport() {
     keyResult: "",
     personsInvolved: "",
     expenses: "",
+    lessonLearned: "",
   });
 
   // UI
@@ -174,6 +177,7 @@ function AccomplishmentReport() {
           keyResult: answers.keyResult || "",
           personsInvolved: answers.personsInvolved || "",
           expenses: answers.expenses || "",
+          lessonLearned: answers.lessonLearned || "",
         }));
 
         // Load rejection reason if the submission was rejected
@@ -416,9 +420,237 @@ function AccomplishmentReport() {
   const onGenerate = () => {
     alert("Generate Report: hook this to your generator when ready.");
   };
-  const onExport = () => {
-    alert("Export: hook this to your export endpoint when ready.");
+  // Export functionality for Word document
+  // --- REPLACE YOUR exportToWord WITH THIS VERSION (2 images per row) ---
+const exportToWord = async (submissionData) => {
+  if (!submissionData || !submissionData.fields) {
+    alert("No data available to export");
+    return;
+  }
+
+  const fields = submissionData.fields;
+  const answers = fields._answers || {};
+  const activity = answers;
+
+  // Normalize orientation via canvas (browser applies EXIF on decode)
+  const normalizeImageForDocx = async (imageUrl, targetHeight = 150, maxWidth = 220) => {
+    try {
+      const res = await fetch(imageUrl, { credentials: "include" });
+      if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+
+      const img = await new Promise((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = reject;
+        el.src = objUrl;
+      });
+
+      const aspect = img.width && img.height ? img.width / img.height : 4 / 3;
+      const height = targetHeight;
+      const width = Math.min(Math.round(aspect * height), maxWidth);
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, width, height);
+
+      const outBlob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.92));
+      URL.revokeObjectURL(objUrl);
+      if (!outBlob) return null;
+
+      return { buffer: new Uint8Array(await outBlob.arrayBuffer()), width, height };
+    } catch (e) {
+      console.error("normalizeImageForDocx error:", e);
+      return null;
+    }
   };
+
+  // Build absolute URLs for stored images
+  const imageItems = (answers.images || [])
+    .map((img) => {
+      if (typeof img === "string") return `${API_BASE}/uploads/accomplishments/${img}`;
+      if (img?.url) return img.url.startsWith("/") ? `${API_BASE}${img.url}` : img.url;
+      if (img?.filename) return `${API_BASE}/uploads/accomplishments/${img.filename}`;
+      return null;
+    })
+    .filter(Boolean);
+
+  const normalized = await Promise.all(imageItems.map((u) => normalizeImageForDocx(u, 150, 220)));
+  const validImages = normalized.filter(Boolean);
+
+  // === Build a small inner table: 2 images per row ===
+  const makeTwoPerRowImageTable = () => {
+    if (!validImages.length) {
+      return new Paragraph({
+        children: [new TextRun({ text: "No images provided", italics: true })],
+      });
+    }
+
+    const rows = [];
+    const gapWidthDXA = 240; // ~ 0.17 inch gap (tweak as needed)
+
+    for (let i = 0; i < validImages.length; i += 2) {
+      const left = validImages[i];
+      const right = validImages[i + 1]; // may be undefined for odd count
+
+      const cells = [
+        new TableCell({
+          borders: { top: { size: 0 }, bottom: { size: 0 }, left: { size: 0 }, right: { size: 0 } },
+          children: [
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              children: [new ImageRun({ data: left.buffer, transformation: { width: left.width, height: left.height } })],
+            }),
+          ],
+        }),
+      ];
+
+      if (right) {
+        // gap cell
+        cells.push(
+          new TableCell({
+            width: { size: gapWidthDXA, type: WidthType.DXA },
+            borders: { top: { size: 0 }, bottom: { size: 0 }, left: { size: 0 }, right: { size: 0 } },
+            children: [new Paragraph({})],
+          })
+        );
+        // right image cell
+        cells.push(
+          new TableCell({
+            borders: { top: { size: 0 }, bottom: { size: 0 }, left: { size: 0 }, right: { size: 0 } },
+            children: [
+              new Paragraph({
+                alignment: AlignmentType.CENTER,
+                children: [new ImageRun({ data: right.buffer, transformation: { width: right.width, height: right.height } })],
+              }),
+            ],
+          })
+        );
+      }
+
+      rows.push(new TableRow({ children: cells }));
+    }
+
+    return new Table({
+      rows,
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      borders: { top: { size: 0 }, bottom: { size: 0 }, left: { size: 0 }, right: { size: 0 } },
+      alignment: AlignmentType.CENTER,
+    });
+  };
+
+  try {
+    const doc = new Document({
+      sections: [
+        {
+          properties: {},
+          children: [
+            new Paragraph({ children: [new TextRun({ text: "Republic of the Philippines", bold: true, size: 24 })], alignment: AlignmentType.CENTER }),
+            new Paragraph({ children: [new TextRun({ text: "Department of Education", bold: true, size: 24 })], alignment: AlignmentType.CENTER }),
+            new Paragraph({ children: [new TextRun({ text: "Region III", bold: true, size: 20 })], alignment: AlignmentType.CENTER }),
+            new Paragraph({ children: [new TextRun({ text: "Schools Division of Bulacan", bold: true, size: 20 })], alignment: AlignmentType.CENTER }),
+            new Paragraph({ children: [new TextRun({ text: "Tuktukan Elementary School", bold: true, size: 20 })], alignment: AlignmentType.CENTER }),
+            new Paragraph({ text: "" }),
+            new Paragraph({ children: [new TextRun({ text: "ACTIVITY COMPLETION REPORT 2024-2025", bold: true, size: 28 })], alignment: AlignmentType.CENTER }),
+            new Paragraph({ text: "" }),
+
+            new Table({
+              width: { size: 100, type: WidthType.PERCENTAGE },
+              rows: [
+                new TableRow({
+                  children: [
+                    new TableCell({
+                      width: { size: 30, type: WidthType.PERCENTAGE },
+                      children: [new Paragraph({ children: [new TextRun({ text: "Program/Activity Title:", bold: true })] })],
+                    }),
+                    new TableCell({
+                      width: { size: 70, type: WidthType.PERCENTAGE },
+                      children: [new Paragraph({ children: [new TextRun({ text: activity.activityName || "Not provided" })] })],
+                    }),
+                  ],
+                }),
+                new TableRow({
+                  children: [
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Facilitator/s:", bold: true })] })] }),
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: activity.facilitators || "Not provided" })] })] }),
+                  ],
+                }),
+                new TableRow({
+                  children: [
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Objectives:", bold: true })] })] }),
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: activity.objectives || "Not provided" })] })] }),
+                  ],
+                }),
+                new TableRow({
+                  children: [
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Program/Activity Design:", bold: true })] })] }),
+                    new TableCell({
+                      children: [
+                        new Paragraph({ children: [new TextRun({ text: `Date: ${activity.date || "Not provided"}` })] }),
+                        new Paragraph({ children: [new TextRun({ text: `Time: ${activity.time || "Not provided"}` })] }),
+                        new Paragraph({ children: [new TextRun({ text: `Venue: ${activity.venue || "Not provided"}` })] }),
+                        new Paragraph({ children: [new TextRun({ text: `Key Results: ${activity.keyResult || "Not provided"}` })] }),
+                      ],
+                    }),
+                  ],
+                }),
+                new TableRow({
+                  children: [
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Person/s Involved:", bold: true })] })] }),
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: activity.personsInvolved || "Not provided" })] })] }),
+                  ],
+                }),
+                new TableRow({
+                  children: [
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Expenses:", bold: true })] })] }),
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: activity.expenses || "Not provided" })] })] }),
+                  ],
+                }),
+                new TableRow({
+                  children: [
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Lessons Learned/Recommendation:", bold: true })] })] }),
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: activity.lessonLearned || "Not provided" })] })] }),
+                  ],
+                }),
+
+                // Picture/s row (2 images per row)
+                new TableRow({
+                  children: [
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Picture/s:", bold: true })] })] }),
+                    new TableCell({ children: [makeTwoPerRowImageTable()] }),
+                  ],
+                }),
+
+                new TableRow({
+                  children: [
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Narrative:", bold: true })] })] }),
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: answers.narrative || "No narrative provided" })] })] }),
+                  ],
+                }),
+              ],
+            }),
+
+            new Paragraph({ text: "" }),
+            new Paragraph({ children: [new TextRun({ text: "Activity Completion Report prepared by:", bold: true })] }),
+            new Paragraph({ text: "" }),
+            new Paragraph({ children: [new TextRun({ text: "Name: [Signature Name]", bold: true })] }),
+            new Paragraph({ children: [new TextRun({ text: "Position: [Position Title]", bold: true })] }),
+          ],
+        },
+      ],
+    });
+
+    const blob = await Packer.toBlob(doc);
+    const fileName = `Activity_Completion_Report_${activity.activityName?.replace(/[^a-zA-Z0-9]/g, "_") || "Report"}.docx`;
+    saveAs(blob, fileName);
+  } catch (err) {
+    console.error("Error generating Word document:", err);
+    alert("Error generating document. Please try again.");
+  }
+};
   const onSubmitToPrincipal = async () => {
     // Allow resubmission for rejected reports (status 4)
     if (submissionStatus >= 2 && submissionStatus !== 4) {
@@ -454,6 +686,7 @@ function AccomplishmentReport() {
       fd.append("keyResult", activity.keyResult);
       fd.append("personsInvolved", activity.personsInvolved);
       fd.append("expenses", activity.expenses);
+      fd.append("lessonLearned", activity.lessonLearned);
       
       // Include existing images (including consolidated ones) in the submission
       if (existingImages.length > 0) {
@@ -512,6 +745,11 @@ function AccomplishmentReport() {
         ? `${API_BASE}/reports/accomplishment/${submissionId}/peers?ra=${encodeURIComponent(reportAssignmentId)}`
         : `${API_BASE}/reports/accomplishment/${submissionId}/peers`;
       
+      console.log("[Consolidate] DEBUG - Request details:");
+      console.log("- submissionId:", submissionId);
+      console.log("- reportAssignmentId:", reportAssignmentId);
+      console.log("- URL:", url);
+      
       const res = await fetch(url, { credentials: "include" });
       if (!res.ok) {
         const txt = await res.text().catch(() => "");
@@ -521,12 +759,13 @@ function AccomplishmentReport() {
       try {
         console.log("[Consolidate] peers response:", data);
         console.log("[Consolidate] peers response (pretty):\n" + JSON.stringify(data, null, 2));
+        console.log("[Consolidate] response length:", Array.isArray(data) ? data.length : "not an array");
       } catch (_) { /* noop */ }
       
       setPeerGroups(Array.isArray(data) ? data : []);
       setShowConsolidate(true);
     } catch (e) {
-      setError(e.message || "Failed to load peers");
+setError(e.message || "Failed to load peers");
     }
   };
 
@@ -681,7 +920,7 @@ function AccomplishmentReport() {
                     </div>
                   )}
 
-                  <button onClick={onExport}>Export</button>
+                  <button onClick={() => exportToWord(submission)}>Export</button>
                   <button onClick={onSubmit} disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}>
                     {saving ? "Saving…" : "Save Draft"}
                   </button>
@@ -730,7 +969,7 @@ function AccomplishmentReport() {
                     </div>
                   )}
 
-                  <button onClick={onExport}>Export</button>
+                  <button onClick={exportToWord}>Export</button>
                   <button onClick={handlePrincipalConfirmation} disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}>
                     {saving ? "Submitting…" : "Submit to Principal"}
                   </button>
@@ -1148,6 +1387,20 @@ function AccomplishmentReport() {
                     </div>
 
                     <div className="form-row">
+                      <label htmlFor="lessonLearned">Lesson Learned/Recommendation:</label>
+                      <textarea
+                        id="lessonLearned"
+                        name="lessonLearned"
+                        rows="4"
+                        value={activity.lessonLearned}
+                        onChange={(e) => setActivity((p) => ({ ...p, lessonLearned: e.target.value }))}
+                        required
+                        disabled={submissionStatus >= 2 && submissionStatus !== 4}
+                        placeholder="Enter lessons learned and recommendations from this activity"
+                      />
+                    </div>
+
+                    <div className="form-row">
                       <label htmlFor="coordPictures">Picture/s:</label>
                       <input
                         type="file"
@@ -1353,7 +1606,7 @@ function AccomplishmentReport() {
                                       key={`${sIdx}-${imgIdx}`} 
                                       src={imageUrl} 
                                       alt={`Image ${imgIdx + 1}`} 
-                                      style={{ width: 80, height: 60, objectFit: "cover", borderRadius: 4, border: "1px solid #e5e7eb" }}
+                                      style={{ width: 100, height: 75, objectFit: "cover", borderRadius: 4, border: "1px solid #e5e7eb" }}
                                       onError={(e) => {
                                         console.error('Image failed to load:', imageUrl);
                                         debugImageUrl(img, `Peer Group ${sIdx}-${imgIdx}`);

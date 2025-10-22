@@ -34,10 +34,14 @@ import SubmittedReport from './pages/Teacher/SubmittedReport.jsx'
 import AssignedReport from './pages/Coordinator/AssignedReport.jsx'
 import ViewSubmissionTeacher from './pages/Teacher/ViewSubmission.jsx'
 import ForApproval from './pages/Principal/ForApproval.jsx'
-import UserManagement from './pages/Principal/UserManagement.jsx'
 import AssignedReportData from './pages/Coordinator/AssignedReportData.jsx'
 import SubmissionData from './pages/Principal/SubmissionData.jsx'
 import ForApprovalData from './pages/Principal/ForApprovalData.jsx'
+import ViewSubmissionData from './pages/Principal/ViewSubmissionData.jsx'
+import UserManagement from './pages/Admin/UserManagement.jsx'
+import AssignUser from './pages/Admin/AssignUser.jsx'
+import AddSchool from './pages/Admin/AddSchool.jsx'
+import AddSchoolPage from './pages/Admin/AddSchoolPage.jsx'
 
 
 function App() {
@@ -67,11 +71,14 @@ function App() {
           <Route path="/SubmittedReport" element={<SubmittedReport />} />
           <Route path="/AssignedReport" element={<AssignedReport />} />
           <Route path="/ForApproval" element={<ForApproval />} />
-          <Route path="/UserManagement" element={<UserManagement />} />
           <Route path="/AssignedReportData/:submissionId" element={<AssignedReportData />} />
           <Route path="/SubmissionData" element={<SubmissionData />} />
           <Route path="/ForApprovalData" element={<ForApprovalData />} />
+          <Route path="/ViewSubmissionData" element={<ViewSubmissionData />} />
           <Route path="/submission/:submissionId" element={<ViewSubmissionTeacher />} />
+          <Route path="/UserManagement" element={<UserManagement />} />
+          <Route path="/AssignUser" element={<AssignUser />} />
+          <Route path="/AddSchool" element={<AddSchoolPage />} />
       </Routes>
     </main>
   )
@@ -130,7 +137,7 @@ function LoginForm() {
             navigate('/DashboardPrincipal');
             break;
           case 'admin':
-            navigate('/DashboardCoordinator');
+            navigate('/UserManagement');
             break;
           default:
             navigate('/DashboardTeacher');

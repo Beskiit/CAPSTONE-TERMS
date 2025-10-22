@@ -26,9 +26,6 @@ function SidebarCoordinator({ activeLink, style }) {
                             <li className={`sidebar-item ${activeLink === 'Set Report Schedule' ? 'active' : ''}`}>
                                 <Link to="/SetReport">Set Report Schedule</Link>
                             </li>
-                            <li className={`sidebar-item ${activeLink === 'User Management' ? 'active' : ''}`}>
-                                <Link to="/UserManagement">User Management</Link>
-                            </li>
                             <li className={`sidebar-item ${activeLink === 'Assigned Report' ? 'active' : ''}`}>
                                 <Link to="/AssignedReport">Assigned Reports</Link>
                             </li>

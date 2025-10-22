@@ -1,0 +1,69 @@
+.year-quarter-selector {
+  display: flex;
+  gap: 20px;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.year-quarter-selector.loading {
+  opacity: 0.7;
+}
+
+.year-quarter-selector .selector-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 150px;
+}
+
+.year-quarter-selector .selector-group label {
+  font-weight: 500;
+  color: #333;
+  font-size: 14px;
+}
+
+.year-quarter-selector .dropdown-select {
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background-color: white;
+  font-size: 14px;
+  color: #333;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+
+.year-quarter-selector .dropdown-select:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+.year-quarter-selector .dropdown-select:disabled {
+  background-color: #f8f9fa;
+  color: #6c757d;
+  cursor: not-allowed;
+}
+
+.year-quarter-selector-error {
+  width: 100%;
+  margin-top: 8px;
+  color: #dc3545;
+  font-size: 12px;
+}
+
+.year-quarter-selector-error small {
+  color: #dc3545;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .year-quarter-selector {
+    flex-direction: column;
+    gap: 15px;
+  }
+  
+  .year-quarter-selector .selector-group {
+    min-width: 100%;
+  }
+}

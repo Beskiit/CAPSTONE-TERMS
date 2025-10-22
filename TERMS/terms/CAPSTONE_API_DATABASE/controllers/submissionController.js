@@ -81,17 +81,64 @@ export const getSubmissions = (req, res) => {
 
 export const getSubmissionsByUser = (req, res) => {
   const { id } = req.params;
-  const sql = `
+  const { year, quarter } = req.query;
+  
+  let sql = `
     SELECT s.submission_id, s.category_id, s.submitted_by, s.status,
            s.number_of_submission, s.value,
            DATE_FORMAT(s.date_submitted, '%m/%d/%Y %H:%i:%s') AS date_submitted,
-           s.fields
+           s.fields, s.report_assignment_id,
+           ra.year as assignment_year, ra.quarter as assignment_quarter,
+           c.category_name
     FROM submission s
+    LEFT JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
+    LEFT JOIN category c ON s.category_id = c.category_id
     WHERE s.submitted_by = ?
-    ORDER BY s.date_submitted DESC
   `;
-  db.query(sql, [id], (err, results) => {
+  
+  const params = [id];
+  
+  // Add year and quarter filtering if provided
+  if (year && quarter) {
+    // Handle inconsistent year values: year=1 maps to 2025, year=2025 maps to 2025
+    const yearValue = parseInt(year);
+    const quarterValue = parseInt(quarter);
+    
+    if (yearValue === 2025) {
+      // For 2025, check both year=1 and year=2025
+      sql += ` AND (ra.year = ? OR ra.year = ?) AND ra.quarter = ?`;
+      params.push(1, 2025, quarterValue);
+    } else {
+      sql += ` AND ra.year = ? AND ra.quarter = ?`;
+      params.push(yearValue, quarterValue);
+    }
+  }
+  // If no year/quarter filter, show all submissions
+  
+  sql += ` ORDER BY s.date_submitted DESC`;
+  
+  db.query(sql, params, (err, results) => {
     if (err) return res.status(500).send('Database error: ' + err);
+    
+    // Debug logging
+    console.log('getSubmissionsByUser query:', sql);
+    console.log('getSubmissionsByUser params:', params);
+    console.log('getSubmissionsByUser results count:', results.length);
+    if (results.length > 0) {
+      console.log('First result:', {
+        submission_id: results[0].submission_id,
+        assignment_year: results[0].assignment_year,
+        assignment_quarter: results[0].assignment_quarter,
+        value: results[0].value
+      });
+    }
+    
+    // Log all results to see year/quarter values
+    console.log('All results year/quarter values:');
+    results.forEach((result, index) => {
+      console.log(`Result ${index + 1}: year=${result.assignment_year}, quarter=${result.assignment_quarter}`);
+    });
+    
     res.json(results.map(normalizeFields)); // 200 with [] if none
   });
 };
@@ -109,11 +156,13 @@ export const getSubmission = (req, res) => {
            DATE_FORMAT(ra.to_date, '%m/%d/%Y') AS to_date,
            ra.allow_late,
            c.category_name,
-           sc.sub_category_name
+           sc.sub_category_name,
+           ud.name AS submitted_by_name
     FROM submission s
     JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
     LEFT JOIN category c ON ra.category_id = c.category_id
     LEFT JOIN sub_category sc ON ra.sub_category_id = sc.sub_category_id
+    LEFT JOIN user_details ud ON s.submitted_by = ud.user_id
     WHERE s.submission_id = ?
   `;
   db.query(sql, [id], (err, results) => {
@@ -627,12 +676,74 @@ export const getSubmissionsForPrincipalApproval = (req, res) => {
       c.category_name,
       ra.title as assignment_title,
       ra.to_date as due_date,
-      ra.given_by as assigned_by_principal
+      ra.given_by as assigned_by_principal,
+      ra.year as assignment_year,
+      ra.quarter as assignment_quarter
     FROM submission s
     LEFT JOIN user_details ud ON s.submitted_by = ud.user_id
     LEFT JOIN category c ON s.category_id = c.category_id
     LEFT JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
     WHERE s.status = 2 
+      AND ra.given_by = ?
+    ORDER BY s.date_submitted DESC
+  `;
+
+  db.query(sql, [principalId], (err, results) => {
+    if (err) return res.status(500).send('Database error: ' + err);
+    
+    // Parse fields for each submission
+    const submissions = results.map(row => {
+      const out = { ...row };
+      try { 
+        out.fields = typeof out.fields === 'string' ? JSON.parse(out.fields) : out.fields; 
+      } catch {
+        out.fields = {};
+      }
+      return out;
+    });
+    
+    res.json(submissions);
+  });
+};
+
+/**
+ * GET /submissions/approved-by-principal
+ * Returns submissions that were assigned BY the current principal and have been approved (status 3)
+ */
+export const getApprovedSubmissionsByPrincipal = (req, res) => {
+  const principalId = req.user?.user_id;
+  
+  if (!principalId) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  const sql = `
+    SELECT 
+      s.submission_id,
+      s.category_id,
+      s.submitted_by,
+      s.status,
+      s.number_of_submission,
+      s.value as title,
+      DATE_FORMAT(s.date_submitted, '%Y-%m-%d %H:%i:%s') AS date_submitted,
+      s.fields,
+      ud.name as submitted_by_name,
+      ud.role as submitted_by_role,
+      c.category_name,
+      ra.title as assignment_title,
+      ra.to_date as due_date,
+      ra.given_by as assigned_by_principal,
+      ra.year as assignment_year,
+      ra.quarter as assignment_quarter,
+      sy.school_year,
+      qp.quarter AS quarter_name
+    FROM submission s
+    LEFT JOIN user_details ud ON s.submitted_by = ud.user_id
+    LEFT JOIN category c ON s.category_id = c.category_id
+    LEFT JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
+    LEFT JOIN school_year sy ON sy.year_id = ra.year
+    LEFT JOIN quarter_period qp ON qp.quarter_period_id = ra.quarter
+    WHERE s.status = 3 
       AND ra.given_by = ?
     ORDER BY s.date_submitted DESC
   `;
@@ -779,6 +890,7 @@ export const patchSubmissionFormData = (req, res) => {
   const keyResult = req.body.keyResult;
   const personsInvolved = req.body.personsInvolved;
   const expenses = req.body.expenses;
+  const lessonLearned = req.body.lessonLearned;
   const existingImagesJson = req.body.existingImages;
 
   // Get current submission data
@@ -811,7 +923,8 @@ export const patchSubmissionFormData = (req, res) => {
       ...(venue && { venue }),
       ...(keyResult && { keyResult }),
       ...(personsInvolved && { personsInvolved }),
-      ...(expenses && { expenses })
+      ...(expenses && { expenses }),
+      ...(lessonLearned && { lessonLearned })
     };
 
     const next = {
@@ -979,19 +1092,23 @@ const handleRejectionWorkflow = (submissionId, rejectionReason, res) => {
           ref_id: Number(submissionId)
         };
 
-        // Notify the submitter
-        createNotification(submission.submitted_by, notificationPayload);
-
-        // Return success response
-        res.json({
-          message: 'Report rejected successfully. Deadline extended by 7 days.',
-          submission: {
-            submission_id: submissionId,
-            status: 1,
-            extended_due_date: extendedDueDate.toISOString(),
-            rejection_reason: rejectionReason
-          }
-        });
+        createNotification(submission.submitted_by, notificationPayload)
+          .then(() => {
+            console.log('Rejection notification sent successfully');
+            res.json({ 
+              success: true, 
+              message: 'Report rejected successfully',
+              extendedDueDate: extendedDueDate.toISOString()
+            });
+          })
+          .catch((notifErr) => {
+            console.error('Failed to send rejection notification:', notifErr);
+            res.json({ 
+              success: true, 
+              message: 'Report rejected successfully (notification failed)',
+              extendedDueDate: extendedDueDate.toISOString()
+            });
+          });
       });
     });
   });

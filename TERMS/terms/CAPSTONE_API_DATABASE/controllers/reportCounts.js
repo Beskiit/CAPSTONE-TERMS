@@ -60,36 +60,36 @@ export const getStatusCountsByUserInRange = (req, res) => {
 export const getStatusCountsByUser = (req, res) => {
   const { id } = req.params;
 
+  // Check if this is a coordinator by looking at the user's role
+  // For now, we'll use a different approach - count reports assigned by this user
   const sql = `
     SELECT
-      SUM(CASE WHEN LOWER(st.value) IN ('pending','for review') OR s.status = 1 THEN 1 ELSE 0 END) AS pending,
-      SUM(CASE WHEN LOWER(st.value) = 'completed' OR s.status = 2 THEN 1 ELSE 0 END) AS completed_only,
-      SUM(CASE WHEN LOWER(st.value) = 'approved'  OR s.status = 3 THEN 1 ELSE 0 END) AS approved_only,
-      SUM(CASE WHEN LOWER(st.value) = 'rejected'  OR s.status = 4 THEN 1 ELSE 0 END) AS rejected,
-      COUNT(*) AS submitted
+      SUM(CASE WHEN s.status = 1 THEN 1 ELSE 0 END) AS pending,
+      SUM(CASE WHEN s.status = 2 THEN 1 ELSE 0 END) AS submitted,
+      SUM(CASE WHEN s.status = 3 THEN 1 ELSE 0 END) AS approved,
+      SUM(CASE WHEN s.status = 4 THEN 1 ELSE 0 END) AS rejected,
+      COUNT(*) AS total
     FROM submission s
-    LEFT JOIN status st ON st.status_id = s.status
-    WHERE s.submitted_by = ?
+    JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
+    WHERE ra.given_by = ?
   `;
 
   db.query(sql, [id], (err, rows) => {
     if (err) return res.status(500).send("DB error: " + err);
     const r = rows?.[0] || {};
     const pending   = Number(r.pending || 0);
-    const completed = Number(r.completed_only || 0);
-    const approvedStrict = Number(r.approved_only || 0);
-    const approved = approvedStrict + completed; // combined (approved + completed)
-    const rejected  = Number(r.rejected || 0);
     const submitted = Number(r.submitted || 0);
+    const approved  = Number(r.approved || 0);
+    const rejected  = Number(r.rejected || 0);
+    const total     = Number(r.total || 0);
 
     // Keep keys your UI already expects
     res.json({
       submitted,
       pending,
-      approved,          // combined
-      completed,         // still expose completed so UI fallback works
+      approved,
       rejected,
-      approved_strict: approvedStrict // optional helper
+      total
     });
   });
 };

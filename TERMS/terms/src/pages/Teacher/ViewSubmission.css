@@ -1,0 +1,382 @@
+/* ViewSubmission Styles */
+.submission-details {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  
+  .detail-row {
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #e9ecef;
+  }
+  
+  .detail-row:last-child {
+    border-bottom: none;
+  }
+  
+  .detail-row label {
+    font-weight: 600;
+    color: #495057;
+    min-width: 120px;
+  }
+
+  .detail-row span {
+    margin-left: 10px;
+    color: #212529;
+  }
+  
+  /* Accomplishment Report Display - Form Layout */
+  .accomplishment-report-display {
+    background: #fff;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 20px 0;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
+  
+  .accomplishment-report-display h4 {
+    color: #2c3e50;
+    margin-bottom: 20px;
+    font-size: 1.3em;
+    border-bottom: 2px solid #3498db;
+    padding-bottom: 10px;
+  }
+  
+  .form-display {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+  }
+  
+  .form-row {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 15px;
+  }
+  
+  .form-row label {
+    font-weight: 600;
+    color: #2c3e50;
+    font-size: 0.9em;
+    min-width: 200px;
+    text-align: left;
+  }
+  
+  .readonly-field {
+    background: #f5f5f5;
+    border: 1px solid #d0d0d0;
+    border-radius: 4px;
+    padding: 8px 12px;
+    color: #333;
+    min-height: 20px;
+    white-space: pre-wrap;
+    flex: 1;
+    font-size: 14px;
+  }
+  
+  .narrative-content {
+    min-height: 80px;
+    line-height: 1.6;
+    resize: vertical;
+  }
+  
+  /* Program/Activity Design Section */
+  .activity-design-section {
+    background: #f8f9fa;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 15px;
+    margin: 15px 0;
+  }
+  
+  .activity-design-section .form-row {
+    margin-bottom: 10px;
+  }
+  
+  .activity-design-section .form-row:last-child {
+    margin-bottom: 0;
+  }
+  
+  /* LAEMPL Report Display */
+  .laempl-report-display {
+    background: #fff;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 20px 0;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
+  
+  .laempl-report-display h4 {
+    color: #2c3e50;
+    margin-bottom: 20px;
+    font-size: 1.3em;
+    border-bottom: 2px solid #3498db;
+    padding-bottom: 10px;
+  }
+  
+  .table-container {
+    overflow-x: auto;
+  }
+  
+  .laempl-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+  }
+  
+  .laempl-table th,
+  .laempl-table td {
+    border: 1px solid #dee2e6;
+    padding: 8px 12px;
+    text-align: center;
+  }
+  
+  .laempl-table th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+    color: #495057;
+  }
+  
+  .trait-cell {
+    background-color: #e9ecef;
+    font-weight: 600;
+    text-align: left;
+  }
+  
+  .data-cell {
+    background-color: #fff;
+  }
+  
+  /* Generic Content Display */
+  .generic-content {
+    background: #fff;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 20px 0;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
+  
+  .generic-content h4 {
+    color: #2c3e50;
+    margin-bottom: 15px;
+    font-size: 1.2em;
+  }
+  
+  .generic-content p {
+    color: #495057;
+    line-height: 1.6;
+    margin-bottom: 15px;
+  }
+  
+  /* Image Gallery */
+  .image-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 15px;
+    margin-top: 10px;
+  }
+  
+  .image-item {
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    overflow: hidden;
+    background: white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
+  
+  .image-item img {
+    width: 100%;
+    height: 150px;
+    object-fit: cover;
+    display: block;
+  }
+  
+  /* Action Buttons */
+  .action-buttons {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+  }
+  
+  .action-buttons button {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color 0.2s;
+  }
+  
+  .action-buttons button:first-child {
+    background-color: #6c757d;
+    color: white;
+  }
+  
+  .action-buttons button:first-child:hover {
+    background-color: #5a6268;
+  }
+  
+  .action-buttons button:last-child {
+    background-color: #007bff;
+    color: white;
+  }
+  
+  .action-buttons button:last-child:hover {
+    background-color: #0056b3;
+  }
+
+  /* 1) Constrain the overall card width and center it */
+.accomplishment-report-display,
+.laempl-report-display,
+.generic-content,
+.submission-details {
+  max-width: 920px;    /* tweak: 820–980px depending on taste */
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* 2) Make value fields stop stretching to full width */
+.form-row {
+  justify-content: flex-start;
+}
+
+/* Stop growing, give a sensible fixed width */
+.form-row .readonly-field {
+  flex: 0 0 420px;     /* basis 420px, no grow, no shrink */
+  max-width: 100%;
+}
+
+/* Optional: compact labels a bit */
+.form-row label {
+  min-width: 180px;    /* was 200px */
+}
+
+/* 3) Program/Activity Design block: make a neat two-column feel */
+.activity-design-section {
+  max-width: 720px;    /* narrows the inner block */
+  margin-left: 0;      /* align with labels */
+}
+
+/* 4) Responsive: on small screens let fields go full width again */
+@media (max-width: 768px) {
+  .accomplishment-report-display,
+  .laempl-report-display,
+  .generic-content,
+  .submission-details {
+    max-width: 100%;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .form-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .form-row label {
+    min-width: 0;
+  }
+
+  .form-row .readonly-field,
+  .activity-design-section {
+    flex: 0 0 auto;
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+/* Small, boxed value next to each label */
+.value-box,
+.readonly-field {                 /* reuse your existing class if present */
+  display: inline-block;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  padding: 6px 10px;
+  line-height: 1.4;
+  color: #333;
+  min-height: 32px;
+  /* keep boxes compact instead of full width */
+  flex: 0 0 340px;               /* adjust 300–420px to taste */
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Align label/value neatly */
+.form-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.form-row label {
+  min-width: 190px;              /* left column width */
+  text-align: left;
+  color: #2c3e50;
+  font-weight: 600;
+}
+
+/* Optional: make the whole Content card narrower & centered */
+#content-card,
+.accomplishment-report-display {
+  max-width: 920px;
+  margin: 0 auto;
+}
+
+/* === Left-align the cards (no horizontal centering) === */
+.accomplishment-report-display,
+.laempl-report-display,
+.generic-content,
+.submission-details,
+#content-card {
+  max-width: 920px;     /* keep it narrow */
+  margin-left: 0;       /* flush left */
+  margin-right: 0;      /* no centering */
+  /* keep your vertical spacing as needed */
+}
+
+/* If any parent flex container centers children, force left alignment */
+.submission-content,
+.dashboard-main,
+.content-section {
+  justify-content: flex-start !important;
+  align-items: flex-start !important;
+  text-align: left;
+}
+
+/* Ensure label/value rows remain left-aligned and compact */
+.form-row {
+  justify-content: flex-start;
+}
+
+.form-row .readonly-field,
+.value-box {
+  flex: 0 0 420px;      /* compact value box width */
+  max-width: 100%;
+}
+
+/* (Optional) Slightly narrower inner block in the design section, still left */
+.activity-design-section {
+  max-width: 720px;
+  margin-left: 0;
+}
+
+/* Mobile stays full width */
+@media (max-width: 768px) {
+  .accomplishment-report-display,
+  .laempl-report-display,
+  .generic-content,
+  .submission-details,
+  #content-card {
+    max-width: 100%;
+  }
+}
+

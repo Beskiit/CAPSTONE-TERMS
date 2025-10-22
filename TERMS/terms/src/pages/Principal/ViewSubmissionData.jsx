@@ -6,7 +6,6 @@ import "../Teacher/LAEMPLReport.css";
 import "./ForApprovalData.css";
 import "../Coordinator/AssignedReport.css";
 import "../Teacher/ViewSubmission.css";
-import Modal from "react-modal";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle, ImageRun } from "docx";
 import { saveAs } from "file-saver";
 
@@ -72,14 +71,8 @@ const clampVal = (k, v) => {
 
 const LOCK_STATUSES = new Set([1]); // e.g., 1=submitted
 
-function ForApprovalData() {
+function ViewSubmissionData() {
   const [openPopup, setOpenPopup] = useState(false);
-
-  // NEW: reject & approve modal state
-  const [isRejectOpen, setIsRejectOpen] = useState(false);            // NEW
-  const [rejectReason, setRejectReason] = useState("");               // NEW
-  const [reasonErr, setReasonErr] = useState("");                     // NEW
-  const [isApproveOpen, setIsApproveOpen] = useState(false);          // NEW
 
   // NEW: submission data state
   const [submissionData, setSubmissionData] = useState(null);
@@ -88,9 +81,8 @@ function ForApprovalData() {
   const [submissionError, setSubmissionError] = useState(null);
   const [currentSubmissionId, setCurrentSubmissionId] = useState(SUBMISSION_ID);
 
-  useEffect(() => {
-    Modal.setAppElement("#root");
-  }, []);
+  // NEW: user state
+  const [user, setUser] = useState(null);
 
   // Re-check URL parameters on component mount
   useEffect(() => {
@@ -108,7 +100,7 @@ function ForApprovalData() {
         console.log('Using submission ID:', submissionId);
         
         if (!submissionId) {
-          setSubmissionError("No submission ID provided in the URL. Please go back to the For Approval list and try again.");
+          setSubmissionError("No submission ID provided in the URL. Please go back to the View Submission list and try again.");
           setSubmissionLoading(false);
           return;
         }
@@ -200,285 +192,6 @@ function ForApprovalData() {
     fetchSubmissionData();
   }, [currentSubmissionId]);
 
-  // table state
-  const [data, setData] = useState(() =>
-    Object.fromEntries(
-      TRAITS.map((t) => [t, Object.fromEntries(COLS.map((c) => [c.key, ""]))])
-    )
-  );
-
-  const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState("");
-  const [err, setErr] = useState("");
-
-  const [status, setStatus] = useState(null);
-  const locked = LOCK_STATUSES.has(Number(status));
-  const [editOverride, setEditOverride] = useState(false);
-  const isDisabled = locked && !editOverride;
-
-  const touchedRef = useRef(false);
-  const fileInput = useRef(null);
-
-  const handleChange = (trait, colKey, value) => {
-    touchedRef.current = true;
-    const cleaned = value.replace(/[^\d.-]/g, "");
-    setData((prev) => ({
-      ...prev,
-      [trait]: { ...prev[trait], [colKey]: clampVal(colKey, cleaned) },
-    }));
-  };
-
-  const totals = COLS.reduce((acc, c) => {
-    acc[c.key] = TRAITS.reduce(
-      (sum, t) => sum + (Number(data[t][c.key]) || 0),
-      0
-    );
-    return acc;
-  }, {});
-
-  const toRows = (obj) => TRAITS.map((trait) => ({ trait, ...obj[trait] }));
-
-  const canSubmit = !!SUBMISSION_ID && !saving;
-
-  // NOTE: keeping your existing onSubmit (it has API calls).
-  // We won't use it for the modals since you asked for front-end only.
-
-  // Prefill from backend (kept as-is from your code)
-  useEffect(() => {
-    const load = async () => {
-      if (!SUBMISSION_ID) return;
-      setLoading(true);
-      try {
-        const tryUrls = [
-          `${API_BASE}/submissions/laempl/${SUBMISSION_ID}`,
-          `${API_BASE}/submissions/${SUBMISSION_ID}`,
-        ];
-        let json = null;
-        for (const url of tryUrls) {
-          const r = await fetch(url, { credentials: "include" });
-          if (r.ok) {
-            json = await r.json();
-            break;
-          }
-        }
-
-        if (typeof json?.status !== "undefined") setStatus(json.status);
-
-        const rows = json?.fields?.rows;
-        if (Array.isArray(rows)) {
-          if (touchedRef.current) return;
-
-          const next = Object.fromEntries(
-            TRAITS.map((t) => [
-              t,
-              Object.fromEntries(COLS.map((c) => [c.key, ""])),
-            ])
-          );
-          rows.forEach((r) => {
-            if (!r?.trait || !next[r.trait]) return;
-            COLS.forEach((c) => {
-              next[r.trait][c.key] = (r[c.key] ?? "").toString();
-            });
-          });
-          setData(next);
-        }
-      } catch {
-        /* ignore */
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
-  }, []);
-
-  // Export / Template / Import / Clear (kept)
-  const toCSV = () => {
-    const header = ["Trait", ...COLS.map((c) => c.label)];
-    const rows = TRAITS.map((trait) => [
-      trait,
-      ...COLS.map((c) => data[trait][c.key] || ""),
-    ]);
-    const totalRow = ["Total", ...COLS.map((c) => totals[c.key])];
-
-    const lines = [header, ...rows, totalRow]
-      .map((r) => r.map((x) => `"${String(x).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
-
-    const blob = new Blob([lines], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "LAEMPL_Grade1.csv";
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleGenerateTemplate = () => {
-    const header = ["Trait", ...COLS.map((c) => c.label)];
-    const blank = TRAITS.map((trait) => [trait, ...COLS.map(() => "")]);
-    const csv = [header, ...blank].map((r) => r.join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "LAEMPL_Template.csv";
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const onImport = async (file) => {
-    try {
-      const text = await file.text();
-      const lines = text
-        .trim()
-        .split(/\r?\n/)
-        .map((l) =>
-          l
-            .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
-            .map((s) => s.replace(/^"|"$/g, "").replace(/""/g, '"'))
-        );
-
-      const body = lines.slice(1, 1 + TRAITS.length);
-      const next = Object.fromEntries(
-        TRAITS.map((t) => [
-          t,
-          Object.fromEntries(COLS.map((c) => [c.key, ""])),
-        ])
-      );
-
-      body.forEach((row) => {
-        const trait = row[0];
-        if (!TRAITS.includes(trait)) return;
-        COLS.forEach((c, i) => {
-          const raw = row[i + 1] ?? "";
-          next[trait][c.key] = clampVal(c.key, raw);
-        });
-      });
-
-      touchedRef.current = true;
-      setEditOverride(true);
-      setData(next);
-      setMsg("Imported file successfully.");
-      setErr("");
-      setOpenPopup(false);
-    } catch (e) {
-      setErr("Failed to import CSV. " + (e?.message || ""));
-    }
-  };
-
-  const handleClear = () => {
-    touchedRef.current = true;
-    setEditOverride(true);
-    const blank = Object.fromEntries(
-      TRAITS.map((t) => [
-        t,
-        Object.fromEntries(COLS.map((c) => [c.key, ""])),
-      ])
-    );
-    setData(blank);
-  };
-
-  const [open, setOpen] = useState(false);
-  const [openSec, setOpenSec] = useState(false);
-
-  const [user, setUser] = useState(null);
-  const role = (user?.role || "").toLowerCase();
-  const isPrincipal = role === "principal";
-
-  // NEW: Component to display accomplishment report data
-  const AccomplishmentReportDisplay = ({ submissionData }) => {
-    if (!submissionData || !submissionData.fields) {
-      return <div>No accomplishment data available</div>;
-    }
-
-    const fields = submissionData.fields;
-    const activity = fields.activity || {};
-
-    return (
-      <div className="accomplishment-display">
-        <h3>Accomplishment Report Details</h3>
-        
-        <div className="report-section">
-          <h4>Activity Information</h4>
-          <div className="field-group">
-            <div className="field">
-              <label>Activity Name:</label>
-              <span>{activity.activityName || 'Not provided'}</span>
-            </div>
-            <div className="field">
-              <label>Facilitators:</label>
-              <span>{activity.facilitators || 'Not provided'}</span>
-            </div>
-            <div className="field">
-              <label>Objectives:</label>
-              <span>{activity.objectives || 'Not provided'}</span>
-            </div>
-            <div className="field">
-              <label>Date:</label>
-              <span>{activity.date || 'Not provided'}</span>
-            </div>
-            <div className="field">
-              <label>Time:</label>
-              <span>{activity.time || 'Not provided'}</span>
-            </div>
-            <div className="field">
-              <label>Venue:</label>
-              <span>{activity.venue || 'Not provided'}</span>
-            </div>
-            <div className="field">
-              <label>Key Results:</label>
-              <span>{activity.keyResult || 'Not provided'}</span>
-            </div>
-            <div className="field">
-              <label>Persons Involved:</label>
-              <span>{activity.personsInvolved || 'Not provided'}</span>
-            </div>
-            <div className="field">
-              <label>Expenses:</label>
-              <span>{activity.expenses || 'Not provided'}</span>
-            </div>
-          </div>
-        </div>
-
-        {fields.images && fields.images.length > 0 && (
-          <div className="report-section">
-            <h4>Images</h4>
-            <div className="images-grid">
-              {fields.images.map((image, index) => (
-                <div key={index} className="image-item">
-                  <img 
-                    src={`${API_BASE}/uploads/accomplishments/${image}`} 
-                    alt={`Activity image ${index + 1}`}
-                    style={{ maxWidth: '200px', maxHeight: '200px', objectFit: 'cover' }}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {fields.narrative && (
-          <div className="report-section">
-            <h4>Narrative</h4>
-            <div className="narrative-content">
-              {fields.narrative}
-            </div>
-          </div>
-        )}
-
-        {fields.coordinator_notes && (
-          <div className="report-section">
-            <h4>Coordinator Notes</h4>
-            <div className="coordinator-notes">
-              {fields.coordinator_notes}
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
   useEffect(() => {
     const fetchUser = async () => {
       try {
@@ -495,112 +208,18 @@ function ForApprovalData() {
     fetchUser();
   }, []);
 
-  // NEW: open/close handlers (front-end only)
-  const openRejectModal = (e) => {
-    e.preventDefault();
-    setReasonErr("");
-    setRejectReason("");
-    setIsRejectOpen(true);
-  };
-  const closeRejectModal = () => setIsRejectOpen(false);
-
-  const openApproveModal = (e) => {                                    // NEW
-    e.preventDefault();
-    setIsApproveOpen(true);
-  };
-  const closeApproveModal = () => setIsApproveOpen(false);             // NEW
-
-  // NEW: modal confirms with API calls
-  const handleRejectSubmit = async (e) => {
-    e.preventDefault();
-    if (!rejectReason.trim()) {
-      setReasonErr("Please provide a reason.");
-      return;
-    }
-
-    try {
-      setSaving(true);
-      
-      // Update submission status to rejected (4) using PATCH
-      const submissionId = currentSubmissionId || SUBMISSION_ID;
-      const endpoint = submissionType === 'ACCOMPLISHMENT' 
-        ? `${API_BASE}/reports/accomplishment/${submissionId}`
-        : `${API_BASE}/submissions/${submissionId}`;
-      
-      const response = await fetch(endpoint, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          status: 4, // Rejected status
-          rejection_reason: rejectReason
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to reject submission');
-      }
-
-      setMsg("Submission rejected successfully.");
-      setIsRejectOpen(false);
-      setRejectReason("");
-      setReasonErr("");
-    } catch (error) {
-      console.error("Error rejecting submission:", error);
-      setErr("Failed to reject submission. Please try again.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleApproveConfirm = async () => {
-    try {
-      setSaving(true);
-      
-      // Update submission status to approved (3) using PATCH
-      const submissionId = currentSubmissionId || SUBMISSION_ID;
-      const endpoint = submissionType === 'ACCOMPLISHMENT' 
-        ? `${API_BASE}/reports/accomplishment/${submissionId}`
-        : `${API_BASE}/submissions/${submissionId}`;
-      
-      const response = await fetch(endpoint, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          status: 3 // Approved status
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to approve submission');
-      }
-
-      setMsg("Submission approved successfully.");
-      setIsApproveOpen(false);
-    } catch (error) {
-      console.error("Error approving submission:", error);
-      setErr("Failed to approve submission. Please try again.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
+  // Helper function to get status text
   const getStatusText = (status) => {
     switch (status) {
-      case 0: return 'Draft';
-      case 1: return 'Pending';
-      case 2: return 'Completed';
+      case 1: return 'Draft';
+      case 2: return 'Submitted';
       case 3: return 'Approved';
       case 4: return 'Rejected';
       default: return 'Unknown';
     }
   };
 
+  // Export to Word function (exact copy from ForApprovalData)
   const exportToWord = async (submissionData) => {
     if (!submissionData || !submissionData.fields) {
       alert("No data available to export");
@@ -852,20 +471,20 @@ function ForApprovalData() {
       <div className="accomplishment-report-display">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <h4>Activity Completion Report</h4>
-                <button 
+          <button 
             onClick={() => exportToWord({ fields })}
-                  style={{ 
+            style={{ 
               backgroundColor: '#28a745',
-                    color: 'white', 
-                    border: 'none', 
+              color: 'white', 
+              border: 'none', 
               padding: '8px 16px',
-                    borderRadius: '4px', 
+              borderRadius: '4px', 
               cursor: 'pointer',
               fontSize: '14px'
-                  }}
-                >
+            }}
+          >
             Export to Word
-                </button>
+          </button>
         </div>
         <div className="form-display">
           <div className="form-row">
@@ -923,8 +542,8 @@ function ForApprovalData() {
                   </div>
                 ))}
               </div>
-              </div>
-            )}
+            </div>
+          )}
           <div className="form-row">
             <label>Narrative:</label>
             <div className="readonly-field narrative-content">{answers.narrative || ''}</div>
@@ -951,31 +570,31 @@ function ForApprovalData() {
       <div className="laempl-report-display">
         <h4>LAEMPL Report</h4>
         <div className="table-container">
-                <table className="laempl-table">
-                  <thead>
-                    <tr>
+          <table className="laempl-table">
+            <thead>
+              <tr>
                 <th>Trait</th>
                 {cols.map(col => (
                   <th key={col.key}>{col.label}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
               {traits.map(trait => {
                 const rowData = rows.find(r => r.trait === trait) || {};
                 return (
-                      <tr key={trait}>
+                  <tr key={trait}>
                     <td className="trait-cell">{trait}</td>
                     {cols.map(col => (
                       <td key={col.key} className="data-cell">
                         {rowData[col.key] || ''}
-                          </td>
-                        ))}
-                      </tr>
+                      </td>
+                    ))}
+                  </tr>
                 );
               })}
-                  </tbody>
-                </table>
+            </tbody>
+          </table>
         </div>
       </div>
     );
@@ -988,8 +607,8 @@ function ForApprovalData() {
           <div>
             <h4>Narrative:</h4>
             <p>{fields.narrative}</p>
-              </div>
-            )}
+          </div>
+        )}
         {fields.images && fields.images.length > 0 && (
           <div>
             <h4>Images:</h4>
@@ -1011,7 +630,7 @@ function ForApprovalData() {
       <>
         <Header userText={user ? user.name : "Guest"} />
         <div className="dashboard-container">
-          <Sidebar activeLink="For Approval" />
+          <Sidebar activeLink="View Report" />
           <div className="dashboard-content">
             <div className="dashboard-main">
               <div className="loading-container">
@@ -1031,7 +650,7 @@ function ForApprovalData() {
       <>
         <Header userText={user ? user.name : "Guest"} />
         <div className="dashboard-container">
-          <Sidebar activeLink="For Approval" />
+          <Sidebar activeLink="View Report" />
           <div className="dashboard-content">
             <div className="dashboard-main">
               <div className="error-container">
@@ -1052,7 +671,7 @@ function ForApprovalData() {
     <>
       <Header userText={user ? user.name : "Guest"} />
       <div className="dashboard-container">
-        <Sidebar activeLink="For Approval" />
+        <Sidebar activeLink="View Report" />
         <div className="dashboard-content">
           <div className="dashboard-main">
             <h2>Submitted Report Details</h2>
@@ -1086,110 +705,15 @@ function ForApprovalData() {
                 </div>
               </div>
             )}
-            
-            {/* Approve and Reject Section */}
-            <div className="approval-section">
-              <h3>Review Submission</h3>
-              <p>Review the submission details above and choose to approve or reject.</p>
-              {msg && (
-                <div className={`message ${msg.includes('Error') ? 'error' : 'success'}`}>
-                  {msg}
-                </div>
-              )}
-              {err && (
-                <div className="error-message">
-                  {err}
-                </div>
-              )}
-              <div className="approval-buttons">
-                <button 
-                  onClick={openRejectModal}
-                  disabled={saving || submissionLoading}
-                  className="reject-button"
-                >
-                  {saving ? 'Processing...' : 'Reject'}
-                </button>
-                <button 
-                  onClick={openApproveModal}
-                  disabled={saving || submissionLoading}
-                  className="approve-button"
-                >
-                  {saving ? 'Processing...' : 'Approve'}
-                </button>
-          </div>
-        </div>
 
             <div className="action-buttons">
               <button onClick={() => window.history.back()}>Go Back</button>
-          </div>
+            </div>
           </div>
         </div>
       </div>
-
-      {/* Reject Modal (front-end only) */}
-      <Modal
-        isOpen={isRejectOpen}
-        onRequestClose={closeRejectModal}
-        contentLabel="Reject with reason"
-        className="modal-action"
-      >
-        <h3 style={{ marginTop: 0 }}>Reject Submission</h3>
-        <p style={{ margin: "6px 0 12px" }}>
-          Please provide a reason for rejecting this submission.
-        </p>
-
-        <form onSubmit={handleRejectSubmit}>
-          <textarea
-            value={rejectReason}
-            onChange={(e) => setRejectReason(e.target.value)}
-            rows={5}
-            placeholder="Type your reason here…"
-            style={{
-              width: "100%",
-              resize: "vertical",
-              padding: "10px",
-              borderRadius: 8,
-              border: "1px solid #ccc",
-              outline: "none",
-            }}
-          />
-          {reasonErr && (
-            <div style={{ color: "#c0392b", marginTop: 8, fontSize: 14 }}>
-              {reasonErr}
-            </div>
-          )}
-
-          <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "flex-end" }}>
-            <button type="button" onClick={closeRejectModal} disabled={saving}>
-              Cancel
-            </button>
-            <button type="submit" disabled={saving}>
-              {saving ? "Rejecting..." : "Submit Feedback"}
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Approve Modal (front-end only) */}
-      <Modal
-        isOpen={isApproveOpen}
-        onRequestClose={closeApproveModal}
-        contentLabel="Approve confirmation"
-        className="modal-action"
-      >
-        <h3 style={{ marginTop: 0 }}>Approve Submission</h3>
-        <p>Are you sure you want to approve this submission?</p>
-        <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "flex-end" }}>
-          <button type="button" onClick={closeApproveModal} disabled={saving}>
-            Cancel
-          </button>
-          <button type="button" onClick={handleApproveConfirm} disabled={saving}>
-            {saving ? "Approving..." : "Yes"}
-          </button>
-        </div>
-      </Modal>
     </>
   );
 }
 
-export default ForApprovalData;
+export default ViewSubmissionData;

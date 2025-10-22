@@ -6,6 +6,24 @@ body{
   min-height: 100vh;
 }
 
+/* Clickable report styling */
+.clickable-report {
+  transition: all 0.2s ease-in-out;
+}
+
+.clickable-report:hover {
+  background-color: #f8f9fa;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.loading-message, .no-reports-message {
+  text-align: center;
+  padding: 2rem;
+  color: #6c757d;
+  font-style: italic;
+}
+
 .dashboard-container {
   display: flex;
   margin-top: 2.5rem;

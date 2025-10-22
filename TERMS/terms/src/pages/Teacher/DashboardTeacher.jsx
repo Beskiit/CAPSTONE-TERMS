@@ -15,6 +15,7 @@ import Rejected from '../../assets/rejected.svg';
 const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
 
 function Dashboard() {
+  const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [deadlines, setDeadlines] = useState([]);
   const [counts, setCounts] = useState({
@@ -23,12 +24,14 @@ function Dashboard() {
     approved: 0,   // strict approved-only
     rejected: 0,
   });
+  const [submittedReports, setSubmittedReports] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   const fetchCounts = async () => {
     try {
       if (!user?.user_id) return; // safety
       const res = await fetch(
-        `${API_BASE}/reports/status/count/user/${user.user_id}`,
+        `${API_BASE}/reports/status/count/teacher/${user.user_id}`,
         { credentials: "include" }
       );
 
@@ -39,6 +42,7 @@ function Dashboard() {
       }
 
       let data = await res.json();
+      console.log('📊 Teacher counts API response:', data);
 
       // Normalize keys to lowercase to be safe:
       if (data && typeof data === "object") {
@@ -47,17 +51,19 @@ function Dashboard() {
         data = lower;
       }
 
-      setCounts({
-        // ⬇️ Use COMPLETED for the left card (you called it "Total Submitted")
-        submitted: Number(data.completed ?? 0),
-
+      const finalCounts = {
+        // Status 2 = Submitted/Completed
+        submitted: Number(data.submitted ?? 0),
+        // Status 1 = Pending/Draft
         pending: Number(data.pending ?? 0),
-
-        // ⬇️ Show STRICT approved-only (status=3)
-        approved: Number(data.approved_strict ?? data.approved ?? 0),
-
+        // Status 3 = Approved
+        approved: Number(data.approved ?? 0),
+        // Status 4 = Rejected
         rejected: Number(data.rejected ?? 0),
-      });
+      };
+      
+      console.log('📊 Final teacher counts:', finalCounts);
+      setCounts(finalCounts);
     } catch (e) {
       console.error("Failed to load counts:", e);
     }
@@ -100,6 +106,44 @@ function Dashboard() {
     fetchDeadlines();
   }, [user]);
 
+  // Fetch submitted reports data
+  useEffect(() => {
+    const fetchReportsData = async () => {
+      try {
+        setLoading(true);
+        
+        // Fetch submitted reports by user ID
+        if (user?.user_id) {
+          const submittedRes = await fetch(`${API_BASE}/submissions/user/${user.user_id}`, {
+            credentials: "include",
+          });
+          if (submittedRes.ok) {
+            const submittedData = await submittedRes.json();
+            // Filter for submitted reports (status 2)
+            const submittedOnly = submittedData.filter(report => report.status === 2);
+            setSubmittedReports(submittedOnly);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch reports data:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (user) {
+      fetchReportsData();
+    }
+  }, [user]);
+
+  // Navigation handlers
+  const handleSubmittedReportClick = (report) => {
+    // Navigate to ViewSubmission for submitted reports
+    if (report.submission_id) {
+      navigate(`/submission/${report.submission_id}`);
+    }
+  };
+
   return (
     <>
       <Header userText={user ? user.name : "Guest"} />
@@ -111,9 +155,8 @@ function Dashboard() {
             <div className="dashboard-cards">
               <div className="dashboard-card">
                 <div className="title-container">
-                  <img src={Submitted} alt="Completed Photo" />
-                  {/* You can keep the old label if you want, but this is clearer */}
-                  <h3>Completed</h3>
+                  <img src={Submitted} alt="Submitted Photo" />
+                  <h3>Submitted</h3>
                 </div>
                 <p>{counts.submitted}</p>
               </div>
@@ -143,19 +186,35 @@ function Dashboard() {
             <div className="submitted-reports">
               <h2>Submitted Reports</h2>
               <hr />
-              <div className="submitted-reports-container" clickable="true">
-                <div className="submitted-report-title">
-                  <h4>Quarterly Assessment Report</h4>
-                  <p>Intervention Report</p>
-                  <p>1st Quarter</p>
-                </div>
-                <div className="submitted-report-date">
-                  <p>SY: 2025-2026</p>
-                  <p>Date Given: May 06, 2025</p>
-                  <p>May 06, 2025</p>
-                </div>
+              <div className="reports-list">
+                {loading ? (
+                  <div className="loading-message">Loading submitted reports...</div>
+                ) : submittedReports.length > 0 ? (
+                  submittedReports.slice(0, 5).map((report, index) => (
+                    <div 
+                      key={report.submission_id || index} 
+                      className="submitted-reports-container clickable-report"
+                      onClick={() => handleSubmittedReportClick(report)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <div className="submitted-report-title">
+                        <h4>{report.assignment_title || 'Report'}</h4>
+                        <p>{report.category_name || 'Category'}</p>
+                        <p>{report.sub_category_name || 'Sub-Category'}</p>
+                      </div>
+                      <div className="submitted-report-date">
+                        <p>SY: {report.school_year || '2024-2025'}</p>
+                        <p>Date Submitted: {report.date_submitted || 'N/A'}</p>
+                        <p>Status: {report.status === 2 ? 'Submitted' : 'Unknown'}</p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="no-reports-message">No submitted reports found</div>
+                )}
               </div>
             </div>
+
           </div>
         </div>
 
