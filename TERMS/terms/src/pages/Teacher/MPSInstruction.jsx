@@ -60,7 +60,7 @@ function MPSInstruction() {
             <p className="instruction">{instruction || "No instruction provided."}</p>
             <button
               className="instruction-btn"
-              onClick={() => navigate(`/MPSReport?id=${submissionId || ""}`)}
+              onClick={() => navigate(`/LAEMPLReport?id=${submissionId || ""}`)}
             >
               + Prepare Report
             </button>

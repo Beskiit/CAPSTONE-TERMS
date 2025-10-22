@@ -35,7 +35,9 @@ function UserManagement() {
   const [roles, setRoles] = useState([]);
   const [assignmentDetails, setAssignmentDetails] = useState({
     section: '',
-    gradeLevel: ''
+    gradeLevel: '',
+    category: '',
+    subCategory: ''
   });
   const [showYearQuarterModal, setShowYearQuarterModal] = useState(false);
   const [yearQuarter, setYearQuarter] = useState({
@@ -46,6 +48,10 @@ function UserManagement() {
   const [allYearQuarters, setAllYearQuarters] = useState([]);
   const [selectedYear, setSelectedYear] = useState('');
   const [selectedQuarter, setSelectedQuarter] = useState('');
+  const [categories, setCategories] = useState([]);
+  const [subCategories, setSubCategories] = useState([]);
+  const [sections, setSections] = useState([]);
+  const [gradeLevels, setGradeLevels] = useState([]);
 
   useEffect(() => {
     // ensure the element id matches your index.html (#root is default in Vite)
@@ -54,6 +60,8 @@ function UserManagement() {
     fetchRoles();
     fetchActiveYearQuarter();
     fetchAllYearQuarters();
+    fetchCategories();
+    fetchGradeLevels();
     initializeSchema();
   }, []);
 
@@ -251,8 +259,16 @@ function UserManagement() {
   const handleEditUser = (user) => {
     setSelectedUser(user);
     setSelectedSchool(user.school_name || '');
-    setAssignmentDetails({ section: '', gradeLevel: '' });
+    setAssignmentDetails({ section: '', gradeLevel: '', category: '', subCategory: '' });
     setShowAssignmentModal(true);
+    
+    // If user has a school, fetch sections for that school
+    if (user.school_name) {
+      const school = schools.find(s => s.school_name === user.school_name);
+      if (school) {
+        fetchSections(school.school_id);
+      }
+    }
   };
 
   const fetchSchools = async () => {
@@ -265,6 +281,71 @@ function UserManagement() {
       setSchools(data);
     } catch (err) {
       console.error("Error fetching schools:", err);
+    }
+  };
+
+  const fetchCategories = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/categories`, { credentials: "include" });
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      setCategories(data);
+    } catch (err) {
+      console.error("Error fetching categories:", err);
+    }
+  };
+
+  const fetchSubCategories = async (categoryId) => {
+    try {
+      const response = await fetch(`${API_BASE}/subcategories/${categoryId}`, { credentials: "include" });
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      setSubCategories(data);
+    } catch (err) {
+      console.error("Error fetching sub-categories:", err);
+    }
+  };
+
+  const fetchSections = async (schoolId) => {
+    try {
+      const response = await fetch(`${API_BASE}/admin/sections/${schoolId}`, { credentials: "include" });
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      setSections(data);
+    } catch (err) {
+      console.error("Error fetching sections:", err);
+    }
+  };
+
+  const fetchGradeLevels = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/admin/grade-levels`, { credentials: "include" });
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      setGradeLevels(data);
+    } catch (err) {
+      console.error("Error fetching grade levels:", err);
+    }
+  };
+
+  const handleSchoolChange = (schoolName) => {
+    setSelectedSchool(schoolName);
+    setAssignmentDetails(prev => ({ ...prev, section: '', gradeLevel: '' }));
+    
+    // Find the school and fetch its sections
+    const school = schools.find(s => s.school_name === schoolName);
+    if (school) {
+      fetchSections(school.school_id);
+    } else {
+      setSections([]);
     }
   };
 
@@ -281,7 +362,9 @@ function UserManagement() {
           user_id: selectedUser.user_id,
           school_name: selectedSchool,
           section: assignmentDetails.section,
-          grade_level: assignmentDetails.gradeLevel
+          grade_level: assignmentDetails.gradeLevel,
+          category: assignmentDetails.category,
+          sub_category: assignmentDetails.subCategory
         }),
         credentials: "include"
       });
@@ -657,7 +740,7 @@ function UserManagement() {
               <select
                 id="schoolSelect"
                 value={selectedSchool}
-                onChange={(e) => setSelectedSchool(e.target.value)}
+                onChange={(e) => handleSchoolChange(e.target.value)}
                 className="school-dropdown"
               >
                 <option value="">Choose a school...</option>
@@ -678,14 +761,16 @@ function UserManagement() {
                     value={assignmentDetails.section}
                     onChange={(e) => setAssignmentDetails(prev => ({...prev, section: e.target.value}))}
                     className="form-input"
+                    disabled={!selectedSchool || !assignmentDetails.gradeLevel}
                   >
                     <option value="">Select section...</option>
-                    <option value="Masipag">Masipag</option>
-                    <option value="Matulungin">Matulungin</option>
-                    <option value="Masunurin">Masunurin</option>
-                    <option value="Magalang">Magalang</option>
-                    <option value="Matapat">Matapat</option>
-                    <option value="Matiyaga">Matiyaga</option>
+                    {sections
+                      .filter(section => String(section.grade_level) === String(assignmentDetails.gradeLevel))
+                      .map(section => (
+                        <option key={section.section_id} value={section.section}>
+                          {section.section}
+                        </option>
+                      ))}
                   </select>
                 </div>
 
@@ -694,18 +779,63 @@ function UserManagement() {
                   <select
                     id="gradeLevel"
                     value={assignmentDetails.gradeLevel}
-                    onChange={(e) => setAssignmentDetails(prev => ({...prev, gradeLevel: e.target.value}))}
+                    onChange={(e) => setAssignmentDetails(prev => ({...prev, gradeLevel: e.target.value, section: ''}))}
                     className="form-input"
                   >
                     <option value="">Select grade level...</option>
-                    <option value="1">Grade 1</option>
-                    <option value="2">Grade 2</option>
-                    <option value="3">Grade 3</option>
-                    <option value="4">Grade 4</option>
-                    <option value="5">Grade 5</option>
-                    <option value="6">Grade 6</option>
+                    {gradeLevels.map(grade => (
+                      <option key={grade.grade_level_id} value={grade.grade_level}>
+                        Grade {grade.grade_level}
+                      </option>
+                    ))}
                   </select>
                 </div>
+
+                {selectedUser?.role === 'coordinator' && (
+                  <>
+                    <div className="form-group">
+                      <label htmlFor="categorySelect">Category:</label>
+                      <select
+                        id="categorySelect"
+                        value={assignmentDetails.category}
+                        onChange={(e) => {
+                          setAssignmentDetails(prev => ({...prev, category: e.target.value, subCategory: ''}));
+                          if (e.target.value) {
+                            fetchSubCategories(e.target.value);
+                          } else {
+                            setSubCategories([]);
+                          }
+                        }}
+                        className="form-input"
+                      >
+                        <option value="">Select category...</option>
+                        {categories.map(category => (
+                          <option key={category.category_id} value={category.category_id}>
+                            {category.category_name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="subCategorySelect">Sub-Category:</label>
+                      <select
+                        id="subCategorySelect"
+                        value={assignmentDetails.subCategory}
+                        onChange={(e) => setAssignmentDetails(prev => ({...prev, subCategory: e.target.value}))}
+                        className="form-input"
+                        disabled={!assignmentDetails.category}
+                      >
+                        <option value="">Select sub-category...</option>
+                        {subCategories.map(subCategory => (
+                          <option key={subCategory.sub_category_id} value={subCategory.sub_category_id}>
+                            {subCategory.sub_category_name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </>
+                )}
               </div>
             )}
 

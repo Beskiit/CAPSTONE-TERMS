@@ -347,6 +347,192 @@ export const giveReport = (req, res) => {
 ========================= */
 
 // POST /reports/laempl
+// Give LAEMPL & MPS report with subject selection
+export const giveLAEMPLMPSReport = (req, res) => {
+  const authenticatedUserId = req.user?.user_id;
+  if (!authenticatedUserId) return res.status(401).send('Authentication required');
+
+  const {
+    category_id,
+    sub_category_id,
+    given_by = authenticatedUserId,
+    quarter,
+    year,
+    from_date,
+    to_date,
+    instruction = null,
+    is_given = 1,
+    is_archived = 0,
+    allow_late = 0,
+    submitted_by,
+    assignees,
+    title,
+    grade_level_id,
+    subject_ids = [], // Array of subject IDs
+    number_of_submission,
+    number_of_submissions
+  } = req.body || {};
+
+  // Validation
+  if (category_id == null || quarter == null || year == null || !to_date) {
+    return res.status(400).send('category_id, quarter, year, and to_date are required.');
+  }
+  if (!title || typeof title !== 'string') {
+    return res.status(400).send('title is required (string).');
+  }
+  if (!grade_level_id) {
+    return res.status(400).send('grade_level_id is required for LAEMPL & MPS.');
+  }
+  if (!Array.isArray(subject_ids) || subject_ids.length === 0) {
+    return res.status(400).send('subject_ids array is required for LAEMPL & MPS.');
+  }
+
+  const recipients =
+    Array.isArray(assignees) && assignees.length
+      ? assignees
+      : (submitted_by != null ? [submitted_by] : []);
+
+  if (!recipients.length) {
+    return res.status(400).send('Provide submitted_by or a non-empty assignees array.');
+  }
+
+  const hasPerRecipientNos = Array.isArray(number_of_submissions);
+  if (hasPerRecipientNos && number_of_submissions.length !== recipients.length) {
+    return res.status(400).send('number_of_submissions length must match assignees length.');
+  }
+
+  const fromDateValue = from_date
+    ? new Date(from_date).toISOString().slice(0, 10)
+    : new Date().toISOString().slice(0, 10);
+
+  const _is_given    = Number(Boolean(is_given));
+  const _is_archived = Number(Boolean(is_archived));
+  const _allow_late  = Number(Boolean(allow_late));
+
+  db.getConnection((connErr, conn) => {
+    if (connErr) return res.status(500).send('DB connect error: ' + connErr.message);
+
+    conn.beginTransaction((txErr) => {
+      if (txErr) { conn.release(); return res.status(500).send('Begin TX error: ' + txErr.message); }
+
+      // Create assignments for each subject
+      const createAssignments = async () => {
+        const results = [];
+        
+        for (const subject_id of subject_ids) {
+          // Get subject name for title
+          const subjectQuery = `SELECT subject_name FROM subject WHERE subject_id = ?`;
+          const subjectResult = await new Promise((resolve, reject) => {
+            conn.query(subjectQuery, [subject_id], (err, results) => {
+              if (err) reject(err);
+              else resolve(results);
+            });
+          });
+
+          const subjectName = subjectResult[0]?.subject_name || 'Unknown Subject';
+          const assignmentTitle = `${title} - ${subjectName}`;
+
+          // Insert assignment for this subject
+          const insertReportSql = `
+            INSERT INTO report_assignment
+              (category_id, sub_category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `;
+          const raVals = [
+            category_id,
+            sub_category_id ?? null,
+            given_by,
+            quarter,
+            year,
+            fromDateValue,
+            to_date,
+            instruction,
+            _is_given,
+            _is_archived,
+            _allow_late,
+            assignmentTitle
+          ];
+
+          const assignmentResult = await new Promise((resolve, reject) => {
+            conn.query(insertReportSql, raVals, (err, result) => {
+              if (err) reject(err);
+              else resolve(result);
+            });
+          });
+
+          const report_assignment_id = assignmentResult.insertId;
+
+          // Create submissions for each recipient for this subject
+          for (let i = 0; i < recipients.length; i++) {
+            const recipient = recipients[i];
+            const nos = hasPerRecipientNos ? number_of_submissions[i] : (number_of_submission || 1);
+
+            const insertSubmissionSql = `
+              INSERT INTO submission
+                (report_assignment_id, category_id, submitted_by, status, number_of_submission, value, fields)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
+            `;
+            const submissionVals = [
+              report_assignment_id,
+              category_id,
+              recipient,
+              1, // pending status
+              nos,
+              assignmentTitle,
+              JSON.stringify({
+                type: "LAEMPL",
+                grade: grade_level_id,
+                subject_id: subject_id,
+                subject_name: subjectName,
+                rows: [],
+                totals: {},
+                meta: { createdAt: new Date().toISOString() }
+              })
+            ];
+
+            await new Promise((resolve, reject) => {
+              conn.query(insertSubmissionSql, submissionVals, (err, result) => {
+                if (err) reject(err);
+                else resolve(result);
+              });
+            });
+          }
+
+          results.push({
+            report_assignment_id,
+            subject_id,
+            subject_name: subjectName,
+            title: assignmentTitle
+          });
+        }
+
+        return results;
+      };
+
+      createAssignments()
+        .then((results) => {
+          conn.commit((commitErr) => {
+            conn.release();
+            if (commitErr) {
+              return res.status(500).send('Commit error: ' + commitErr.message);
+            }
+            res.json({
+              success: true,
+              message: `Created ${results.length} LAEMPL & MPS assignments`,
+              assignments: results
+            });
+          });
+        })
+        .catch((error) => {
+          conn.rollback(() => {
+            conn.release();
+            res.status(500).send('Error creating assignments: ' + error.message);
+          });
+        });
+    });
+  });
+};
+
 export const giveLAEMPLReport = (req, res) => {
   const authenticatedUserId = req.user?.user_id;
   if (!authenticatedUserId) return res.status(401).send('Authentication required');
@@ -609,6 +795,152 @@ export const patchReport = (req, res) => {
 };
 
 // DELETE report
+// Give LAEMPL & MPS report for coordinators (single submission with all subjects)
+export const giveLAEMPLMPSCoordinatorReport = (req, res) => {
+  const authenticatedUserId = req.user?.user_id;
+  if (!authenticatedUserId) return res.status(401).send('Authentication required');
+
+  const {
+    category_id, sub_category_id, given_by = authenticatedUserId, quarter, year, from_date, to_date,
+    instruction = null, is_given = 1, is_archived = 0, allow_late = 0, submitted_by, assignees, title,
+    grade_level_id, number_of_submission, number_of_submissions
+  } = req.body || {};
+
+  if (!category_id || !sub_category_id || !quarter || !year || !from_date || !to_date || !assignees || !title || !grade_level_id) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  const recipients = Array.isArray(assignees) ? assignees : [assignees];
+  const hasPerRecipientNos = Array.isArray(number_of_submissions) && number_of_submissions.length === recipients.length;
+
+  // Get all subjects for the grade level
+  const getSubjectsQuery = `
+    SELECT subject_id, subject_name 
+    FROM subject 
+    WHERE grade_level_id = ? AND is_active = 1
+    ORDER BY subject_name
+  `;
+
+  db.getConnection((connErr, conn) => {
+    if (connErr) {
+      console.error('Database connection error:', connErr);
+      return res.status(500).json({ error: 'Database connection failed' });
+    }
+
+    conn.beginTransaction(async (err) => {
+      if (err) {
+        conn.release();
+        return res.status(500).json({ error: 'Transaction failed to start' });
+      }
+
+      try {
+        // Get all subjects for the grade level
+        const subjects = await new Promise((resolve, reject) => {
+          conn.query(getSubjectsQuery, [grade_level_id], (err, results) => {
+            if (err) reject(err);
+            else resolve(results);
+          });
+        });
+
+        if (subjects.length === 0) {
+          throw new Error('No subjects found for the selected grade level');
+        }
+
+        // Create a single report assignment for the coordinator
+        const fromDateValue = from_date ? new Date(from_date).toISOString().split('T')[0] : null;
+        const _is_given = is_given ? 1 : 0;
+        const _is_archived = is_archived ? 1 : 0;
+        const _allow_late = allow_late ? 1 : 0;
+
+        const insertReportSql = `
+          INSERT INTO report_assignment 
+          (category_id, sub_category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `;
+        
+        const raVals = [category_id, sub_category_id ?? null, given_by, quarter, year, fromDateValue, to_date, instruction, _is_given, _is_archived, _allow_late, title];
+        
+        const assignmentResult = await new Promise((resolve, reject) => {
+          conn.query(insertReportSql, raVals, (err, result) => {
+            if (err) reject(err);
+            else resolve(result);
+          });
+        });
+
+        const report_assignment_id = assignmentResult.insertId;
+
+        // Create submissions for all recipients with all subjects
+        for (let i = 0; i < recipients.length; i++) {
+          const recipient = recipients[i];
+          const nos = hasPerRecipientNos ? number_of_submissions[i] : (number_of_submission || 1);
+          
+          // Create a single submission with all subjects
+          const allSubjectsData = subjects.map(subject => ({
+            subject_id: subject.subject_id,
+            subject_name: subject.subject_name,
+            rows: [],
+            totals: {}
+          }));
+
+          const insertSubmissionSql = `
+            INSERT INTO submission 
+            (report_assignment_id, category_id, submitted_by, status, number_of_submission, fields)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `;
+          
+          const submissionVals = [
+            report_assignment_id, 
+            category_id, 
+            recipient, 
+            1, // status = 1 (submitted)
+            nos,
+            JSON.stringify({ 
+              type: "LAEMPL_COORDINATOR", 
+              grade: grade_level_id, 
+              subjects: allSubjectsData,
+              title: title,
+              meta: { createdAt: new Date().toISOString() }
+            })
+          ];
+
+          await new Promise((resolve, reject) => {
+            conn.query(insertSubmissionSql, submissionVals, (err, result) => {
+              if (err) reject(err);
+              else resolve(result);
+            });
+          });
+        }
+
+        await new Promise((resolve, reject) => {
+          conn.commit((err) => {
+            if (err) reject(err);
+            else resolve();
+          });
+        });
+
+        conn.release();
+        res.json({ 
+          success: true, 
+          message: 'LAEMPL & MPS coordinator report created successfully',
+          report_assignment_id,
+          subjects_covered: subjects.length
+        });
+
+      } catch (error) {
+        await new Promise((resolve) => {
+          conn.rollback(() => {
+            conn.release();
+            resolve();
+          });
+        });
+        
+        console.error('Error creating coordinator report:', error);
+        res.status(500).json({ error: 'Failed to create coordinator report', details: error.message });
+      }
+    });
+  });
+};
+
 export const deleteReport = (req, res) => {
   const { id } = req.params;
   const sql = 'DELETE FROM report_assignment WHERE report_assignment_id = ?';

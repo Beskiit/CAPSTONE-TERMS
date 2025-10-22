@@ -284,6 +284,7 @@ function AssignedReport() {
                                             <tr>
                                                 <th>Report Title</th>
                                                 <th>Category</th>
+                                                <th>Grade & Section</th>
                                                 <th>Status</th>
                                                 <th>Submitted</th>
                                                 <th>Due Date</th>
@@ -299,6 +300,11 @@ function AssignedReport() {
                                                     <td>
                                                         <span className="category-info">
                                                             {report.category_name} - {report.sub_category_name}
+                                                        </span>
+                                                    </td>
+                                                    <td>
+                                                        <span className="grade-section-info">
+                                                            {report.grade_level ? `Grade ${report.grade_level}` : 'N/A'} - {report.section_name || 'N/A'}
                                                         </span>
                                                     </td>
                                                     <td>

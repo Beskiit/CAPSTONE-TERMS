@@ -26,6 +26,7 @@ function SetReport() {
   const isPrincipal = role === "principal";
 
   const [users, setUsers] = useState([]);
+  const [usersWithGrades, setUsersWithGrades] = useState([]);
   const [categories, setCategories] = useState([]);
   const [subCategories, setSubCategories] = useState([]);
   const [attempts, setAttempts] = useState("");
@@ -49,10 +50,18 @@ function SetReport() {
   const [selectedCoordinator, setSelectedCoordinator] = useState("");
   const [coordinators, setCoordinators] = useState([]);
 
+  // Grade level and subject selection for LAEMPL & MPS
+  const [gradeLevels, setGradeLevels] = useState([]);
+  const [subjects, setSubjects] = useState([]);
+  const [selectedGradeLevel, setSelectedGradeLevel] = useState("");
+  const [selectedSubjects, setSelectedSubjects] = useState([]);
+
   // NEW: prevent double-submit
   const [submitting, setSubmitting] = useState(false);
   const [teacherMenuOpen, setTeacherMenuOpen] = useState(false);
+  const [subjectMenuOpen, setSubjectMenuOpen] = useState(false);
   const teacherMenuRef = useRef(null);
+  const subjectMenuRef = useRef(null);
 
   // Confirmation Modal
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -64,8 +73,19 @@ function SetReport() {
     return cat ? cat[String(selectedSubCategory)] || "" : "";
   }, [selectedCategory, selectedSubCategory]);
 
-  // Merge teachers + coordinators for principals
+  // Merge teachers + coordinators for principals, with grade filtering for LAEMPL & MPS
   const selectableUsers = useMemo(() => {
+    const isLAEMPLMPS = selectedSubCategory === "3"; // LAEMPL & MPS sub-category ID
+    
+    if (isLAEMPLMPS && selectedGradeLevel) {
+      // Filter users by grade level for LAEMPL & MPS
+      const filteredUsers = usersWithGrades.filter(user => 
+        user.grade_level == selectedGradeLevel
+      );
+      return filteredUsers;
+    }
+    
+    // Default behavior for other report types
     const base = Array.isArray(users) ? users : [];
     if (!isPrincipal) return base;
     const extra = Array.isArray(coordinators) ? coordinators : [];
@@ -75,7 +95,16 @@ function SetReport() {
       byId.set(u.user_id, u);
     });
     return Array.from(byId.values());
-  }, [isPrincipal, users, coordinators]);
+  }, [isPrincipal, users, coordinators, usersWithGrades, selectedSubCategory, selectedGradeLevel]);
+
+  // Check if any selected teachers have coordinator role
+  const hasCoordinatorSelected = useMemo(() => {
+    const allSelectedUsers = [...selectedTeachers, selectedTeacher].filter(Boolean);
+    return allSelectedUsers.some(userId => {
+      const user = usersWithGrades.find(u => u.user_id === userId);
+      return user?.role?.toLowerCase() === 'coordinator';
+    });
+  }, [selectedTeachers, selectedTeacher, usersWithGrades]);
 
   // ✅ Load logged-in user
   useEffect(() => {
@@ -180,6 +209,78 @@ function SetReport() {
     fetchSubCategories();
   }, [selectedCategory]);
 
+  // ✅ Load grade levels
+  useEffect(() => {
+    const fetchGradeLevels = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/admin/grade-levels`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setGradeLevels(data);
+      } catch (err) {
+        console.error("Failed to fetch grade levels:", err);
+      }
+    };
+    fetchGradeLevels();
+  }, []);
+
+  // ✅ Load subjects when grade level changes
+  useEffect(() => {
+    if (!selectedGradeLevel) {
+      setSubjects([]);
+      setSelectedSubjects([]);
+      return;
+    }
+    const fetchSubjects = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/admin/subjects/${selectedGradeLevel}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setSubjects(data);
+      } catch (err) {
+        console.error("Failed to fetch subjects:", err);
+      }
+    };
+    fetchSubjects();
+  }, [selectedGradeLevel]);
+
+  // ✅ Load users with their grade assignments
+  useEffect(() => {
+    const fetchUsersWithGrades = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/users/teachers`, {
+          credentials: "include",
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        setUsers(data);
+        
+        // Fetch grade assignments for each user
+        const usersWithGradeData = await Promise.all(
+          data.map(async (user) => {
+            try {
+              const gradeRes = await fetch(`${API_BASE}/users/teacher-section/${user.user_id}`, {
+                credentials: "include",
+              });
+              if (gradeRes.ok) {
+                const gradeData = await gradeRes.json();
+                return { ...user, grade_level: gradeData.grade_level };
+              }
+              return { ...user, grade_level: null };
+            } catch (err) {
+              console.error(`Failed to fetch grade for user ${user.user_id}:`, err);
+              return { ...user, grade_level: null };
+            }
+          })
+        );
+        setUsersWithGrades(usersWithGradeData);
+      } catch (err) {
+        console.error("Failed to fetch users with grades:", err);
+      }
+    };
+    fetchUsersWithGrades();
+  }, []);
+
   // Decide report type using sub-category name (preferred) or known IDs (fallback)
   function detectReportType(subCategories, selectedSubCategoryId) {
     const sub = subCategories.find(
@@ -211,6 +312,20 @@ function SetReport() {
     if (!selectedCategory || !selectedSubCategory || !dueDate) {
       toast.error("Please complete Category, Sub-Category, and Due Date.");
       return;
+    }
+
+    // Validate LAEMPL & MPS with subject selection
+    const isLAEMPLMPS = selectedSubCategory === "3"; // LAEMPL & MPS sub-category ID
+    if (isLAEMPLMPS) {
+      if (!selectedGradeLevel) {
+        toast.error("Please select a grade level for LAEMPL & MPS.");
+        return;
+      }
+      // Only require subject selection if no coordinator is selected
+      if (!hasCoordinatorSelected && selectedSubjects.length === 0) {
+        toast.error("Please select at least one subject for LAEMPL & MPS.");
+        return;
+      }
     }
 
     // Validate teacher selection based on workflow
@@ -277,13 +392,41 @@ function SetReport() {
           : "Report");
 
       if (reportType === "laempl") {
-        endpoint = `${API_BASE}/reports/laempl`;
-        body = {
-          ...base,
-          title: fallbackTitle,
-          grade: 1,
-          number_of_submission: numberValue, // INT or NULL
-        };
+        // Check if this is LAEMPL & MPS with subject selection
+        const isLAEMPLMPS = selectedSubCategory === "3"; // LAEMPL & MPS sub-category ID
+        if (isLAEMPLMPS && selectedGradeLevel) {
+          if (hasCoordinatorSelected) {
+            // For coordinators: create single submission with all subjects
+            endpoint = `${API_BASE}/reports/laempl-mps-coordinator`;
+            body = {
+              ...base,
+              title: fallbackTitle,
+              grade_level_id: Number(selectedGradeLevel),
+              number_of_submission: numberValue, // INT or NULL
+            };
+          } else if (selectedSubjects.length > 0) {
+            // For teachers: create separate submissions per subject
+            endpoint = `${API_BASE}/reports/laempl-mps`;
+            body = {
+              ...base,
+              title: fallbackTitle,
+              grade_level_id: Number(selectedGradeLevel),
+              subject_ids: selectedSubjects.map((id) => Number(id)),
+              number_of_submission: numberValue, // INT or NULL
+            };
+          } else {
+            toast.error("Please select subjects for teachers or ensure coordinators are selected.");
+            return;
+          }
+        } else {
+          endpoint = `${API_BASE}/reports/laempl`;
+          body = {
+            ...base,
+            title: fallbackTitle,
+            grade: 1,
+            number_of_submission: numberValue, // INT or NULL
+          };
+        }
       } else {
         // generic + MPS both go here (MPS rows filled by teacher UI later)
         endpoint = `${API_BASE}/reports/give`;
@@ -332,6 +475,8 @@ function SetReport() {
       setTitle("");
       setAttempts("");
       setAllowLate(false);
+      setSelectedGradeLevel("");
+      setSelectedSubjects([]);
     } catch (err) {
       console.error("Error submitting report:", err);
       toast.error("Error submitting report. Please try again.");
@@ -351,6 +496,17 @@ function SetReport() {
   const selectAllTeachers = () => setSelectedTeachers(selectableUsers.map((u) => u.user_id));
   const clearAllTeachers = () => setSelectedTeachers([]);
 
+  // --- Subject selection helpers ---
+  const toggleSubject = (subjectId) => {
+    setSelectedSubjects((prev) =>
+      prev.includes(subjectId)
+        ? prev.filter((id) => id !== subjectId)
+        : prev.concat(subjectId)
+    );
+  };
+  const selectAllSubjects = () => setSelectedSubjects(subjects.map((s) => s.subject_id));
+  const clearAllSubjects = () => setSelectedSubjects([]);
+
   // Close teacher menu on outside click
   useEffect(() => {
     function onDocClick(e) {
@@ -362,6 +518,18 @@ function SetReport() {
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [teacherMenuOpen]);
+
+  // Close subject menu on outside click
+  useEffect(() => {
+    function onDocClick(e) {
+      if (!subjectMenuOpen) return;
+      if (subjectMenuRef.current && !subjectMenuRef.current.contains(e.target)) {
+        setSubjectMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [subjectMenuOpen]);
 
   return (
     <>
@@ -408,7 +576,7 @@ function SetReport() {
                 </select>
 
                 {/* Teachers multi-select dropdown placed in same row */}
-                <label>Teachers:</label>
+                <label>Teachers & Coordinators:</label>
                 <div ref={teacherMenuRef} style={{ position: "relative", width: "100%" }}>
                   <button
                     className="teacher-trigger"
@@ -422,7 +590,7 @@ function SetReport() {
                             .filter(u => selectedTeachers.includes(u.user_id))
                             .map(u => u.name)
                             .join(", ")
-                        : "Select Teacher"
+                        : "Select Teachers & Coordinators"
                     }
                   >
                     <span className="teacher-trigger-label">
@@ -431,7 +599,7 @@ function SetReport() {
                             .filter(u => selectedTeachers.includes(u.user_id))
                             .map(u => u.name)
                             .join(", ")
-                        : "Select Teacher"}
+                        : "Select Teachers & Coordinators"}
                     </span>
                   </button>
                   {teacherMenuOpen && (
@@ -500,6 +668,108 @@ function SetReport() {
                     ))}
                   </select>
                 </div>
+              )}
+
+              {/* Grade Level and Subject Selection for LAEMPL & MPS */}
+              {selectedSubCategory === "3" && (
+                <>
+                  <div className="form-row">
+                    <label>Grade Level:</label>
+                    <select
+                      value={selectedGradeLevel}
+                      onChange={(e) => {
+                        setSelectedGradeLevel(e.target.value);
+                        setSelectedSubjects([]); // Clear subjects when grade changes
+                        setSelectedTeachers([]); // Clear teachers when grade changes (for LAEMPL & MPS)
+                      }}
+                    >
+                      <option value="">Select Grade Level</option>
+                      {gradeLevels.map((grade) => (
+                        <option key={grade.grade_level_id} value={grade.grade_level_id}>
+                          Grade {grade.grade_level}
+                        </option>
+                      ))}
+                    </select>
+
+                    {selectedGradeLevel && !hasCoordinatorSelected && (
+                      <>
+                        <label>Subjects:</label>
+                        <div ref={subjectMenuRef} style={{ position: "relative", width: "100%" }}>
+                        <button
+                          className="teacher-trigger"
+                          type="button"
+                          onClick={() => setSubjectMenuOpen((v) => !v)}
+                          aria-haspopup="listbox"
+                          aria-expanded={subjectMenuOpen}
+                          title={
+                            selectedSubjects.length
+                              ? subjects
+                                  .filter(s => selectedSubjects.includes(s.subject_id))
+                                  .map(s => s.subject_name)
+                                  .join(", ")
+                              : "Select Subjects"
+                          }
+                        >
+                          <span className="teacher-trigger-label">
+                            {selectedSubjects.length
+                              ? subjects
+                                  .filter(s => selectedSubjects.includes(s.subject_id))
+                                  .map(s => s.subject_name)
+                                  .join(", ")
+                              : "Select Subjects"}
+                          </span>
+                        </button>
+                        {subjectMenuOpen && (
+                          <div
+                            role="listbox"
+                            className="teacher-menu"
+                            style={{ position: "absolute", zIndex: 10, background: "white", border: "1px solid #ccc", borderRadius: "4px", width: "100%", maxHeight: "200px", overflowY: "auto" }}
+                          >
+                            <div className="teacher-menu-header">
+                              <label>
+                                <input
+                                  className="menu-checkbox"
+                                  type="checkbox"
+                                  checked={selectedSubjects.length === subjects.length && subjects.length > 0}
+                                  onChange={(e) => (e.target.checked ? selectAllSubjects() : clearAllSubjects())}
+                                />
+                                <span>Select all</span>
+                              </label>
+                              <span className="teacher-menu-count">
+                                {selectedSubjects.length} selected
+                              </span>
+                              <button type="button" onClick={clearAllSubjects} className="teacher-menu-clear">
+                                Clear
+                              </button>
+                            </div>
+
+                            <div className="teacher-menu-content">
+                              {subjects.map((subject) => {
+                                const checked = selectedSubjects.includes(subject.subject_id);
+                                return (
+                                  <div
+                                    key={subject.subject_id}
+                                    onClick={() => toggleSubject(subject.subject_id)}
+                                    className={`teacher-menu-item ${checked ? 'selected' : ''}`}
+                                  >
+                                    <input
+                                      className="menu-checkbox"
+                                      type="checkbox"
+                                      readOnly
+                                      checked={checked}
+                                    />
+                                    <span>{subject.subject_name}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </>
               )}
 
               <div className="form-row">

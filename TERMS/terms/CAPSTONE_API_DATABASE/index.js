@@ -1308,7 +1308,11 @@ app.get("/reports/assigned_by/:userId", async (req, res) => {
         COALESCE(sc.sub_category_name, c.category_name) AS report_name,
 
         ud.name  AS submitted_by_name,   -- teacher
-        ud2.name AS given_by_name        -- coordinator
+        ud2.name AS given_by_name,       -- coordinator
+        
+        -- Grade and section information
+        gl.grade_level,
+        sec.section AS section_name
       FROM submission s
       JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
       JOIN category c           ON ra.category_id = c.category_id
@@ -1317,6 +1321,9 @@ app.get("/reports/assigned_by/:userId", async (req, res) => {
       LEFT JOIN user_details ud2 ON ra.given_by    = ud2.user_id
       LEFT JOIN school_year sy ON sy.year_id = ra.year
       LEFT JOIN quarter_enum qe ON qe.quarter_number = ra.quarter
+      LEFT JOIN teacher_section ts ON ud.user_id = ts.user_id
+      LEFT JOIN section sec ON ts.section_id = sec.section_id
+      LEFT JOIN grade_level gl ON sec.grade_level_id = gl.grade_level_id
       WHERE ra.given_by = ?
     `;
     
@@ -1492,13 +1499,13 @@ app.get("/users/teachers", async (req, res) => {
       return res.json([]); // No school assigned, return empty list
     }
 
-    // Get teachers from the same school
+    // Get teachers and coordinators from the same school
     const query = `
-      SELECT ud.user_id, ud.name, ud.email
+      SELECT ud.user_id, ud.name, ud.email, ud.role
       FROM user_details ud
-      WHERE ud.role = 'teacher' 
+      WHERE ud.role IN ('teacher', 'coordinator')
       AND ud.school_id = ?
-      ORDER BY ud.name
+      ORDER BY ud.role, ud.name
     `;
     
     const teachers = await new Promise((resolve, reject) => {
@@ -1777,6 +1784,91 @@ app.get("/admin/quarters", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch quarters", details: error.message });
   }
 });
+
+// Get sections by school
+app.get("/admin/sections/:schoolId", async (req, res) => {
+  try {
+    const { schoolId } = req.params;
+    const query = `
+      SELECT 
+        s.section_id,
+        s.section,
+        s.grade_level_id,
+        gl.grade_level
+      FROM section s
+      LEFT JOIN grade_level gl ON s.grade_level_id = gl.grade_level_id
+      WHERE s.school_id = ?
+      ORDER BY gl.grade_level, s.section
+    `;
+    
+    const rows = await new Promise((resolve, reject) => {
+      db.query(query, [schoolId], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+    
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching sections:", error);
+    res.status(500).json({ error: "Failed to fetch sections", details: error.message });
+  }
+});
+
+// Get all grade levels
+app.get("/admin/grade-levels", async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        grade_level_id,
+        grade_level
+      FROM grade_level
+      ORDER BY grade_level
+    `;
+    
+    const rows = await new Promise((resolve, reject) => {
+      db.query(query, (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+    
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching grade levels:", error);
+    res.status(500).json({ error: "Failed to fetch grade levels", details: error.message });
+  }
+});
+
+// Get subjects by grade level
+app.get("/admin/subjects/:gradeLevelId", async (req, res) => {
+  try {
+    const { gradeLevelId } = req.params;
+    const query = `
+      SELECT 
+        subject_id,
+        subject_name,
+        subject_code,
+        grade_level_id
+      FROM subject
+      WHERE grade_level_id = ? AND is_active = 1
+      ORDER BY subject_name
+    `;
+    
+    const rows = await new Promise((resolve, reject) => {
+      db.query(query, [gradeLevelId], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+    
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching subjects:", error);
+    res.status(500).json({ error: "Failed to fetch subjects", details: error.message });
+  }
+});
+
 
 // ==================== QUARTER ENUM API ENDPOINTS ====================
 
@@ -2176,7 +2268,7 @@ app.post("/admin/year-quarter", async (req, res) => {
 // Assign user to school
 app.post("/admin/assign-user", async (req, res) => {
   try {
-    const { user_id, school_name, section, grade_level } = req.body;
+    const { user_id, school_name, section, grade_level, category, sub_category } = req.body;
     
     if (!user_id || !school_name) {
       return res.status(400).json({ error: "User ID and school name are required" });
@@ -2252,6 +2344,51 @@ app.post("/admin/assign-user", async (req, res) => {
         
         await new Promise((resolve, reject) => {
           db.query(insertTeacherSectionQuery, [user_id, sectionId, yearId], (err, results) => {
+            if (err) reject(err);
+            else resolve(results);
+          });
+        });
+      }
+    }
+    
+    // Handle coordinator category assignments
+    if (category && sub_category) {
+      // Get the active year/quarter ID
+      const getYearQuery = `SELECT yr_and_qtr_id FROM year_and_quarter WHERE is_active = 1 ORDER BY yr_and_qtr_id DESC LIMIT 1`;
+      const yearResult = await new Promise((resolve, reject) => {
+        db.query(getYearQuery, (err, results) => {
+          if (err) reject(err);
+          else resolve(results);
+        });
+      });
+      
+      if (yearResult.length === 0) {
+        return res.status(400).json({ error: "No active year and quarter set. Please set an active year and quarter first." });
+      }
+      
+      const yearId = yearResult[0].yr_and_qtr_id;
+      
+      // Get the grade_level_id from the grade_level table
+      const getGradeLevelQuery = `SELECT grade_level_id FROM grade_level WHERE grade_level = ?`;
+      const gradeResult = await new Promise((resolve, reject) => {
+        db.query(getGradeLevelQuery, [grade_level], (err, results) => {
+          if (err) reject(err);
+          else resolve(results);
+        });
+      });
+      
+      if (gradeResult.length > 0) {
+        const gradeLevelId = gradeResult[0].grade_level_id;
+        
+        // Insert or update coordinator_grade assignment
+        const insertCoordinatorGradeQuery = `
+          INSERT INTO coordinator_grade (user_id, school_id, grade_level_id, yr_and_qtr_id, role) 
+          VALUES (?, ?, ?, ?, 'coordinator')
+          ON DUPLICATE KEY UPDATE grade_level_id = VALUES(grade_level_id)
+        `;
+        
+        await new Promise((resolve, reject) => {
+          db.query(insertCoordinatorGradeQuery, [user_id, school_id, gradeLevelId, yearId], (err, results) => {
             if (err) reject(err);
             else resolve(results);
           });
@@ -2406,6 +2543,246 @@ app.use("/mps", mpsRoutes);
 // 🔹 This is the base your React uses: `${API_BASE}/reports/accomplishment`
 app.use("/reports/accomplishment", accomplishmentRouter);
 
+// Get peer LAEMPL & MPS data for consolidation
+app.get("/reports/laempl-mps/:submissionId/peers", async (req, res) => {
+  try {
+    const { submissionId } = req.params;
+    console.log("Fetching peer LAEMPL & MPS data for submission:", submissionId);
+    
+    // Get the current submission to find the report assignment
+    const currentSubmissionQuery = `
+      SELECT s.report_assignment_id, s.submitted_by, ra.title, ra.quarter, ra.year
+      FROM submission s
+      JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
+      WHERE s.submission_id = ?
+    `;
+    
+    const currentSubmission = await new Promise((resolve, reject) => {
+      db.query(currentSubmissionQuery, [submissionId], (err, results) => {
+        if (err) reject(err);
+        else resolve(results[0]);
+      });
+    });
+    
+    console.log("Current submission details:", currentSubmission);
+    
+    if (!currentSubmission) {
+      console.log("No current submission found for ID:", submissionId);
+      return res.status(404).json({ error: "Submission not found" });
+    }
+    
+    console.log("Current submission report_assignment_id:", currentSubmission.report_assignment_id);
+    
+    // Find peer submissions with the same report assignment and LAEMPL & MPS type
+    // First try to find peers in the same report assignment
+    let peersQuery = `
+      SELECT 
+        s.submission_id,
+        s.status,
+        s.fields,
+        s.date_submitted,
+        ud.name,
+        ud.role,
+        gl.grade_level,
+        sec.section,
+        ts.role as teacher_role,
+        ra.title as report_title
+      FROM submission s
+      JOIN user_details ud ON s.submitted_by = ud.user_id
+      JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
+      LEFT JOIN teacher_section ts ON s.submitted_by = ts.user_id
+      LEFT JOIN section sec ON ts.section_id = sec.section_id
+      LEFT JOIN grade_level gl ON sec.grade_level_id = gl.grade_level_id
+      WHERE s.report_assignment_id = ?
+        AND s.submission_id != ?
+        AND s.status >= 2
+        AND JSON_EXTRACT(s.fields, '$.type') IN ('LAEMPL', 'LAEMPL_TEACHER', 'LAEMPL_COORDINATOR')
+      ORDER BY s.date_submitted DESC
+    `;
+    
+    console.log("Executing peer query with params:", [currentSubmission.report_assignment_id, submissionId]);
+    console.log("Peer query SQL:", peersQuery);
+    
+    const peers = await new Promise((resolve, reject) => {
+      db.query(peersQuery, [currentSubmission.report_assignment_id, submissionId], (err, results) => {
+        if (err) {
+          console.error("Peer query error:", err);
+          reject(err);
+        } else {
+          console.log("Raw peer query results:", results);
+          resolve(results);
+        }
+      });
+    });
+    
+    console.log("Found", peers.length, "raw peer submissions");
+    
+    // If no peers found in same report assignment, look for teacher submissions across different report assignments for same grade level
+    let allPeers = peers;
+    if (peers.length === 0) {
+      console.log("No peers found in same report assignment, looking across different report assignments for same grade level...");
+      
+      const crossAssignmentQuery = `
+        SELECT 
+          s.submission_id,
+          s.status,
+          s.fields,
+          s.date_submitted,
+          ud.name,
+          ud.role,
+          gl.grade_level,
+          sec.section,
+          ts.role as teacher_role,
+          ra.title as report_title
+        FROM submission s
+        JOIN user_details ud ON s.submitted_by = ud.user_id
+        JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
+        LEFT JOIN teacher_section ts ON s.submitted_by = ts.user_id
+        LEFT JOIN section sec ON ts.section_id = sec.section_id
+        LEFT JOIN grade_level gl ON sec.grade_level_id = gl.grade_level_id
+        WHERE ud.role = 'teacher'
+          AND s.status >= 2
+          AND JSON_EXTRACT(s.fields, '$.type') = 'LAEMPL'
+          AND JSON_EXTRACT(s.fields, '$.grade') = ?
+        ORDER BY s.date_submitted DESC
+      `;
+      
+      console.log("Executing cross-assignment query for grade level:", currentSubmission.grade || 2);
+      
+      const crossAssignmentPeers = await new Promise((resolve, reject) => {
+        db.query(crossAssignmentQuery, [currentSubmission.grade || 2], (err, results) => {
+          if (err) {
+            console.error("Cross-assignment query error:", err);
+            reject(err);
+          } else {
+            console.log("Cross-assignment query results:", results);
+            resolve(results);
+          }
+        });
+      });
+      
+      allPeers = crossAssignmentPeers;
+      console.log("Found", allPeers.length, "teacher submissions across different report assignments for grade", currentSubmission.grade || 2);
+    }
+    
+    // Let's also check all submissions for this report assignment to see what's available
+        const allSubmissionsQuery = `
+          SELECT 
+            s.submission_id,
+            s.status,
+            s.fields,
+            s.date_submitted,
+            ud.name,
+            ud.role,
+            s.report_assignment_id
+          FROM submission s
+          JOIN user_details ud ON s.submitted_by = ud.user_id
+          WHERE s.report_assignment_id = ?
+          ORDER BY s.date_submitted DESC
+        `;
+    
+    const allSubmissions = await new Promise((resolve, reject) => {
+      db.query(allSubmissionsQuery, [currentSubmission.report_assignment_id], (err, results) => {
+        if (err) {
+          console.error("All submissions query error:", err);
+          reject(err);
+        } else {
+          console.log("All submissions for this report assignment:", results);
+          resolve(results);
+        }
+      });
+    });
+    
+    // Let's also check if there are any teacher submissions at all in the database
+    const anyTeacherSubmissionsQuery = `
+      SELECT 
+        s.submission_id,
+        s.status,
+        s.fields,
+        s.date_submitted,
+        ud.name,
+        ud.role,
+        s.report_assignment_id,
+        ra.title as report_title
+      FROM submission s
+      JOIN user_details ud ON s.submitted_by = ud.user_id
+      JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
+      WHERE ud.role = 'teacher'
+        AND JSON_EXTRACT(s.fields, '$.type') = 'LAEMPL'
+        AND s.status >= 2
+      ORDER BY s.date_submitted DESC
+      LIMIT 10
+    `;
+    
+    const anyTeacherSubmissions = await new Promise((resolve, reject) => {
+      db.query(anyTeacherSubmissionsQuery, [], (err, results) => {
+        if (err) {
+          console.error("Any teacher submissions query error:", err);
+          reject(err);
+        } else {
+          console.log("Any teacher submissions in database:", results);
+          resolve(results);
+        }
+      });
+    });
+    
+    // Format the peer data
+    const formattedPeers = allPeers.map(peer => ({
+      submission_id: peer.submission_id,
+      teacher_name: peer.name,
+      grade_level: peer.grade_level,
+      section_name: peer.section,
+      status: peer.status,
+      date_submitted: peer.date_submitted,
+      fields: peer.fields,
+      role: peer.role
+    }));
+    
+    console.log("Found", formattedPeers.length, "peer submissions after filtering");
+    console.log("Formatted peers:", formattedPeers);
+    
+    // Additional debugging: Check if we should look for teacher submissions across different report assignments
+    if (formattedPeers.length === 0) {
+      console.log("=== NO PEER SUBMISSIONS FOUND ===");
+      console.log("Current submission report_assignment_id:", currentSubmission.report_assignment_id);
+      console.log("Looking for teacher submissions in the same report assignment...");
+      console.log("But teacher submissions exist for different report assignments:");
+      
+      anyTeacherSubmissions.forEach(teacher => {
+        console.log(`- Teacher submission ${teacher.submission_id}: report_assignment_id ${teacher.report_assignment_id} (${teacher.report_title})`);
+      });
+      
+      console.log("=== SUGGESTION ===");
+      console.log("The coordinator might need to consolidate teacher submissions from different report assignments.");
+      console.log("Or the teacher submissions need to be created for the same report assignment (ID: 11).");
+      
+      // Let's also check if there are any teacher submissions for the same grade level (Grade 2)
+      const grade2TeacherSubmissions = anyTeacherSubmissions.filter(teacher => {
+        try {
+          const fields = typeof teacher.fields === 'string' ? JSON.parse(teacher.fields) : teacher.fields;
+          return fields.grade === 2;
+        } catch (e) {
+          return false;
+        }
+      });
+      
+      if (grade2TeacherSubmissions.length > 0) {
+        console.log("=== FOUND GRADE 2 TEACHER SUBMISSIONS ===");
+        console.log("These could potentially be consolidated:");
+        grade2TeacherSubmissions.forEach(teacher => {
+          console.log(`- Teacher submission ${teacher.submission_id}: ${teacher.report_title} (Grade 2)`);
+        });
+      }
+    }
+    
+    res.json(formattedPeers);
+    
+  } catch (error) {
+    console.error("Error fetching peer LAEMPL & MPS data:", error);
+    res.status(500).json({ error: "Failed to fetch peer data", details: error.message });
+  }
+});
+
 // Teacher-specific status counts endpoint
 app.get("/reports/status/count/teacher/:userId", async (req, res) => {
   try {
@@ -2462,6 +2839,194 @@ app.use((err, req, res, _next) => {
   }
   const status = err.status || 500;
   res.status(status).json({ error: err.message || "Server error" });
+});
+
+// Get coordinator's assigned grade level
+app.get("/users/coordinator-grade/:userId", async (req, res) => {
+  try {
+    // Check authentication
+    if (!req.isAuthenticated?.()) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+    
+    const { userId } = req.params;
+    console.log("Fetching coordinator grade for user ID:", userId);
+    
+    const query = `
+      SELECT 
+        cg.grade_level_id,
+        gl.grade_level
+      FROM coordinator_grade cg
+      JOIN grade_level gl ON cg.grade_level_id = gl.grade_level_id
+      WHERE cg.user_id = ?
+      LIMIT 1
+    `;
+    
+    const rows = await new Promise((resolve, reject) => {
+      db.query(query, [userId], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+    
+    console.log("Coordinator grade query results:", rows);
+    
+    if (rows.length > 0) {
+      res.json(rows[0]);
+    } else {
+      console.log("No grade level found for coordinator:", userId);
+      res.status(404).json({ error: "No grade level assigned to coordinator" });
+    }
+  } catch (error) {
+    console.error("Error fetching coordinator grade:", error);
+    res.status(500).json({ error: "Failed to fetch coordinator grade", details: error.message });
+  }
+});
+
+// Test endpoint to check sections without authentication
+app.get("/test/sections/grade/:gradeLevelId", async (req, res) => {
+  try {
+    const { gradeLevelId } = req.params;
+    console.log("Testing sections for grade level:", gradeLevelId);
+    
+    const query = `
+      SELECT 
+        s.section_id,
+        s.section as section_name,
+        s.grade_level_id,
+        gl.grade_level
+      FROM section s
+      JOIN grade_level gl ON s.grade_level_id = gl.grade_level_id
+      WHERE s.grade_level_id = ?
+      ORDER BY s.section
+    `;
+    
+    const rows = await new Promise((resolve, reject) => {
+      db.query(query, [gradeLevelId], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+    
+    console.log("Sections found:", rows);
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching sections by grade:", error);
+    res.status(500).json({ error: "Failed to fetch sections", details: error.message });
+  }
+});
+
+// Simple test endpoint
+app.get("/test", (req, res) => {
+  res.json({ message: "Server is working!", timestamp: new Date().toISOString() });
+});
+
+// Fix submission type for coordinator
+app.patch("/submissions/:id/fix-coordinator-type", async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log("Fixing submission type for coordinator, submission ID:", id);
+    
+    // Get current submission data
+    const getCurrentQuery = `SELECT fields FROM submission WHERE submission_id = ?`;
+    const currentData = await new Promise((resolve, reject) => {
+      db.query(getCurrentQuery, [id], (err, results) => {
+        if (err) reject(err);
+        else resolve(results[0]);
+      });
+    });
+    
+    if (!currentData) {
+      return res.status(404).json({ error: "Submission not found" });
+    }
+    
+    // Parse current fields
+    let currentFields = {};
+    try {
+      currentFields = typeof currentData.fields === 'string' 
+        ? JSON.parse(currentData.fields) 
+        : currentData.fields;
+    } catch (e) {
+      console.error("Error parsing current fields:", e);
+    }
+    
+    // Update the type to LAEMPL_COORDINATOR
+    const updatedFields = {
+      ...currentFields,
+      type: "LAEMPL_COORDINATOR",
+      grade: 2, // Set grade level
+      subjects: [
+        { subject_id: 10, subject_name: "Araling Panlipunan", rows: [], totals: {} },
+        { subject_id: 8, subject_name: "English", rows: [], totals: {} },
+        { subject_id: 6, subject_name: "ESP", rows: [], totals: {} },
+        { subject_id: 9, subject_name: "Filipino", rows: [], totals: {} },
+        { subject_id: 11, subject_name: "MAPEH", rows: [], totals: {} },
+        { subject_id: 7, subject_name: "Mathematics", rows: [], totals: {} },
+        { subject_id: 12, subject_name: "MTB", rows: [], totals: {} }
+      ],
+      title: "LAEMPL & MPS FOR GRADE 2",
+      meta: { 
+        ...currentFields.meta,
+        updatedAt: new Date().toISOString(),
+        fixedToCoordinator: true
+      }
+    };
+    
+    // Update the submission
+    const updateQuery = `UPDATE submission SET fields = ? WHERE submission_id = ?`;
+    await new Promise((resolve, reject) => {
+      db.query(updateQuery, [JSON.stringify(updatedFields), id], (err, result) => {
+        if (err) reject(err);
+        else resolve(result);
+      });
+    });
+    
+    console.log("Successfully updated submission to coordinator type");
+    res.json({ 
+      message: "Submission updated to coordinator type", 
+      submission_id: id,
+      updated_fields: updatedFields
+    });
+    
+  } catch (error) {
+    console.error("Error fixing submission type:", error);
+    res.status(500).json({ error: "Failed to fix submission type", details: error.message });
+  }
+});
+
+// Get sections by grade level
+app.get("/sections/grade/:gradeLevelId", async (req, res) => {
+  try {
+    // Check authentication
+    if (!req.isAuthenticated?.()) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+    
+    const { gradeLevelId } = req.params;
+    const query = `
+      SELECT 
+        s.section_id,
+        s.section as section_name,
+        s.grade_level_id,
+        gl.grade_level
+      FROM section s
+      JOIN grade_level gl ON s.grade_level_id = gl.grade_level_id
+      WHERE s.grade_level_id = ?
+      ORDER BY s.section
+    `;
+    
+    const rows = await new Promise((resolve, reject) => {
+      db.query(query, [gradeLevelId], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+    
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching sections by grade:", error);
+    res.status(500).json({ error: "Failed to fetch sections", details: error.message });
+  }
 });
 
 /* ----------------- Start ----------------- */

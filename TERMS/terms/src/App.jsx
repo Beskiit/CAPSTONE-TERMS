@@ -22,7 +22,6 @@ import Accomplishment from './pages/Teacher/Accomplishment.jsx'
 import LAEMPL from './pages/Teacher/LAEMPL.jsx'
 import LAEMPLReport from './pages/Teacher/LAEMPLReport.jsx'
 import MPS from './pages/Teacher/MPS.jsx'
-import MPSReport from './pages/Teacher/MPSReport.jsx'
 import LAEMPLInstruction from './pages/Teacher/LAEMPLInstruction.jsx'
 import MPSInstruction from './pages/Teacher/MPSInstruction.jsx'
 import AccomplishmentReportInstruction from './pages/Teacher/AccomplishmentReportInstruction.jsx'
@@ -61,7 +60,6 @@ function App() {
           <Route path="/LAEMPL" element={<LAEMPL />} />
           <Route path="/LAEMPLReport" element={<LAEMPLReport />} />
           <Route path="/MPS" element={<MPS />} />
-          <Route path="/MPSReport" element={<MPSReport />} />
           <Route path="/LAEMPLInstruction" element={<LAEMPLInstruction />} />
           <Route path="/MPSInstruction" element={<MPSInstruction />} />
           <Route path="/AccomplishmentReportInstruction" element={<AccomplishmentReportInstruction />} />

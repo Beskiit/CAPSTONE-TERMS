@@ -12,6 +12,7 @@ function LAEMPLInstruction() {
     const navigate = useNavigate();
     const { state } = useLocation();
     const assignmentId = state?.id;
+    const submissionId = state?.submission_id;
     const title = state?.title;
     const instruction = state?.instruction;
     const fromDate = state?.from_date;
@@ -58,7 +59,7 @@ function LAEMPLInstruction() {
                     <div className="content">
                         <h3 className="header">Instructions</h3>
                         <p className="instruction">{instruction || "No instruction provided."}</p>
-                        <button className="instruction-btn" onClick={() => navigate(`/LAEMPLReport?id=${assignmentId || ''}`)}>+ Prepare Report</button>
+                        <button className="instruction-btn" onClick={() => navigate(`/LAEMPLReport?id=${submissionId || ''}`)}>+ Prepare Report</button>
                     </div>
                 </div>
                 <div className="dashboard-sidebar">

@@ -295,15 +295,15 @@ export const patchLAEMPLBySubmissionId = (req, res) => {
   const { id } = req.params; // submission_id
 
   // — LAEMPL schema/rules —
-  const TRAITS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
-  const COLS = [
+  let TRAITS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
+  let COLS = [
     { key: "m",        type: "count", min: 0,  max: 9999 },
     { key: "f",        type: "count", min: 0,  max: 9999 },
-    { key: "gmrc",     type: "score", min: 15, max: 25 },
-    { key: "math",     type: "score", min: 15, max: 25 },
-    { key: "lang",     type: "score", min: 15, max: 25 },
-    { key: "read",     type: "score", min: 15, max: 25 },
-    { key: "makabasa", type: "score", min: 15, max: 25 },
+    { key: "gmrc",     type: "score", min: 0,  max: 9999 },
+    { key: "math",     type: "score", min: 0,  max: 9999 },
+    { key: "lang",     type: "score", min: 0,  max: 9999 },
+    { key: "read",     type: "score", min: 0,  max: 9999 },
+    { key: "makabasa", type: "score", min: 0,  max: 9999 },
   ];
   const clamp = (val, min, max) => {
     if (val === "" || val == null) return null;
@@ -317,6 +317,15 @@ export const patchLAEMPLBySubmissionId = (req, res) => {
   const body   = req.body || {};
   const requestedStatus = body.status; // may be undefined
   const grade  = body.grade;
+  
+  console.log("=== BACKEND LAEMPL SUBMIT DEBUG ===");
+  console.log("Submission ID:", id);
+  console.log("Request body:", body);
+  console.log("Requested status:", requestedStatus);
+  console.log("Grade:", grade);
+  console.log("Rows input:", body.rows);
+  console.log("Totals input:", body.totals);
+  console.log("=== END BACKEND LAEMPL SUBMIT DEBUG ===");
 
   const rowsInput = body.rows ?? body.data ?? {};
   let rowsNormalized;
@@ -324,12 +333,29 @@ export const patchLAEMPLBySubmissionId = (req, res) => {
     const obj = typeof rowsInput === 'string' ? JSON.parse(rowsInput) : rowsInput;
     if (Array.isArray(obj)) {
       rowsNormalized = obj;
+      // Extract dynamic traits from the rows data
+      TRAITS = obj.map(row => row.trait).filter(Boolean);
     } else if (obj && typeof obj === 'object') {
+      // Use dynamic traits from the object keys
+      TRAITS = Object.keys(obj).filter(key => key !== 'totals' && key !== 'meta');
       rowsNormalized = TRAITS.map(trait => ({ trait, ...(obj[trait] || {}) }));
     } else {
       rowsNormalized = [];
     }
   } catch { rowsNormalized = []; }
+
+  // Extract dynamic columns from the first row if available
+  if (rowsNormalized.length > 0) {
+    const firstRow = rowsNormalized[0];
+    COLS = Object.keys(firstRow)
+      .filter(key => key !== 'trait')
+      .map(key => ({
+        key,
+        type: key === 'm' || key === 'f' ? 'count' : 'score',
+        min: key === 'm' || key === 'f' ? 0 : 0,  // Allow 0 for subject columns
+        max: key === 'm' || key === 'f' ? 9999 : 9999  // Allow higher values for subject columns
+      }));
+  }
 
   const cleanRows = TRAITS.map(trait => {
     const src = rowsNormalized.find(r => (r?.trait || '').toLowerCase() === trait.toLowerCase()) || {};
@@ -374,6 +400,20 @@ export const patchLAEMPLBySubmissionId = (req, res) => {
       totals,
       meta: { ...(current.meta || {}), updatedAt: new Date().toISOString() }
     };
+    
+    // Add subject information if available from the request
+    if (body.subject_id) {
+      nextFields.subject_id = body.subject_id;
+    }
+    if (body.subject_name) {
+      nextFields.subject_name = body.subject_name;
+    }
+    
+    console.log("=== BACKEND FINAL DATA STRUCTURE ===");
+    console.log("Next fields:", JSON.stringify(nextFields, null, 2));
+    console.log("Clean rows:", cleanRows);
+    console.log("Totals:", totals);
+    console.log("=== END BACKEND FINAL DATA STRUCTURE ===");
 
     // Decide the new status:
     let newStatusClause = '';
