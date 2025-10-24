@@ -6,9 +6,8 @@ import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import { ConfirmationModal, SubmissionConfirmation } from "../../components/ConfirmationModal";
 import { normalizeImages, getImageUrl, debugImageUrl } from "../../utils/imageUtils.js";
 import toast from "react-hot-toast";
+import { AISummarizationService } from "../../config/openai";
 import "./AccomplishmentReport.css";
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle, ImageRun } from "docx";
-import { saveAs } from "file-saver";
 
 // Always strip trailing slash on base, then build our own paths.
 const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
@@ -86,6 +85,11 @@ function AccomplishmentReport() {
   const [aiLoading, setAiLoading] = useState(false);
   const [prevNarrative, setPrevNarrative] = useState("");
 
+  // AI Summarization for Consolidation
+  const [consolidationSummary, setConsolidationSummary] = useState("");
+  const [isGeneratingConsolidationSummary, setIsGeneratingConsolidationSummary] = useState(false);
+  const [showSummaryModal, setShowSummaryModal] = useState(false);
+
   // Confirmation Modals
   const [showCoordinatorModal, setShowCoordinatorModal] = useState(false);
   const [showPrincipalModal, setShowPrincipalModal] = useState(false);
@@ -152,7 +156,10 @@ function AccomplishmentReport() {
         
         // Only set images if they haven't been consolidated recently
         if (!imagesConsolidated) {
-          setExistingImages(normalizeImages(imgs));
+          console.log('🔍 [DEBUG] Raw images from server:', imgs);
+          const normalizedImgs = normalizeImages(imgs);
+          console.log('🔍 [DEBUG] Normalized images:', normalizedImgs);
+          setExistingImages(normalizedImgs);
         }
         
         setSubmissionStatus(statusFromApi);
@@ -310,6 +317,26 @@ function AccomplishmentReport() {
         setImagesConsolidated(false); // Reset flag when new images are added
       }
 
+      // After saving, reload the submission data to get the proper image URLs from the server
+      try {
+        const reloadRes = await fetch(`${BASE}/${submissionId}`, { credentials: "include" });
+        if (reloadRes.ok) {
+          const reloadData = await reloadRes.json();
+          console.log('🔄 [DEBUG] Reloaded submission data after save:', reloadData);
+          
+          const imgs = reloadData?.images ?? reloadData?.fields?._answers?.images ?? reloadData?.fields?.images ?? reloadData?.fields?.photos ?? [];
+          console.log('🔄 [DEBUG] Reloaded images from server:', imgs);
+          
+          if (imgs.length > 0) {
+            const normalizedImgs = normalizeImages(imgs);
+            console.log('🔄 [DEBUG] Normalized reloaded images:', normalizedImgs);
+            setExistingImages(normalizedImgs);
+          }
+        }
+      } catch (reloadError) {
+        console.error('Failed to reload submission data:', reloadError);
+      }
+
       setSuccess("Saved!");
       toast.success("Report saved successfully!");
     } catch (e2) {
@@ -382,6 +409,26 @@ function AccomplishmentReport() {
         setImagesConsolidated(false); // Reset flag when new images are added
       }
 
+      // After submitting, reload the submission data to get the proper image URLs from the server
+      try {
+        const reloadRes = await fetch(`${BASE}/${submissionId}`, { credentials: "include" });
+        if (reloadRes.ok) {
+          const reloadData = await reloadRes.json();
+          console.log('🔄 [DEBUG] Reloaded submission data after coordinator submit:', reloadData);
+          
+          const imgs = reloadData?.images ?? reloadData?.fields?._answers?.images ?? reloadData?.fields?.images ?? reloadData?.fields?.photos ?? [];
+          console.log('🔄 [DEBUG] Reloaded images from server:', imgs);
+          
+          if (imgs.length > 0) {
+            const normalizedImgs = normalizeImages(imgs);
+            console.log('🔄 [DEBUG] Normalized reloaded images:', normalizedImgs);
+            setExistingImages(normalizedImgs);
+          }
+        }
+      } catch (reloadError) {
+        console.error('Failed to reload submission data after coordinator submit:', reloadError);
+      }
+
       setSuccess("Report submitted to coordinator successfully!");
       setSubmissionStatus(2);
       setShowSubmitToast(true);
@@ -417,240 +464,8 @@ function AccomplishmentReport() {
     await onSubmitToCoordinator();
   };
 
-  const onGenerate = () => {
-    alert("Generate Report: hook this to your generator when ready.");
-  };
-  // Export functionality for Word document
-  // --- REPLACE YOUR exportToWord WITH THIS VERSION (2 images per row) ---
-const exportToWord = async (submissionData) => {
-  if (!submissionData || !submissionData.fields) {
-    alert("No data available to export");
-    return;
-  }
 
-  const fields = submissionData.fields;
-  const answers = fields._answers || {};
-  const activity = answers;
 
-  // Normalize orientation via canvas (browser applies EXIF on decode)
-  const normalizeImageForDocx = async (imageUrl, targetHeight = 150, maxWidth = 220) => {
-    try {
-      const res = await fetch(imageUrl, { credentials: "include" });
-      if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
-      const blob = await res.blob();
-      const objUrl = URL.createObjectURL(blob);
-
-      const img = await new Promise((resolve, reject) => {
-        const el = new Image();
-        el.onload = () => resolve(el);
-        el.onerror = reject;
-        el.src = objUrl;
-      });
-
-      const aspect = img.width && img.height ? img.width / img.height : 4 / 3;
-      const height = targetHeight;
-      const width = Math.min(Math.round(aspect * height), maxWidth);
-
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0, width, height);
-
-      const outBlob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.92));
-      URL.revokeObjectURL(objUrl);
-      if (!outBlob) return null;
-
-      return { buffer: new Uint8Array(await outBlob.arrayBuffer()), width, height };
-    } catch (e) {
-      console.error("normalizeImageForDocx error:", e);
-      return null;
-    }
-  };
-
-  // Build absolute URLs for stored images
-  const imageItems = (answers.images || [])
-    .map((img) => {
-      if (typeof img === "string") return `${API_BASE}/uploads/accomplishments/${img}`;
-      if (img?.url) return img.url.startsWith("/") ? `${API_BASE}${img.url}` : img.url;
-      if (img?.filename) return `${API_BASE}/uploads/accomplishments/${img.filename}`;
-      return null;
-    })
-    .filter(Boolean);
-
-  const normalized = await Promise.all(imageItems.map((u) => normalizeImageForDocx(u, 150, 220)));
-  const validImages = normalized.filter(Boolean);
-
-  // === Build a small inner table: 2 images per row ===
-  const makeTwoPerRowImageTable = () => {
-    if (!validImages.length) {
-      return new Paragraph({
-        children: [new TextRun({ text: "No images provided", italics: true })],
-      });
-    }
-
-    const rows = [];
-    const gapWidthDXA = 240; // ~ 0.17 inch gap (tweak as needed)
-
-    for (let i = 0; i < validImages.length; i += 2) {
-      const left = validImages[i];
-      const right = validImages[i + 1]; // may be undefined for odd count
-
-      const cells = [
-        new TableCell({
-          borders: { top: { size: 0 }, bottom: { size: 0 }, left: { size: 0 }, right: { size: 0 } },
-          children: [
-            new Paragraph({
-              alignment: AlignmentType.CENTER,
-              children: [new ImageRun({ data: left.buffer, transformation: { width: left.width, height: left.height } })],
-            }),
-          ],
-        }),
-      ];
-
-      if (right) {
-        // gap cell
-        cells.push(
-          new TableCell({
-            width: { size: gapWidthDXA, type: WidthType.DXA },
-            borders: { top: { size: 0 }, bottom: { size: 0 }, left: { size: 0 }, right: { size: 0 } },
-            children: [new Paragraph({})],
-          })
-        );
-        // right image cell
-        cells.push(
-          new TableCell({
-            borders: { top: { size: 0 }, bottom: { size: 0 }, left: { size: 0 }, right: { size: 0 } },
-            children: [
-              new Paragraph({
-                alignment: AlignmentType.CENTER,
-                children: [new ImageRun({ data: right.buffer, transformation: { width: right.width, height: right.height } })],
-              }),
-            ],
-          })
-        );
-      }
-
-      rows.push(new TableRow({ children: cells }));
-    }
-
-    return new Table({
-      rows,
-      width: { size: 100, type: WidthType.PERCENTAGE },
-      borders: { top: { size: 0 }, bottom: { size: 0 }, left: { size: 0 }, right: { size: 0 } },
-      alignment: AlignmentType.CENTER,
-    });
-  };
-
-  try {
-    const doc = new Document({
-      sections: [
-        {
-          properties: {},
-          children: [
-            new Paragraph({ children: [new TextRun({ text: "Republic of the Philippines", bold: true, size: 24 })], alignment: AlignmentType.CENTER }),
-            new Paragraph({ children: [new TextRun({ text: "Department of Education", bold: true, size: 24 })], alignment: AlignmentType.CENTER }),
-            new Paragraph({ children: [new TextRun({ text: "Region III", bold: true, size: 20 })], alignment: AlignmentType.CENTER }),
-            new Paragraph({ children: [new TextRun({ text: "Schools Division of Bulacan", bold: true, size: 20 })], alignment: AlignmentType.CENTER }),
-            new Paragraph({ children: [new TextRun({ text: "Tuktukan Elementary School", bold: true, size: 20 })], alignment: AlignmentType.CENTER }),
-            new Paragraph({ text: "" }),
-            new Paragraph({ children: [new TextRun({ text: "ACTIVITY COMPLETION REPORT 2024-2025", bold: true, size: 28 })], alignment: AlignmentType.CENTER }),
-            new Paragraph({ text: "" }),
-
-            new Table({
-              width: { size: 100, type: WidthType.PERCENTAGE },
-              rows: [
-                new TableRow({
-                  children: [
-                    new TableCell({
-                      width: { size: 30, type: WidthType.PERCENTAGE },
-                      children: [new Paragraph({ children: [new TextRun({ text: "Program/Activity Title:", bold: true })] })],
-                    }),
-                    new TableCell({
-                      width: { size: 70, type: WidthType.PERCENTAGE },
-                      children: [new Paragraph({ children: [new TextRun({ text: activity.activityName || "Not provided" })] })],
-                    }),
-                  ],
-                }),
-                new TableRow({
-                  children: [
-                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Facilitator/s:", bold: true })] })] }),
-                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: activity.facilitators || "Not provided" })] })] }),
-                  ],
-                }),
-                new TableRow({
-                  children: [
-                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Objectives:", bold: true })] })] }),
-                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: activity.objectives || "Not provided" })] })] }),
-                  ],
-                }),
-                new TableRow({
-                  children: [
-                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Program/Activity Design:", bold: true })] })] }),
-                    new TableCell({
-                      children: [
-                        new Paragraph({ children: [new TextRun({ text: `Date: ${activity.date || "Not provided"}` })] }),
-                        new Paragraph({ children: [new TextRun({ text: `Time: ${activity.time || "Not provided"}` })] }),
-                        new Paragraph({ children: [new TextRun({ text: `Venue: ${activity.venue || "Not provided"}` })] }),
-                        new Paragraph({ children: [new TextRun({ text: `Key Results: ${activity.keyResult || "Not provided"}` })] }),
-                      ],
-                    }),
-                  ],
-                }),
-                new TableRow({
-                  children: [
-                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Person/s Involved:", bold: true })] })] }),
-                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: activity.personsInvolved || "Not provided" })] })] }),
-                  ],
-                }),
-                new TableRow({
-                  children: [
-                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Expenses:", bold: true })] })] }),
-                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: activity.expenses || "Not provided" })] })] }),
-                  ],
-                }),
-                new TableRow({
-                  children: [
-                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Lessons Learned/Recommendation:", bold: true })] })] }),
-                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: activity.lessonLearned || "Not provided" })] })] }),
-                  ],
-                }),
-
-                // Picture/s row (2 images per row)
-                new TableRow({
-                  children: [
-                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Picture/s:", bold: true })] })] }),
-                    new TableCell({ children: [makeTwoPerRowImageTable()] }),
-                  ],
-                }),
-
-                new TableRow({
-                  children: [
-                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Narrative:", bold: true })] })] }),
-                    new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: answers.narrative || "No narrative provided" })] })] }),
-                  ],
-                }),
-              ],
-            }),
-
-            new Paragraph({ text: "" }),
-            new Paragraph({ children: [new TextRun({ text: "Activity Completion Report prepared by:", bold: true })] }),
-            new Paragraph({ text: "" }),
-            new Paragraph({ children: [new TextRun({ text: "Name: [Signature Name]", bold: true })] }),
-            new Paragraph({ children: [new TextRun({ text: "Position: [Position Title]", bold: true })] }),
-          ],
-        },
-      ],
-    });
-
-    const blob = await Packer.toBlob(doc);
-    const fileName = `Activity_Completion_Report_${activity.activityName?.replace(/[^a-zA-Z0-9]/g, "_") || "Report"}.docx`;
-    saveAs(blob, fileName);
-  } catch (err) {
-    console.error("Error generating Word document:", err);
-    alert("Error generating document. Please try again.");
-  }
-};
   const onSubmitToPrincipal = async () => {
     // Allow resubmission for rejected reports (status 4)
     if (submissionStatus >= 2 && submissionStatus !== 4) {
@@ -713,6 +528,26 @@ const exportToWord = async (submissionData) => {
         setImagesConsolidated(false); // Reset flag when new images are added
       }
 
+      // After submitting to principal, reload the submission data to get the proper image URLs from the server
+      try {
+        const reloadRes = await fetch(`${BASE}/${submissionId}`, { credentials: "include" });
+        if (reloadRes.ok) {
+          const reloadData = await reloadRes.json();
+          console.log('🔄 [DEBUG] Reloaded submission data after principal submit:', reloadData);
+          
+          const imgs = reloadData?.images ?? reloadData?.fields?._answers?.images ?? reloadData?.fields?.images ?? reloadData?.fields?.photos ?? [];
+          console.log('🔄 [DEBUG] Reloaded images from server:', imgs);
+          
+          if (imgs.length > 0) {
+            const normalizedImgs = normalizeImages(imgs);
+            console.log('🔄 [DEBUG] Normalized reloaded images:', normalizedImgs);
+            setExistingImages(normalizedImgs);
+          }
+        }
+      } catch (reloadError) {
+        console.error('Failed to reload submission data after principal submit:', reloadError);
+      }
+
       setSuccess("Report submitted to principal successfully!");
       setSubmissionStatus(2);
       setShowSubmitToast(true);
@@ -766,6 +601,80 @@ const exportToWord = async (submissionData) => {
       setShowConsolidate(true);
     } catch (e) {
 setError(e.message || "Failed to load peers");
+    }
+  };
+
+  // Generate AI Summary for Consolidation
+  const generateConsolidationSummary = async (title, consolidatedData) => {
+    console.log('🤖 [FRONTEND] AI Summary button clicked for title:', title);
+    console.log('🤖 [FRONTEND] Consolidated data:', consolidatedData);
+    
+    try {
+      setIsGeneratingConsolidationSummary(true);
+      setConsolidationSummary("");
+      
+      // Find the peer group that matches the title
+      const peerGroup = peerGroups.find(group => group.title === title);
+      if (!peerGroup) {
+        console.error('❌ [FRONTEND] Peer group not found for title:', title);
+        throw new Error("Peer group not found for title: " + title);
+      }
+      
+      console.log('✅ [FRONTEND] Peer group found:', peerGroup);
+
+      // Extract narratives from all submissions in this peer group
+      console.log('🔍 [FRONTEND] Extracting narratives from', peerGroup.submissions?.length || 0, 'submissions');
+      const teacherNarratives = [];
+      if (peerGroup.submissions && Array.isArray(peerGroup.submissions)) {
+        peerGroup.submissions.forEach((submission, index) => {
+          try {
+            const fields = typeof submission.fields === 'string' ? JSON.parse(submission.fields) : submission.fields;
+            const narrative = fields?.narrative || fields?._answers?.narrative || "";
+            
+            console.log(`📝 [FRONTEND] Submission ${index + 1} narrative length:`, narrative.length);
+            
+            if (narrative && narrative.trim()) {
+              teacherNarratives.push({
+                teacherName: submission.teacher_name || `Teacher ${index + 1}`,
+                section: submission.section_name || "Unknown Section",
+                narrative: narrative.trim()
+              });
+              console.log(`✅ [FRONTEND] Added narrative from ${submission.teacher_name || `Teacher ${index + 1}`}`);
+            } else {
+              console.log(`⚠️ [FRONTEND] No narrative found for submission ${index + 1}`);
+            }
+          } catch (e) {
+            console.warn("❌ [FRONTEND] Failed to parse submission fields:", e);
+          }
+        });
+      }
+      
+      console.log('📊 [FRONTEND] Total narratives extracted:', teacherNarratives.length);
+
+      if (teacherNarratives.length === 0) {
+        throw new Error("No teacher narratives found in the selected submissions to summarize.");
+      }
+
+      const summaryData = {
+        title,
+        teacherNarratives,
+        submissionCount: teacherNarratives.length
+      };
+
+      console.log('🚀 [FRONTEND] Calling AI SummarizationService with data:', summaryData);
+      const summary = await AISummarizationService.generateSummary(summaryData);
+      console.log('✅ [FRONTEND] AI Summary received, length:', summary.length);
+      
+      setConsolidationSummary(summary);
+      setShowSummaryModal(true);
+      
+      console.log('🎉 [FRONTEND] AI Summary modal opened successfully');
+      toast.success("AI Summary generated successfully!");
+    } catch (error) {
+      console.error("AI Consolidation Summary Error:", error);
+      toast.error(`Failed to generate AI summary: ${error.message}`);
+    } finally {
+      setIsGeneratingConsolidationSummary(false);
     }
   };
 
@@ -884,43 +793,6 @@ setError(e.message || "Failed to load peers");
             {isTeacher ? (
               <>
                 <div className="buttons">
-                  <button onClick={onGenerate}>Generate Report</button>
-
-                  {!isTeacher && (
-                    <button onClick={() => setOpenPopup(true)}>Upload Images</button>
-                  )}
-                  {openPopup && (
-                    <div className="modal-overlay">
-                      <div className="import-popup">
-                        <div className="popup-header">
-                          <h2>Import File</h2>
-                          <button
-                            className="close-button"
-                            onClick={() => setOpenPopup(false)}
-                          >
-                            X
-                          </button>
-                        </div>
-                        <hr />
-                        <form className="import-form" onSubmit={(e) => e.preventDefault()}>
-                          <label htmlFor="fileInput" className="file-upload-label">
-                            Click here to upload a file
-                          </label>
-                          <input
-                            id="fileInput"
-                            type="file"
-                            multiple
-                            accept="image/*"
-                            style={{ display: "none" }}
-                            onChange={handleFiles}
-                          />
-                          <button type="submit">Upload</button>
-                        </form>
-                      </div>
-                    </div>
-                  )}
-
-                  <button onClick={() => exportToWord(submission)}>Export</button>
                   <button onClick={onSubmit} disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}>
                     {saving ? "Saving…" : "Save Draft"}
                   </button>
@@ -936,44 +808,10 @@ setError(e.message || "Failed to load peers");
             ) : (
               <>
                 <div className="buttons">
-                  <button onClick={onGenerate}>Generate Report</button>
-                  <button onClick={() => setOpenPopup(true)}>Upload Images</button>
-                  {openPopup && (
-                    <div className="modal-overlay">
-                      <div className="import-popup">
-                        <div className="popup-header">
-                          <h2>Import File</h2>
-                          <button
-                            className="close-button"
-                            onClick={() => setOpenPopup(false)}
-                          >
-                            X
-                          </button>
-                        </div>
-                        <hr />
-                        <form className="import-form" onSubmit={(e) => e.preventDefault()}>
-                          <label htmlFor="fileInput" className="file-upload-label">
-                            Click here to upload a file
-                          </label>
-                          <input
-                            id="fileInput"
-                            type="file"
-                            multiple
-                            accept="image/*"
-                            style={{ display: "none" }}
-                            onChange={handleFiles}
-                          />
-                          <button type="submit">Upload</button>
-                        </form>
-                      </div>
-                    </div>
-                  )}
-
-                  <button onClick={exportToWord}>Export</button>
+                  <button onClick={openConsolidate}>Consolidate</button>
                   <button onClick={handlePrincipalConfirmation} disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}>
                     {saving ? "Submitting…" : "Submit to Principal"}
                   </button>
-                  <button onClick={openConsolidate}>Consolidate</button>
                 </div>
               </>
             )}
@@ -1220,19 +1058,31 @@ setError(e.message || "Failed to load peers");
 
                     {(existingImages.length > 0 || newFiles.length > 0) && (
                       <div className="thumbs">
-                        {existingImages.map((img, index) => (
-                          <div key={img.url + img.filename} className="thumb">
-                            <img src={img.url} alt={img.filename} />
-                            <button
-                              type="button"
-                              className="remove-image-btn"
-                              onClick={() => setExistingImages(prev => prev.filter((_, i) => i !== index))}
-                              title="Remove image"
-                            >
-                              X
-                            </button>
-                          </div>
-                        ))}
+                        {existingImages.map((img, index) => {
+                          console.log('🖼️ [DEBUG] Rendering image:', { img, index, url: img.url });
+                          return (
+                            <div key={img.url + img.filename} className="thumb">
+                              <img 
+                                src={img.url} 
+                                alt={img.filename}
+                                onError={(e) => {
+                                  console.error('❌ [DEBUG] Image failed to load:', img.url, e);
+                                }}
+                                onLoad={() => {
+                                  console.log('✅ [DEBUG] Image loaded successfully:', img.url);
+                                }}
+                              />
+                              <button
+                                type="button"
+                                className="remove-image-btn"
+                                onClick={() => setExistingImages(prev => prev.filter((_, i) => i !== index))}
+                                title="Remove image"
+                              >
+                                X
+                              </button>
+                            </div>
+                          );
+                        })}
                         {newFiles.map((f, i) => (
                           <div key={`new-${i}`} className="thumb">
                             <img src={URL.createObjectURL(f)} alt={f.name} />
@@ -1619,7 +1469,15 @@ setError(e.message || "Failed to load peers");
                             </div>
                           </td>
                           <td style={{ padding: 8, width: 260, textAlign: "right", display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                            <button className="btn" onClick={() => summarizePeers(g.title)} disabled={aiLoading || !hasNarr} title={!hasNarr ? 'No narratives to summarize in this group' : undefined}>{aiLoading ? 'Summarizing…' : 'AI Summary'}</button>
+                            <button className="btn" onClick={() => generateConsolidationSummary(g.title, { images: g.submissions?.flatMap(s => {
+                              const f = parseFields(s) || {};
+                              const answers = f._answers || {};
+                              return (answers.images || []).filter(img => {
+                                if (typeof img === 'string' && img.startsWith('blob:')) return false;
+                                if (typeof img === 'object' && img.url && img.url.startsWith('blob:')) return false;
+                                return true;
+                              });
+                            }) || [] }) } disabled={isGeneratingConsolidationSummary} title="Generate AI summary from teacher narratives">{isGeneratingConsolidationSummary ? 'Generating…' : 'AI Summary'}</button>
                             <button className="btn primary" onClick={() => consolidateByTitle(g.title)}>Consolidate Images ({imageCount})</button>
                           </td>
                         </tr>
@@ -1674,6 +1532,54 @@ setError(e.message || "Failed to load peers");
         cancelText="Cancel"
         type="warning"
       />
+
+      {/* AI Summary Modal */}
+      {showSummaryModal && (
+        <div className="modal-overlay">
+          <div className="import-popup" style={{ maxWidth: 800, width: "90%" }}>
+            <div className="popup-header">
+              <h2>AI Consolidation Summary</h2>
+              <button className="close-button" onClick={() => setShowSummaryModal(false)}>X</button>
+            </div>
+            <hr />
+            <div style={{ maxHeight: 500, overflowY: "auto", padding: "20px 0" }}>
+              {isGeneratingConsolidationSummary ? (
+                <div style={{ textAlign: "center", padding: "40px" }}>
+                  <div style={{ fontSize: "18px", marginBottom: "10px" }}>🤖</div>
+                  <div>Generating AI Summary...</div>
+                  <div style={{ fontSize: "14px", color: "#666", marginTop: "10px" }}>
+                    This may take a few moments
+                  </div>
+                </div>
+              ) : (
+                <div style={{ whiteSpace: "pre-wrap", lineHeight: "1.6" }}>
+                  {consolidationSummary}
+                </div>
+              )}
+            </div>
+            <div style={{ marginTop: 20, display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button 
+                className="btn" 
+                onClick={() => setShowSummaryModal(false)}
+              >
+                Close
+              </button>
+              {consolidationSummary && (
+                <button 
+                  className="btn primary" 
+                  onClick={() => {
+                    setNarrative(prev => prev + "\n\n" + consolidationSummary);
+                    setShowSummaryModal(false);
+                    toast.success("AI Summary added to narrative!");
+                  }}
+                >
+                  Add to Narrative
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

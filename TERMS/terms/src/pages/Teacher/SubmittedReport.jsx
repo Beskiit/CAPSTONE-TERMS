@@ -24,8 +24,10 @@ function SubmittedReport() {
     // Dropdown states
     const [selectedSchoolYear, setSelectedSchoolYear] = useState('');
     const [selectedQuarter, setSelectedQuarter] = useState('');
+    const [selectedCategory, setSelectedCategory] = useState('');
     const [schoolYears, setSchoolYears] = useState([]);
     const [quarters, setQuarters] = useState([]);
+    const [categories, setCategories] = useState([]);
     const [filteredSubmissions, setFilteredSubmissions] = useState([]);
 
     const role = (user?.role || "").toLowerCase();
@@ -45,6 +47,21 @@ function SubmittedReport() {
             }
         };
         fetchUser();
+    }, []);
+
+    // Fetch categories
+    useEffect(() => {
+        const fetchCategories = async () => {
+            try {
+                const res = await fetch(`${API_BASE}/categories`);
+                if (!res.ok) return;
+                const data = await res.json();
+                setCategories(data);
+            } catch (err) {
+                console.error("Failed to fetch categories:", err);
+            }
+        };
+        fetchCategories();
     }, []);
 
     // Fetch school years and quarters
@@ -109,7 +126,7 @@ function SubmittedReport() {
         }
     }, [user?.user_id]);
 
-    // Filter submissions based on selected school year and quarter
+    // Filter submissions based on selected school year, quarter, and category
     useEffect(() => {
         const filterSubmissions = () => {
             let filtered = submissions;
@@ -143,25 +160,35 @@ function SubmittedReport() {
                 console.log('📊 Filtered results:', filtered.length);
             }
 
+            // Filter by category
+            if (selectedCategory) {
+                const selectedCategoryObj = categories.find(cat => cat.category_id.toString() === selectedCategory);
+                if (selectedCategoryObj) {
+                    filtered = filtered.filter(submission => {
+                        return submission.category_name === selectedCategoryObj.category_name;
+                    });
+                }
+            }
+
             setFilteredSubmissions(filtered);
         };
 
         filterSubmissions();
-    }, [submissions, selectedSchoolYear, selectedQuarter, schoolYears, quarters]);
+    }, [submissions, selectedSchoolYear, selectedQuarter, selectedCategory, schoolYears, quarters, categories]);
     return(
         <>
             <Header userText={user ? user.name : "Guest"} />
             <div className="dashboard-container">
                 {isTeacher ? (
-                    <Sidebar activeLink="MPS" />
+                    <Sidebar activeLink="Submitted Reports" />
                 ) : (
-                    <SidebarCoordinator activeLink="MPS" />
+                    <SidebarCoordinator activeLink="Submitted Report" />
                 )}
                 <div className="dashboard-content">
                     <div className="dashboard-main">
                         <h2>Submitted Report</h2>
                         
-                        {/* School Year and Quarter Dropdowns */}
+                        {/* School Year, Quarter, and Category Dropdowns */}
                         <div className="filter-dropdowns">
                             <div className="dropdown-group">
                                 <label htmlFor="school-year-select">School Year:</label>
@@ -196,6 +223,23 @@ function SubmittedReport() {
                                     ))}
                                 </select>
                             </div>
+
+                            <div className="dropdown-group">
+                                <label htmlFor="category-select">Category:</label>
+                                <select 
+                                    id="category-select"
+                                    value={selectedCategory || ''} 
+                                    onChange={(e) => setSelectedCategory(e.target.value)}
+                                    className="dropdown-select"
+                                >
+                                    <option value="">All Categories</option>
+                                    {categories.map(category => (
+                                        <option key={category.category_id} value={category.category_id}>
+                                            {category.category_name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
                         </div>
                     </div>
                     <div className="content">
@@ -210,11 +254,11 @@ function SubmittedReport() {
                                         <thead>
                                             <tr>
                                                 <th>Report Title</th>
-                                                <th>Status</th>
+                                                <th>Assignment Title</th>
                                                 <th>Date Submitted</th>
-                                                <th>Assignment</th>
-                                                <th>School Year</th>
                                                 <th>Quarter</th>
+                                                <th>School Year</th>
+                                                <th>Status</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -223,6 +267,10 @@ function SubmittedReport() {
                                                     <td className="file-cell">
                                                         <span className="file-name">{submission.value || submission.category_name || 'Report'}</span>
                                                     </td>
+                                                    <td>{submission.assignment_title || submission.title || 'N/A'}</td>
+                                                    <td>{submission.date_submitted || 'Not submitted'}</td>
+                                                    <td>{submission.quarter_name || 'N/A'}</td>
+                                                    <td>{submission.school_year || 'N/A'}</td>
                                                     <td>
                                                         <span className={`status-badge status-${submission.status}`}>
                                                             {submission.status === 0 ? 'Draft' : 
@@ -244,10 +292,6 @@ function SubmittedReport() {
                                                             </div>
                                                         )}
                                                     </td>
-                                                    <td>{submission.date_submitted || 'Not submitted'}</td>
-                                                    <td>Assignment #{submission.report_assignment_id || 'N/A'}</td>
-                                                    <td>{submission.school_year || 'N/A'}</td>
-                                                    <td>{submission.quarter_name || 'N/A'}</td>
                                                 </tr>
                                             ))}
                                         </tbody>

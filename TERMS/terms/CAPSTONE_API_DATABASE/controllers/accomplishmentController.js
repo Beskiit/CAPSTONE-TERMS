@@ -65,16 +65,34 @@ export const giveAccomplishmentReport = (req, res) => {
 
   const initialFields = buildInitialAccFields();
 
-  // Helper: next attempt number PER (submitted_by, report_assignment_id)
-  const computeNextNum = (userId, reportAssignmentId, cb) => {
+  // Helper: get next attempt numbers for all recipients at once
+  const computeNextNums = (userIds, reportAssignmentId, cb) => {
+    if (userIds.length === 0) return cb(null, {});
+    
+    const placeholders = userIds.map(() => '?').join(',');
     const sql = `
-      SELECT COALESCE(MAX(number_of_submission), 0) + 1 AS next_num
+      SELECT submitted_by, COALESCE(MAX(number_of_submission), 0) + 1 AS next_num
       FROM submission
-      WHERE submitted_by = ? AND report_assignment_id = ?
+      WHERE submitted_by IN (${placeholders}) AND report_assignment_id = ?
+      GROUP BY submitted_by
     `;
-    db.query(sql, [userId, reportAssignmentId], (err, rows) => {
+    
+    db.query(sql, [...userIds, reportAssignmentId], (err, rows) => {
       if (err) return cb(err);
-      cb(null, rows?.[0]?.next_num || 1);
+      
+      const nextNums = {};
+      rows.forEach(row => {
+        nextNums[row.submitted_by] = row.next_num;
+      });
+      
+      // Set default value of 1 for users not found
+      userIds.forEach(userId => {
+        if (!(userId in nextNums)) {
+          nextNums[userId] = 1;
+        }
+      });
+      
+      cb(null, nextNums);
     });
   };
 
@@ -110,14 +128,46 @@ export const giveAccomplishmentReport = (req, res) => {
 
       const report_assignment_id = insRes.insertId;
 
-      const insertForIdx = (i) => {
-        if (i >= recipients.length) {
-          return db.query("COMMIT", (cErr) => {
-            if (cErr) {
-              return db.query("ROLLBACK", () =>
-                res.status(500).send("Commit failed: " + cErr)
-              );
-            }
+      // Get next submission numbers for all recipients at once
+      computeNextNums(recipients, report_assignment_id, (nErr, nextNums) => {
+        if (nErr) {
+          return db.query("ROLLBACK", () =>
+            res.status(500).send("Failed to compute next submission numbers: " + nErr)
+          );
+        }
+
+        // Create all submissions in parallel
+        const submissionPromises = recipients.map(teacherId => {
+          return new Promise((resolve, reject) => {
+            const insertSubmissionSql = `
+              INSERT INTO submission
+                (report_assignment_id, category_id, submitted_by, status, number_of_submission, value, date_submitted, fields)
+              VALUES
+                (?, ?, ?, 1, ?, ?, NOW(), ?)
+            `;
+            const subVals = [
+              report_assignment_id,
+              category_id,
+              teacherId,
+              nextNums[teacherId],
+              title,
+              initialFields,
+            ];
+
+            db.query(insertSubmissionSql, subVals, (subErr) => {
+              if (subErr) {
+                reject(subErr);
+              } else {
+                resolve();
+              }
+            });
+          });
+        });
+
+        // Wait for all submissions to be created
+        Promise.all(submissionPromises)
+          .then(() => {
+            // Create notifications
             const nameSql = `SELECT name FROM user_details WHERE user_id = ? LIMIT 1`;
             db.query(nameSql, [given_by], (_e, nRows) => {
               const giverName = (nRows && nRows[0] && nRows[0].name) ? nRows[0].name : 'Coordinator';
@@ -129,53 +179,27 @@ export const giveAccomplishmentReport = (req, res) => {
                 ref_type: 'report_assignment',
                 ref_id: report_assignment_id,
               }));
+              
               createNotificationsBulk(notifications, () => {
-              return res
-                .status(201)
-                .json({ report_assignment_id, submissions_created: recipients.length });
+                db.query("COMMIT", (cErr) => {
+                  if (cErr) {
+                    return db.query("ROLLBACK", () =>
+                      res.status(500).send("Commit failed: " + cErr)
+                    );
+                  }
+                  return res
+                    .status(201)
+                    .json({ report_assignment_id, submissions_created: recipients.length });
+                });
               });
             });
-          });
-        }
-
-        const teacherId = recipients[i];
-
-        computeNextNum(teacherId, report_assignment_id, (nErr, nextNum) => {
-          if (nErr) {
-            return db.query("ROLLBACK", () =>
-              res
-                .status(500)
-                .send("Failed to compute next submission number: " + nErr)
+          })
+          .catch((err) => {
+            db.query("ROLLBACK", () =>
+              res.status(500).send("Failed to create submissions: " + err)
             );
-          }
-
-          const insertSubmissionSql = `
-            INSERT INTO submission
-              (report_assignment_id, category_id, submitted_by, status, number_of_submission, value, date_submitted, fields)
-            VALUES
-              (?, ?, ?, 1, ?, ?, NOW(), ?)
-          `;
-          const subVals = [
-            report_assignment_id, // FK linkage
-            category_id,
-            teacherId,
-            nextNum,
-            title, // store display title in `value`
-            initialFields,
-          ];
-
-          db.query(insertSubmissionSql, subVals, (subErr) => {
-            if (subErr) {
-              return db.query("ROLLBACK", () =>
-                res.status(500).send("Failed to insert submission: " + subErr)
-              );
-            }
-            insertForIdx(i + 1);
           });
-        });
-      };
-
-      insertForIdx(0);
+      });
     });
   });
 };
@@ -279,9 +303,14 @@ export const patchAccomplishmentSubmission = (req, res) => {
 
     const newFields = JSON.stringify(next);
 
-    const updateSql = `UPDATE submission SET fields = ?, status = COALESCE(?, status) WHERE submission_id = ?`;
+    // Only update status if it's provided and valid
     const newStatus = Number.isFinite(Number(status)) ? Number(status) : null;
-    db.query(updateSql, [newFields, newStatus, id], (updErr) => {
+    const updateSql = newStatus !== null 
+      ? `UPDATE submission SET fields = ?, status = ? WHERE submission_id = ?`
+      : `UPDATE submission SET fields = ? WHERE submission_id = ?`;
+    const updateParams = newStatus !== null ? [newFields, newStatus, id] : [newFields, id];
+    
+    db.query(updateSql, updateParams, (updErr) => {
       if (updErr) return res.status(500).send("Update failed: " + updErr);
       // If approved or rejected, notify submitter
       if (newStatus === 3 || newStatus === 4) {

@@ -83,6 +83,9 @@ function ViewSubmissionData() {
 
   // NEW: user state
   const [user, setUser] = useState(null);
+  
+  // Export format state
+
 
   // Re-check URL parameters on component mount
   useEffect(() => {
@@ -450,6 +453,7 @@ function ViewSubmissionData() {
     }
   };
 
+
   const renderSubmissionContent = (submission) => {
     const fields = submission.fields || {};
     
@@ -471,14 +475,14 @@ function ViewSubmissionData() {
       <div className="accomplishment-report-display">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <h4>Activity Completion Report</h4>
-          <button 
+          <button
             onClick={() => exportToWord({ fields })}
-            style={{ 
+            style={{
               backgroundColor: '#28a745',
-              color: 'white', 
-              border: 'none', 
+              color: 'white',
+              border: 'none',
               padding: '8px 16px',
-              borderRadius: '4px', 
+              borderRadius: '4px',
               cursor: 'pointer',
               fontSize: '14px'
             }}
@@ -674,7 +678,25 @@ function ViewSubmissionData() {
         <Sidebar activeLink="View Report" />
         <div className="dashboard-content">
           <div className="dashboard-main">
-            <h2>Submitted Report Details</h2>
+            <div className="page-header">
+              <button 
+                onClick={() => window.history.back()} 
+                className="back-button"
+                style={{
+                  backgroundColor: '#3b82f6',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  marginBottom: '20px'
+                }}
+              >
+                ← Back
+              </button>
+              <h2>Submitted Report Details</h2>
+            </div>
             
             <div className="submission-details">
               <div className="detail-row">
@@ -699,16 +721,12 @@ function ViewSubmissionData() {
             
             {submissionData.fields && (
               <div className="submission-content">
-                <h3>Content</h3>
                 <div className="content-section">
                   {renderSubmissionContent(submissionData)}
                 </div>
               </div>
             )}
 
-            <div className="action-buttons">
-              <button onClick={() => window.history.back()}>Go Back</button>
-            </div>
           </div>
         </div>
       </div>

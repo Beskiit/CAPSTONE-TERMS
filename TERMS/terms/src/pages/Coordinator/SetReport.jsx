@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import Header from "../../components/shared/Header.jsx";
 import Sidebar from "../../components/shared/SidebarCoordinator.jsx";
 import SidebarPrincipal from "../../components/shared/SidebarPrincipal.jsx";
@@ -20,6 +21,7 @@ const TEMPLATE_MAP = {
 };
 
 function SetReport() {
+  const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const role = (user?.role || "").toLowerCase();
   const isCoordinator = role === "coordinator";
@@ -68,7 +70,14 @@ function SetReport() {
 
   // Preview image resolver
   const previewSrc = useMemo(() => {
-    if (!selectedCategory || !selectedSubCategory) return "";
+    if (!selectedCategory) return "";
+    
+    // For Accomplishment Report (category_id = 0), show preview directly
+    if (String(selectedCategory) === "0") {
+      return TEMPLATE_MAP["1"]["10"]; // Accomplishment Report template
+    }
+    
+    if (!selectedSubCategory) return "";
     const cat = TEMPLATE_MAP[String(selectedCategory)];
     return cat ? cat[String(selectedSubCategory)] || "" : "";
   }, [selectedCategory, selectedSubCategory]);
@@ -265,10 +274,15 @@ function SetReport() {
               if (gradeRes.ok) {
                 const gradeData = await gradeRes.json();
                 return { ...user, grade_level: gradeData.grade_level };
+              } else if (gradeRes.status === 404) {
+                // User has no teacher-section assignment, which is normal
+                return { ...user, grade_level: null };
+              } else {
+                console.warn(`Failed to fetch grade for user ${user.user_id}: ${gradeRes.status}`);
+                return { ...user, grade_level: null };
               }
-              return { ...user, grade_level: null };
             } catch (err) {
-              console.error(`Failed to fetch grade for user ${user.user_id}:`, err);
+              console.warn(`Failed to fetch grade for user ${user.user_id}:`, err);
               return { ...user, grade_level: null };
             }
           })
@@ -282,7 +296,12 @@ function SetReport() {
   }, []);
 
   // Decide report type using sub-category name (preferred) or known IDs (fallback)
-  function detectReportType(subCategories, selectedSubCategoryId) {
+  function detectReportType(subCategories, selectedSubCategoryId, selectedCategoryId) {
+    // Check if this is Accomplishment Report (category_id = 0)
+    if (String(selectedCategoryId) === "0") {
+      return "accomplishment";
+    }
+
     const sub = subCategories.find(
       (s) => String(s.sub_category_id) === String(selectedSubCategoryId)
     );
@@ -309,8 +328,15 @@ function SetReport() {
       toast.error("User not loaded yet. Please try again in a moment.");
       return;
     }
-    if (!selectedCategory || !selectedSubCategory || !dueDate) {
-      toast.error("Please complete Category, Sub-Category, and Due Date.");
+    
+    // For Accomplishment Report (category_id = 0), subcategory is not required
+    const isAccomplishmentReport = String(selectedCategory) === "0";
+    if (!selectedCategory || !dueDate) {
+      toast.error("Please complete Category and Due Date.");
+      return;
+    }
+    if (!isAccomplishmentReport && !selectedSubCategory) {
+      toast.error("Please complete Sub-Category.");
       return;
     }
 
@@ -354,7 +380,7 @@ function SetReport() {
     setSubmitting(true);
 
     try {
-      const reportType = detectReportType(subCategories, selectedSubCategory);
+      const reportType = detectReportType(subCategories, selectedSubCategory, selectedCategory);
 
       // FIX: map attempts to INT or NULL (NULL = unlimited)
       const numberValue =
@@ -368,7 +394,7 @@ function SetReport() {
 
       const base = {
         category_id: Number(selectedCategory),
-        sub_category_id: Number(selectedSubCategory),
+        sub_category_id: reportType === "accomplishment" ? null : Number(selectedSubCategory),
         given_by: Number(givenBy),
         assignees: recipients.map((x) => Number(x)),
         quarter: activeYearQuarter.quarter,
@@ -385,13 +411,22 @@ function SetReport() {
       let body = {};
       const fallbackTitle =
         (title && title.trim()) ||
-        (reportType === "laempl"
+        (reportType === "accomplishment"
+          ? "Accomplishment Report"
+          : reportType === "laempl"
           ? "LAEMPL Report"
           : reportType === "mps"
           ? "MPS Report"
           : "Report");
 
-      if (reportType === "laempl") {
+      if (reportType === "accomplishment") {
+        // Handle Accomplishment Report
+        endpoint = `${API_BASE}/reports/accomplishment/give`;
+        body = {
+          ...base,
+          title: fallbackTitle,
+        };
+      } else if (reportType === "laempl") {
         // Check if this is LAEMPL & MPS with subject selection
         const isLAEMPLMPS = selectedSubCategory === "3"; // LAEMPL & MPS sub-category ID
         if (isLAEMPLMPS && selectedGradeLevel) {
@@ -464,19 +499,13 @@ function SetReport() {
 
       toast.success(`Report has been set successfully!`);
 
-      // Optional: reset form
-      setSelectedTeacher("");
-      setSelectedTeachers([]);
-      setSelectedSubCategory("");
-      setSelectedCategory("");
-      setStartDate("");
-      setDueDate("");
-      setInstruction("");
-      setTitle("");
-      setAttempts("");
-      setAllowLate(false);
-      setSelectedGradeLevel("");
-      setSelectedSubjects([]);
+      // Redirect to Assigned Reports with pre-selected school year and quarter
+      // Use the year_id (50000) to match the database year column
+      const yearValue = activeYearQuarter.year || 50000; // Use year_id from activeYearQuarter
+      const quarterValue = activeYearQuarter.quarter || 1;
+      const redirectUrl = `/AssignedReport?year=${yearValue}&quarter=${quarterValue}`;
+      console.log('Redirecting to:', redirectUrl, 'with activeYearQuarter:', activeYearQuarter);
+      navigate(redirectUrl);
     } catch (err) {
       console.error("Error submitting report:", err);
       toast.error("Error submitting report. Please try again.");
@@ -650,7 +679,7 @@ function SetReport() {
                 </div>
               </div>
 
-              {selectedCategory && (
+              {selectedCategory && String(selectedCategory) !== "0" && (
                 <div className="form-row">
                   <label>Sub-Category:</label>
                   <select

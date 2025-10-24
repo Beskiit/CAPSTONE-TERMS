@@ -1840,6 +1840,34 @@ app.get("/admin/grade-levels", async (req, res) => {
   }
 });
 
+// Get all subjects
+app.get("/subjects", async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        subject_id,
+        subject_name,
+        subject_code,
+        grade_level_id
+      FROM subject
+      WHERE is_active = 1
+      ORDER BY subject_name
+    `;
+    
+    const rows = await new Promise((resolve, reject) => {
+      db.query(query, [], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+    
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching subjects:", error);
+    res.status(500).json({ error: "Failed to fetch subjects", details: error.message });
+  }
+});
+
 // Get subjects by grade level
 app.get("/admin/subjects/:gradeLevelId", async (req, res) => {
   try {
@@ -2289,6 +2317,56 @@ app.post("/admin/assign-user", async (req, res) => {
     
     const school_id = schoolResult[0].school_id;
     
+    // Validation: Check for existing assignments
+    if (section && grade_level) {
+      // Check if another teacher is already assigned to this section and grade
+      const checkTeacherSectionQuery = `
+        SELECT ts.user_id, ud.name 
+        FROM teacher_section ts
+        JOIN user_details ud ON ts.user_id = ud.user_id
+        JOIN section s ON ts.section_id = s.section_id
+        WHERE s.section = ? AND s.school_id = ? AND s.grade_level_id = ?
+        AND ts.user_id != ?
+      `;
+      
+      const existingTeacherResult = await new Promise((resolve, reject) => {
+        db.query(checkTeacherSectionQuery, [section, school_id, grade_level, user_id], (err, results) => {
+          if (err) reject(err);
+          else resolve(results);
+        });
+      });
+      
+      if (existingTeacherResult.length > 0) {
+        return res.status(400).json({ 
+          error: `Section ${section} in Grade ${grade_level} is already assigned to ${existingTeacherResult[0].name}` 
+        });
+      }
+    }
+    
+    if (category && sub_category) {
+      // Check if another coordinator is already assigned to this category and sub-category
+      const checkCoordinatorQuery = `
+        SELECT cg.user_id, ud.name 
+        FROM coordinator_grade cg
+        JOIN user_details ud ON cg.user_id = ud.user_id
+        WHERE cg.school_id = ? AND cg.grade_level_id = ?
+        AND cg.user_id != ?
+      `;
+      
+      const existingCoordinatorResult = await new Promise((resolve, reject) => {
+        db.query(checkCoordinatorQuery, [school_id, grade_level, user_id], (err, results) => {
+          if (err) reject(err);
+          else resolve(results);
+        });
+      });
+      
+      if (existingCoordinatorResult.length > 0) {
+        return res.status(400).json({ 
+          error: `Grade ${grade_level} coordinator position is already assigned to ${existingCoordinatorResult[0].name}` 
+        });
+      }
+    }
+    
     // Update user_details table to include school assignment
     const updateUserQuery = `
       UPDATE user_details 
@@ -2335,11 +2413,19 @@ app.post("/admin/assign-user", async (req, res) => {
       if (sectionResult.length > 0) {
         const sectionId = sectionResult[0].section_id;
         
-        // Insert or update teacher_section assignment
+        // First, remove any existing teacher_section assignments for this user
+        const deleteExistingQuery = `DELETE FROM teacher_section WHERE user_id = ?`;
+        await new Promise((resolve, reject) => {
+          db.query(deleteExistingQuery, [user_id], (err, results) => {
+            if (err) reject(err);
+            else resolve(results);
+          });
+        });
+        
+        // Insert new teacher_section assignment
         const insertTeacherSectionQuery = `
           INSERT INTO teacher_section (user_id, section_id, yr_and_qtr_id, role) 
           VALUES (?, ?, ?, 'adviser')
-          ON DUPLICATE KEY UPDATE section_id = VALUES(section_id)
         `;
         
         await new Promise((resolve, reject) => {
@@ -2380,11 +2466,19 @@ app.post("/admin/assign-user", async (req, res) => {
       if (gradeResult.length > 0) {
         const gradeLevelId = gradeResult[0].grade_level_id;
         
-        // Insert or update coordinator_grade assignment
+        // First, remove any existing coordinator_grade assignments for this user
+        const deleteExistingCoordinatorQuery = `DELETE FROM coordinator_grade WHERE user_id = ?`;
+        await new Promise((resolve, reject) => {
+          db.query(deleteExistingCoordinatorQuery, [user_id], (err, results) => {
+            if (err) reject(err);
+            else resolve(results);
+          });
+        });
+        
+        // Insert new coordinator_grade assignment
         const insertCoordinatorGradeQuery = `
           INSERT INTO coordinator_grade (user_id, school_id, grade_level_id, yr_and_qtr_id, role) 
           VALUES (?, ?, ?, ?, 'coordinator')
-          ON DUPLICATE KEY UPDATE grade_level_id = VALUES(grade_level_id)
         `;
         
         await new Promise((resolve, reject) => {
@@ -2432,6 +2526,24 @@ app.post("/admin/unassign-user", async (req, res) => {
       });
     });
     
+    // Remove teacher_section assignments
+    const deleteTeacherSectionQuery = `DELETE FROM teacher_section WHERE user_id = ?`;
+    await new Promise((resolve, reject) => {
+      db.query(deleteTeacherSectionQuery, [user_id], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+    
+    // Remove coordinator_grade assignments
+    const deleteCoordinatorGradeQuery = `DELETE FROM coordinator_grade WHERE user_id = ?`;
+    await new Promise((resolve, reject) => {
+      db.query(deleteCoordinatorGradeQuery, [user_id], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+    
     res.json({ 
       success: true, 
       message: "User unassigned from school successfully",
@@ -2440,6 +2552,61 @@ app.post("/admin/unassign-user", async (req, res) => {
   } catch (error) {
     console.error("Error unassigning user:", error);
     res.status(500).json({ error: "Failed to unassign user", details: error.message });
+  }
+});
+
+// Delete user
+app.delete("/admin/users/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    if (!userId) {
+      return res.status(400).json({ error: "User ID is required" });
+    }
+    
+    // First, remove all related assignments
+    const deleteTeacherSectionQuery = `DELETE FROM teacher_section WHERE user_id = ?`;
+    await new Promise((resolve, reject) => {
+      db.query(deleteTeacherSectionQuery, [userId], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+    
+    const deleteCoordinatorGradeQuery = `DELETE FROM coordinator_grade WHERE user_id = ?`;
+    await new Promise((resolve, reject) => {
+      db.query(deleteCoordinatorGradeQuery, [userId], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+    
+    // Remove school assignment
+    const updateUserQuery = `UPDATE user_details SET school_id = NULL WHERE user_id = ?`;
+    await new Promise((resolve, reject) => {
+      db.query(updateUserQuery, [userId], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+    
+    // Finally, delete the user from user_details
+    const deleteUserQuery = `DELETE FROM user_details WHERE user_id = ?`;
+    await new Promise((resolve, reject) => {
+      db.query(deleteUserQuery, [userId], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+    
+    res.json({ 
+      success: true, 
+      message: "User deleted successfully",
+      userId
+    });
+  } catch (error) {
+    console.error("Error deleting user:", error);
+    res.status(500).json({ error: "Failed to delete user", details: error.message });
   }
 });
 

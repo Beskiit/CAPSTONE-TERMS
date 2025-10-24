@@ -48,7 +48,7 @@
 .validation-error-item::before {
   content: "•";
   color: #dc2626;
-  font-weight: bold;
+  font-weight: 600;
   position: absolute;
   left: 0;
 }
@@ -67,7 +67,7 @@
 .validation-error-more::before {
   content: "•";
   color: #9ca3af;
-  font-weight: bold;
+  font-weight: 600;
   position: absolute;
   left: 0;
 }

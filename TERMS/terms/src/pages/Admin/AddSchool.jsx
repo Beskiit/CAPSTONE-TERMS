@@ -171,7 +171,7 @@ function AddSchool({ isOpen, onRequestClose, onSchoolAdded }) {
               </thead>
               <tbody>
                 {schools.map((school, index) => (
-                  <tr key={school.school_id}>
+                  <tr key={school.school_id} className="read-only-row">
                     <td>{index + 1}</td>
                     <td className="school-name-cell">{school.school_name}</td>
                     <td>{school.school_number}</td>

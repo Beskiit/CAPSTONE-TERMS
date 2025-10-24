@@ -28,8 +28,15 @@
 .modal-header {
   display: flex;
   align-items: center;
+  justify-content: center;
   padding: 24px 24px 16px 24px;
   border-bottom: 1px solid #e5e7eb;
+}
+
+.modal-header-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .modal-icon {
@@ -77,13 +84,13 @@
 }
 
 .btn-cancel {
-  background: #f3f4f6;
-  color: #374151;
-  border: 1px solid #d1d5db;
+  background: #ef4444 !important;
+  color: white !important;
+  border: 1px solid #dc2626 !important;
 }
 
 .btn-cancel:hover {
-  background: #e5e7eb;
+  background: #dc2626 !important;
 }
 
 .btn-confirm {
@@ -111,6 +118,15 @@
 }
 
 .btn-info:hover {
+  background: #2563eb;
+}
+
+/* Default confirm button should be blue */
+.btn-confirm:not(.btn-warning):not(.btn-danger):not(.btn-info):not(.btn-success) {
+  background: #3b82f6;
+}
+
+.btn-confirm:not(.btn-warning):not(.btn-danger):not(.btn-info):not(.btn-success):hover {
   background: #2563eb;
 }
 

@@ -9,6 +9,7 @@ import Sidebar from '../../components/shared/SidebarPrincipal.jsx';
 import Submitted from '../../assets/submitted.svg';
 import Pending from '../../assets/pending.svg';
 import Approved from '../../assets/approved.svg';
+import Rejected from '../../assets/rejected.svg';
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
 
@@ -18,8 +19,10 @@ function DashboardPrincipal(){
     const [deadlines, setDeadlines] = useState([]);
     const [pendingCount, setPendingCount] = useState(0);
     const [approvedCount, setApprovedCount] = useState(0);
+    const [rejectedCount, setRejectedCount] = useState(0);
     const [approvedReports, setApprovedReports] = useState([]);
     const [pendingReports, setPendingReports] = useState([]);
+    const [rejectedReports, setRejectedReports] = useState([]);
     const [loading, setLoading] = useState(true);
     
         useEffect(() => {
@@ -81,6 +84,16 @@ function DashboardPrincipal(){
                     setApprovedReports(approvedData);
                     setApprovedCount(approvedData.length);
                 }
+
+                // Fetch rejected reports (status 4 - rejected by principal)
+                const rejectedRes = await fetch(`${API_BASE}/submissions/rejected-by-principal`, {
+                    credentials: "include",
+                });
+                if (rejectedRes.ok) {
+                    const rejectedData = await rejectedRes.json();
+                    setRejectedReports(rejectedData);
+                    setRejectedCount(rejectedData.length);
+                }
             } catch (err) {
                 console.error("Failed to fetch reports data:", err);
             } finally {
@@ -96,8 +109,8 @@ function DashboardPrincipal(){
     // Navigation handlers
     const handleApprovedReportClick = (report) => {
         // Navigate to ViewSubmissionData for approved reports
-        if (report.first_submission_id) {
-            navigate(`/ViewSubmissionData?id=${report.first_submission_id}`);
+        if (report.submission_id) {
+            navigate(`/ViewSubmissionData?id=${report.submission_id}`);
         }
     };
 
@@ -105,6 +118,13 @@ function DashboardPrincipal(){
         // Navigate to ForApprovalData for pending reports
         if (report.submission_id) {
             navigate(`/ForApprovalData?id=${report.submission_id}`);
+        }
+    };
+
+    const handleRejectedReportClick = (report) => {
+        // Navigate to AssignedReportData for rejected reports
+        if (report.submission_id) {
+            navigate(`/AssignedReportData/${report.submission_id}`);
         }
     };
 
@@ -131,6 +151,13 @@ function DashboardPrincipal(){
                         </div>
                         <p>{loading ? "Loading..." : approvedCount}</p>
                     </div>
+                    <div className="dashboard-card">
+                        <div className="title-container">
+                            <img src={Rejected} alt="Rejected Photo" />
+                            <h3>Rejected</h3>
+                        </div>
+                        <p>{loading ? "Loading..." : rejectedCount}</p>
+                    </div>
                 </div>
                     <div className="submitted-reports">
                         <h2>Approved Reports</h2>
@@ -154,7 +181,7 @@ function DashboardPrincipal(){
                                         <div className="submitted-report-date">
                                             <p>SY: {report.school_year || '2024-2025'}</p>
                                             <p>Date Submitted: {report.date_submitted || 'N/A'}</p>
-                                            <p>Submitted by: {report.submitted_by_names || 'Unknown'}</p>
+                                            <p>Submitted by: {report.submitted_by_name || 'Unknown'}</p>
                                         </div>
                                     </div>
                                 ))
@@ -162,7 +189,39 @@ function DashboardPrincipal(){
                                 <div className="no-reports-message">No approved reports found</div>
                             )}
                         </div>
+                    </div>
+
+                    <div className="submitted-reports">
+                        <h2>Rejected Reports</h2>
+                        <hr />
+                        <div className="reports-list">
+                            {loading ? (
+                                <div className="loading-message">Loading rejected reports...</div>
+                            ) : rejectedReports.length > 0 ? (
+                                rejectedReports.slice(0, 5).map((report, index) => (
+                                    <div 
+                                        key={report.report_assignment_id || index} 
+                                        className="submitted-reports-container clickable-report"
+                                        onClick={() => handleRejectedReportClick(report)}
+                                        style={{ cursor: 'pointer' }}
+                                    >
+                                        <div className="submitted-report-title">
+                                            <h4>{report.assignment_title || 'Report'}</h4>
+                                            <p>{report.category_name || 'Category'}</p>
+                                            <p>{report.sub_category_name || 'Sub-Category'}</p>
+                                        </div>
+                                        <div className="submitted-report-date">
+                                            <p>SY: {report.school_year || '2024-2025'}</p>
+                                            <p>Date Submitted: {report.date_submitted || 'N/A'}</p>
+                                            <p>Submitted by: {report.submitted_by_name || 'Unknown'}</p>
+                                        </div>
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="no-reports-message">No rejected reports found</div>
+                            )}
                         </div>
+                    </div>
 
                     <div className="submitted-reports-upon-approval">
                         <h2>Submitted Reports Upon Approval</h2>
@@ -186,7 +245,7 @@ function DashboardPrincipal(){
                                         <div className="submitted-report-date">
                                             <p>SY: {report.school_year || '2024-2025'}</p>
                                             <p>Date Submitted: {report.date_submitted || 'N/A'}</p>
-                                            <p>Submitted by: {report.submitted_by_names || 'Unknown'}</p>
+                                            <p>Submitted by: {report.submitted_by_name || 'Unknown'}</p>
                                         </div>
                                     </div>
                                 ))
@@ -208,6 +267,7 @@ function DashboardPrincipal(){
 
 function CalendarComponent({ deadlines = [] }) {
     const [date, setDate] = useState(new Date());
+    const navigate = useNavigate();
     const onChange = (newDate) => {
         setDate(newDate);
     };
@@ -278,6 +338,91 @@ function CalendarComponent({ deadlines = [] }) {
         return null;
     };
 
+    // Function to detect deadline type (copied from DeadlineComponent)
+    const detectType = (d) => {
+        const title   = (d?.title || "").toLowerCase();
+        const catName = (d?.category_name || "").toLowerCase();
+        const subName = (d?.sub_category_name || "").toLowerCase();
+        const subId   = Number(d?.sub_category_id);
+        const catId   = Number(d?.category_id);
+
+        const hay = `${title} ${catName} ${subName}`;
+        if (hay.includes("laempl")) return "laempl";
+        if (hay.includes("mps")) return "mps";
+        if (hay.includes("accomplishment")) return "accomplishment";
+        if (hay.includes("classification of grades") || hay.includes("classification")) return "cog";
+
+        if (subId === 20) return "laempl";
+        if (subId === 30) return "mps";
+        if (catId === 1)  return "accomplishment";
+        if (catId === 2)  return "laempl";
+        return "generic";
+    };
+
+    // Function to get submission ID (copied from DeadlineComponent)
+    const getSubmissionId = (d) =>
+        d?.submission_id ?? d?.id ?? d?.report_assignment_id ?? null;
+
+    // Function to navigate to deadline template
+    const goToTemplate = (deadline) => {
+        const kind = detectType(deadline);
+        const submissionId = getSubmissionId(deadline);
+
+        const commonState = {
+            submission_id: submissionId,
+            title: deadline.title,
+            instruction: deadline.instruction,
+            from_date: deadline.from_date,
+            to_date: deadline.to_date,
+            number_of_submission: deadline.number_of_submission,
+            allow_late: deadline.allow_late,
+        };
+
+        if (kind === "laempl")         return navigate("/LAEMPLInstruction", { state: commonState });
+        if (kind === "mps")            return navigate("/MPSInstruction", { state: commonState });
+        if (kind === "accomplishment") return navigate("/AccomplishmentReportInstruction", { state: commonState });
+        if (kind === "cog")            return navigate("/ClassificationOfGradesInstruction", { state: commonState });
+        return navigate("/SubmittedReport");
+    };
+
+    // Function to handle tile click
+    const handleTileClick = (value, event) => {
+        if (hasDeadline(value)) {
+            // Find the deadline that matches this date
+            const clickedDeadline = deadlines.find(deadline => {
+                const dueDateField = deadline.due_date || deadline.to_date || deadline.dueDate || deadline.toDate;
+                if (dueDateField) {
+                    let date;
+                    date = new Date(dueDateField);
+                    
+                    if (isNaN(date.getTime())) {
+                        const dateStr = dueDateField.toString();
+                        const match = dateStr.match(/(\w{3})\s+(\d{1,2}),\s+(\d{4})/);
+                        if (match) {
+                            const [, month, day, year] = match;
+                            const monthMap = {
+                                'Jan': 0, 'Feb': 1, 'Mar': 2, 'Apr': 3, 'May': 4, 'Jun': 5,
+                                'Jul': 6, 'Aug': 7, 'Sep': 8, 'Oct': 9, 'Nov': 10, 'Dec': 11
+                            };
+                            date = new Date(parseInt(year), monthMap[month], parseInt(day));
+                        }
+                    }
+                    
+                    if (!isNaN(date.getTime())) {
+                        return date.getFullYear() === value.getFullYear() &&
+                               date.getMonth() === value.getMonth() &&
+                               date.getDate() === value.getDate();
+                    }
+                }
+                return false;
+            });
+
+            if (clickedDeadline) {
+                goToTemplate(clickedDeadline);
+            }
+        }
+    };
+
     return (
         <div className="calendar-container">
             <Calendar 
@@ -285,6 +430,7 @@ function CalendarComponent({ deadlines = [] }) {
                 value={date}
                 tileContent={tileContent}
                 tileClassName={tileClassName}
+                onClickDay={handleTileClick}
             />
         </div>
     );

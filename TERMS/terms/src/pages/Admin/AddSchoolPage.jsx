@@ -2,8 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from '../../components/shared/SidebarAdmin';
 import Header from '../../components/shared/Header';
-import Edit from '../../assets/edit.svg';
-import Delete from '../../assets/delete.svg';
 import AddSchool from './AddSchool';
 import Modal from 'react-modal';
 import './AddSchool.css';
@@ -99,7 +97,6 @@ function AddSchoolPage() {
                     <th>#</th>
                     <th>School Name</th>
                     <th>School Number</th>
-                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -111,32 +108,6 @@ function AddSchoolPage() {
                       </td>
                       <td>
                         <span className="school-number">{school.school_number}</span>
-                      </td>
-                      <td>
-                        <div className="action-buttons">
-                          <button
-                            type="button"
-                            className="icon-btn edit-btn"
-                            title="Edit school"
-                            onClick={() => {
-                              // TODO: Implement edit functionality
-                              alert('Edit functionality coming soon!');
-                            }}
-                          >
-                            <img src={Edit} alt="Edit" />
-                          </button>
-                          <button
-                            type="button"
-                            className="icon-btn delete-btn"
-                            title="Delete school"
-                            onClick={() => {
-                              // TODO: Implement delete functionality
-                              alert('Delete functionality coming soon!');
-                            }}
-                          >
-                            <img src={Delete} alt="Delete" />
-                          </button>
-                        </div>
                       </td>
                     </tr>
                   ))}

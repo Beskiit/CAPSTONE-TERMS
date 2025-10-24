@@ -16,6 +16,7 @@ import {
   submitToPrincipal,               // ⬅️ NEW
   getSubmissionsForPrincipalApproval, // ⬅️ NEW
   getApprovedSubmissionsByPrincipal, // ⬅️ NEW
+  getRejectedSubmissionsByPrincipal, // ⬅️ NEW
   patchSubmissionFormData,          // ⬅️ NEW
 } from "../controllers/submissionController.js";
 import { requireAuth } from "../middleware/auth.js";
@@ -61,6 +62,9 @@ router.get("/for-principal-approval", requireAuth, getSubmissionsForPrincipalApp
 
 // Principal approved submissions
 router.get("/approved-by-principal", requireAuth, getApprovedSubmissionsByPrincipal);
+
+// Principal rejected submissions
+router.get("/rejected-by-principal", requireAuth, getRejectedSubmissionsByPrincipal);
 
 // --- SPECIFIC ROUTES MUST COME BEFORE "/:id" ---
 // LAEMPL

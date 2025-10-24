@@ -10,6 +10,7 @@ import AddSchool from "./AddSchool";
 import QuarterEnumService from "../../services/quarterEnumService";
 import QuarterSelector from "../../components/QuarterSelector";
 import YearQuarterSelector from "../../components/YearQuarterSelector";
+import toast from "react-hot-toast";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "http://localhost:5000").replace(/\/$/, "");
 
@@ -17,6 +18,7 @@ function UserManagement() {
   const navigate = useNavigate();
   const [openPopupAdd, setOpenPopupAdd] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState(null);
   const [openPopupAssign, setOpenPopupAssign] = useState(false);
   const [user, setUser] = useState(null);
   const [users, setUsers] = useState([]);
@@ -250,10 +252,32 @@ function UserManagement() {
   };
 
 
-  const handleDelete = () => {
-    // TODO: call your API to delete the user here
-    console.log("User deleted!");
-    setConfirmOpen(false);
+  const handleDelete = async () => {
+    if (!userToDelete) return;
+    
+    try {
+      const response = await fetch(`${API_BASE}/admin/users/${userToDelete.user_id}`, {
+        method: 'DELETE',
+        credentials: "include"
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      // Remove the user from the local state
+      setUsers(users.filter(user => user.user_id !== userToDelete.user_id));
+
+      toast.success(result.message || "User deleted successfully!");
+      setConfirmOpen(false);
+      setUserToDelete(null);
+    } catch (err) {
+      console.error("Error deleting user:", err);
+      toast.error(err.message || "Failed to delete user");
+    }
   };
 
   const handleEditUser = (user) => {
@@ -370,8 +394,11 @@ function UserManagement() {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
+
+      const result = await response.json();
 
       // Update the user in the local state
       setUsers(users.map(user => 
@@ -380,12 +407,19 @@ function UserManagement() {
           : user
       ));
 
+      toast.success(result.message || "User assigned successfully!");
       setShowAssignmentModal(false);
       setSelectedUser(null);
       setSelectedSchool('');
+      setAssignmentDetails({
+        section: '',
+        gradeLevel: '',
+        category: '',
+        subCategory: ''
+      });
     } catch (err) {
       console.error("Error assigning user:", err);
-      alert("Failed to assign user to school");
+      toast.error(err.message || "Failed to assign user to school");
     }
   };
 
@@ -405,8 +439,11 @@ function UserManagement() {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
+
+      const result = await response.json();
 
       // Update the user in the local state
       setUsers(users.map(user => 
@@ -415,12 +452,19 @@ function UserManagement() {
           : user
       ));
 
+      toast.success(result.message || "User unassigned successfully!");
       setShowAssignmentModal(false);
       setSelectedUser(null);
       setSelectedSchool('');
+      setAssignmentDetails({
+        section: '',
+        gradeLevel: '',
+        category: '',
+        subCategory: ''
+      });
     } catch (err) {
       console.error("Error unassigning user:", err);
-      alert("Failed to unassign user from school");
+      toast.error(err.message || "Failed to unassign user from school");
     }
   };
 
@@ -535,7 +579,10 @@ function UserManagement() {
                           <button
                             type="button"
                             className="icon-btn delete-btn"
-                            onClick={() => setConfirmOpen(true)}
+                            onClick={() => {
+                              setUserToDelete(user);
+                              setConfirmOpen(true);
+                            }}
                             title="Delete user"
                           >
                             <img src={Delete} alt="Delete" />
@@ -552,16 +599,22 @@ function UserManagement() {
           {/* React-Modal confirmation */}
           <Modal
             isOpen={confirmOpen}
-            onRequestClose={() => setConfirmOpen(false)}
+            onRequestClose={() => {
+              setConfirmOpen(false);
+              setUserToDelete(null);
+            }}
             className="modal"
             overlayClassName="overlay"
             contentLabel="Confirm delete user"
           >
             <h2>Confirm Delete</h2>
-            <p>Do you want to delete this user?</p>
+            <p>Do you want to delete user "{userToDelete?.name}"? This action cannot be undone.</p>
             <div className="modal-actions">
               <button className="btn btn-danger" onClick={handleDelete}>Yes</button>
-              <button className="btn" onClick={() => setConfirmOpen(false)}>Cancel</button>
+              <button className="btn" onClick={() => {
+                setConfirmOpen(false);
+                setUserToDelete(null);
+              }}>Cancel</button>
             </div>
           </Modal>
 

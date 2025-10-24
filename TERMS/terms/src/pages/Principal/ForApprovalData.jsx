@@ -39,9 +39,46 @@ const getSubmissionId = () => {
 
 const SUBMISSION_ID = getSubmissionId();
 
-const TRAITS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
+// Helper function to sanitize keys from database (e.g., "English (15 - 25 points)" -> "english")
+const sanitizeKey = (rawKey) => {
+  // Remove "(XX - YY points)" part and convert to snake_case
+  let cleanKey = rawKey.replace(/\s*\(\d+\s*-\s*\d+\s*points\)/g, '').trim();
+  cleanKey = cleanKey.toLowerCase().replace(/\s/g, '_');
+  return cleanKey;
+};
 
-const COLS = [
+// Helper function to get column labels
+const getColumnLabel = (key, subjectNames = {}) => {
+  const labelMap = {
+    'm': 'M',
+    'f': 'F',
+    'gmrc': 'GMRC (15 - 25 points)',
+    'math': 'Mathematics (15 - 25 points)',
+    'lang': 'Language (15 - 25 points)',
+    'read': 'Reading and Literacy (15 - 25 points)',
+    'makabasa': 'MAKABASA (15 - 25 points)',
+    'english': 'English (15 - 25 points)',
+    'araling_panlipunan': 'Araling Panlipunan (15 - 25 points)',
+    'total_score': 'Total Score',
+    'hs': 'HS',
+    'ls': 'LS',
+    'total_items': 'Total no. of Items'
+  };
+  
+  // Handle subject IDs (e.g., subject_8, subject_10)
+  if (key.startsWith('subject_')) {
+    const subjectId = key.replace('subject_', '');
+    const subjectName = subjectNames[subjectId];
+    return subjectName || `Subject ${subjectId}`;
+  }
+  
+  return labelMap[key] || key.toUpperCase();
+};
+
+// Dynamic data structure - will be populated from database
+const DEFAULT_TRAITS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
+
+const DEFAULT_COLS = [
   { key: "m",        label: "M" },
   { key: "f",        label: "F" },
   { key: "gmrc",     label: "GMRC (15 - 25 points)" },
@@ -87,6 +124,35 @@ function ForApprovalData() {
   const [submissionLoading, setSubmissionLoading] = useState(true);
   const [submissionError, setSubmissionError] = useState(null);
   const [currentSubmissionId, setCurrentSubmissionId] = useState(SUBMISSION_ID);
+  
+  // Dynamic data structure from database
+  const [TRAITS, setTRAITS] = useState(DEFAULT_TRAITS);
+  const [COLS, setCOLS] = useState(DEFAULT_COLS);
+  const [subjectNames, setSubjectNames] = useState({});
+
+
+  // Function to fetch subject names
+  const fetchSubjectNames = async (subjectIds) => {
+    if (!subjectIds || subjectIds.length === 0) return;
+    
+    try {
+      const response = await fetch(`${API_BASE}/subjects`, {
+        credentials: "include"
+      });
+      
+      if (response.ok) {
+        const subjects = await response.json();
+        const subjectMap = {};
+        subjects.forEach(subject => {
+          subjectMap[subject.subject_id] = subject.subject_name;
+        });
+        setSubjectNames(subjectMap);
+        console.log('Subject names fetched:', subjectMap);
+      }
+    } catch (error) {
+      console.error('Error fetching subject names:', error);
+    }
+  };
 
   useEffect(() => {
     Modal.setAppElement("#root");
@@ -187,7 +253,48 @@ function ForApprovalData() {
         console.log('Submission data fetched successfully:', data);
         console.log('Fields data:', data.fields);
         console.log('Activity data:', data.fields?.activity);
+        console.log('Subject ID:', data.fields?.subject_id);
+        console.log('Subject Name:', data.fields?.subject_name);
         setSubmissionData(data);
+        
+        // Extract dynamic data structure from database
+        if (data.fields && data.fields.rows && Array.isArray(data.fields.rows)) {
+          // Extract traits from the actual data
+          const actualTraits = data.fields.rows.map(row => row.trait).filter(Boolean);
+          if (actualTraits.length > 0) {
+            setTRAITS(actualTraits);
+            console.log('Dynamic traits extracted from database:', actualTraits);
+          }
+          
+          // Extract columns from the first row
+          if (data.fields.rows.length > 0) {
+            const firstRow = data.fields.rows[0];
+            const actualCols = Object.keys(firstRow)
+              .filter(key => key !== 'trait')
+              .map(key => {
+                const cleanKey = sanitizeKey(key);
+                return {
+                  key: cleanKey,
+                  originalKey: key,
+                  label: getColumnLabel(cleanKey, subjectNames)
+                };
+              });
+            if (actualCols.length > 0) {
+              setCOLS(actualCols);
+              console.log('Dynamic columns extracted from database:', actualCols);
+            }
+            
+            // Extract subject IDs and fetch subject names
+            const subjectIds = Object.keys(firstRow)
+              .filter(key => key.startsWith('subject_'))
+              .map(key => key.replace('subject_', ''));
+            
+            if (subjectIds.length > 0) {
+              console.log('Found subject IDs:', subjectIds);
+              fetchSubjectNames(subjectIds);
+            }
+          }
+        }
 
       } catch (error) {
         console.error("Error fetching submission data:", error);
@@ -200,7 +307,7 @@ function ForApprovalData() {
     fetchSubmissionData();
   }, [currentSubmissionId]);
 
-  // table state
+  // table state - initialize with dynamic structure
   const [data, setData] = useState(() =>
     Object.fromEntries(
       TRAITS.map((t) => [t, Object.fromEntries(COLS.map((c) => [c.key, ""]))])
@@ -211,6 +318,30 @@ function ForApprovalData() {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+
+  // Reinitialize data when dynamic structure changes
+  useEffect(() => {
+    if (TRAITS.length > 0 && COLS.length > 0) {
+      const newData = Object.fromEntries(
+        TRAITS.map((t) => [t, Object.fromEntries(COLS.map((c) => [c.key, ""]))])
+      );
+      setData(newData);
+      console.log('Data structure reinitialized with dynamic values:', { TRAITS, COLS });
+      console.log('New data structure:', newData);
+    }
+  }, [TRAITS, COLS]);
+
+  // Update column labels when subject names are fetched
+  useEffect(() => {
+    if (Object.keys(subjectNames).length > 0 && COLS.length > 0) {
+      const updatedCols = COLS.map(col => ({
+        ...col,
+        label: getColumnLabel(col.key, subjectNames)
+      }));
+      setCOLS(updatedCols);
+      console.log('Updated columns with subject names:', updatedCols);
+    }
+  }, [subjectNames]);
 
   const [status, setStatus] = useState(null);
   const locked = LOCK_STATUSES.has(Number(status));
@@ -231,13 +362,16 @@ function ForApprovalData() {
 
   const totals = COLS.reduce((acc, c) => {
     acc[c.key] = TRAITS.reduce(
-      (sum, t) => sum + (Number(data[t][c.key]) || 0),
+      (sum, t) => {
+        const value = data[t]?.[c.key];
+        return sum + (Number(value) || 0);
+      },
       0
     );
     return acc;
   }, {});
 
-  const toRows = (obj) => TRAITS.map((trait) => ({ trait, ...obj[trait] }));
+  const toRows = (obj) => TRAITS.map((trait) => ({ trait, ...(obj[trait] || {}) }));
 
   const canSubmit = !!SUBMISSION_ID && !saving;
 
@@ -269,18 +403,25 @@ function ForApprovalData() {
         if (Array.isArray(rows)) {
           if (touchedRef.current) return;
 
+          // Create data structure based on actual database structure
           const next = Object.fromEntries(
             TRAITS.map((t) => [
               t,
               Object.fromEntries(COLS.map((c) => [c.key, ""])),
             ])
           );
+          
+          // Populate with actual data from database
           rows.forEach((r) => {
             if (!r?.trait || !next[r.trait]) return;
             COLS.forEach((c) => {
-              next[r.trait][c.key] = (r[c.key] ?? "").toString();
+              next[r.trait][c.key] = (r[c.originalKey] ?? "").toString();
             });
           });
+          
+          console.log('Populating data with database values:', next);
+          console.log('Data structure after population:', Object.keys(next));
+          console.log('First trait data:', next[TRAITS[0]]);
           setData(next);
         }
       } catch {
@@ -297,7 +438,7 @@ function ForApprovalData() {
     const header = ["Trait", ...COLS.map((c) => c.label)];
     const rows = TRAITS.map((trait) => [
       trait,
-      ...COLS.map((c) => data[trait][c.key] || ""),
+      ...COLS.map((c) => data[trait]?.[c.key] || ""),
     ]);
     const totalRow = ["Total", ...COLS.map((c) => totals[c.key])];
 
@@ -831,6 +972,7 @@ function ForApprovalData() {
     }
   };
 
+
   const renderSubmissionContent = (submission) => {
     const fields = submission.fields || {};
     
@@ -852,20 +994,20 @@ function ForApprovalData() {
       <div className="accomplishment-report-display">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <h4>Activity Completion Report</h4>
-                <button 
+          <button
             onClick={() => exportToWord({ fields })}
-                  style={{ 
+            style={{
               backgroundColor: '#28a745',
-                    color: 'white', 
-                    border: 'none', 
+              color: 'white',
+              border: 'none',
               padding: '8px 16px',
-                    borderRadius: '4px', 
+              borderRadius: '4px',
               cursor: 'pointer',
               fontSize: '14px'
-                  }}
-                >
+            }}
+          >
             Export to Word
-                </button>
+          </button>
         </div>
         <div className="form-display">
           <div className="form-row">
@@ -936,16 +1078,9 @@ function ForApprovalData() {
 
   const renderLAEMPLReport = (fields) => {
     const rows = fields.rows || [];
-    const traits = ["Masipag", "Matulungin", "Masunurin", "Magalang", "Matapat", "Matiyaga"];
-    const cols = [
-      { key: "m", label: "M" },
-      { key: "f", label: "F" },
-      { key: "gmrc", label: "GMRC (15 - 25 points)" },
-      { key: "math", label: "Mathematics (15 - 25 points)" },
-      { key: "lang", label: "Language (15 - 25 points)" },
-      { key: "read", label: "Reading and Literacy (15 - 25 points)" },
-      { key: "makabasa", label: "MAKABASA (15 - 25 points)" },
-    ];
+    // Use dynamic data structure from state
+    const traits = TRAITS;
+    const cols = COLS;
 
     return (
       <div className="laempl-report-display">
@@ -1055,7 +1190,25 @@ function ForApprovalData() {
         <Sidebar activeLink="For Approval" />
         <div className="dashboard-content">
           <div className="dashboard-main">
-            <h2>Submitted Report Details</h2>
+            <div className="page-header">
+              <button 
+                onClick={() => window.history.back()} 
+                className="back-button"
+                style={{
+                  backgroundColor: '#3b82f6',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  marginBottom: '20px'
+                }}
+              >
+                ← Back
+              </button>
+              <h2>Submitted Report Details</h2>
+            </div>
             
             <div className="submission-details">
               <div className="detail-row">
@@ -1076,11 +1229,22 @@ function ForApprovalData() {
                 <label>Submitted By:</label>
                 <span>{submissionData.submitted_by_name || submissionData.submitted_by || 'Unknown'}</span>
               </div>
+              {submissionData.fields?.subject_name && (
+                <div className="detail-row">
+                  <label>Subject:</label>
+                  <span>{submissionData.fields.subject_name}</span>
+                </div>
+              )}
+              {submissionData.fields?.subject_id && !submissionData.fields?.subject_name && (
+                <div className="detail-row">
+                  <label>Subject ID:</label>
+                  <span>{submissionData.fields.subject_id}</span>
+                </div>
+              )}
             </div>
             
             {submissionData.fields && (
               <div className="submission-content">
-                <h3>Content</h3>
                 <div className="content-section">
                   {renderSubmissionContent(submissionData)}
                 </div>
@@ -1119,9 +1283,6 @@ function ForApprovalData() {
           </div>
         </div>
 
-            <div className="action-buttons">
-              <button onClick={() => window.history.back()}>Go Back</button>
-          </div>
           </div>
         </div>
       </div>

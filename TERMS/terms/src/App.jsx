@@ -1,5 +1,5 @@
 import './App.css'
-import { Routes, Route, useNavigate } from 'react-router-dom'
+import { Routes, Route, useNavigate, Navigate } from 'react-router-dom'
 import depedLogo from './assets/deped-logo.png'
 import EyeIcon from './assets/eye.svg'
 import EyeOffIcon from './assets/eye-close.svg'
@@ -7,6 +7,7 @@ import UserIcon from './assets/user.svg'
 import PasswordIcon from './assets/password.svg'
 import React, { useState } from 'react'
 import ToastProvider from './components/ToastProvider'
+import ProtectedRoute from './components/ProtectedRoute'
 
 // Dashboard components
 import DashboardTeacher from './pages/Teacher/DashboardTeacher.jsx'  
@@ -49,34 +50,46 @@ function App() {
       <ToastProvider />
       <Routes>
           <Route path="/" element={<Login />} />
-          <Route path="/DashboardTeacher" element={<DashboardTeacher />} />
-          <Route path="/DashboardCoordinator" element={<DashboardCoordinator />} />
-          <Route path="/ViewReports" element={<ViewReports />} />
-          <Route path="/ClassificationOfGrades" element={<ClassificationOfGrades />} />
-          <Route path="/ClassificationOfGradesReport" element={<ClassificationOfGradesReport />} />
-          <Route path="/AccomplishmentReport" element={<AccomplishmentReport />} />
-          <Route path="/SetReport" element={<SetReport />} />
-          <Route path="/Accomplishment" element={<Accomplishment />} />
-          <Route path="/LAEMPL" element={<LAEMPL />} />
-          <Route path="/LAEMPLReport" element={<LAEMPLReport />} />
-          <Route path="/MPS" element={<MPS />} />
-          <Route path="/LAEMPLInstruction" element={<LAEMPLInstruction />} />
-          <Route path="/MPSInstruction" element={<MPSInstruction />} />
-          <Route path="/AccomplishmentReportInstruction" element={<AccomplishmentReportInstruction />} />
-          <Route path="/ClassificationOfGradesInstruction" element={<ClassificationOfGradesInstruction />} />
-          <Route path="/DashboardPrincipal" element={<DashboardPrincipal />} />
-          <Route path="/ViewSubmission" element={<ViewSubmission />} />
-          <Route path="/SubmittedReport" element={<SubmittedReport />} />
-          <Route path="/AssignedReport" element={<AssignedReport />} />
-          <Route path="/ForApproval" element={<ForApproval />} />
-          <Route path="/AssignedReportData/:submissionId" element={<AssignedReportData />} />
-          <Route path="/SubmissionData" element={<SubmissionData />} />
-          <Route path="/ForApprovalData" element={<ForApprovalData />} />
-          <Route path="/ViewSubmissionData" element={<ViewSubmissionData />} />
-          <Route path="/submission/:submissionId" element={<ViewSubmissionTeacher />} />
-          <Route path="/UserManagement" element={<UserManagement />} />
-          <Route path="/AssignUser" element={<AssignUser />} />
-          <Route path="/AddSchool" element={<AddSchoolPage />} />
+          <Route path="/login" element={<Login />} />
+          
+          {/* Teacher Routes */}
+          <Route path="/DashboardTeacher" element={<ProtectedRoute requiredRoles={['teacher']}><DashboardTeacher /></ProtectedRoute>} />
+          <Route path="/ClassificationOfGrades" element={<ProtectedRoute requiredRoles={['teacher']}><ClassificationOfGrades /></ProtectedRoute>} />
+          <Route path="/ClassificationOfGradesReport" element={<ProtectedRoute requiredRoles={['teacher']}><ClassificationOfGradesReport /></ProtectedRoute>} />
+          <Route path="/AccomplishmentReport" element={<ProtectedRoute requiredRoles={['teacher']}><AccomplishmentReport /></ProtectedRoute>} />
+          <Route path="/Accomplishment" element={<ProtectedRoute requiredRoles={['teacher']}><Accomplishment /></ProtectedRoute>} />
+          <Route path="/LAEMPL" element={<ProtectedRoute requiredRoles={['teacher']}><LAEMPL /></ProtectedRoute>} />
+          <Route path="/LAEMPLReport" element={<ProtectedRoute requiredRoles={['teacher']}><LAEMPLReport /></ProtectedRoute>} />
+          <Route path="/MPS" element={<ProtectedRoute requiredRoles={['teacher']}><MPS /></ProtectedRoute>} />
+          <Route path="/LAEMPLInstruction" element={<ProtectedRoute requiredRoles={['teacher']}><LAEMPLInstruction /></ProtectedRoute>} />
+          <Route path="/MPSInstruction" element={<ProtectedRoute requiredRoles={['teacher']}><MPSInstruction /></ProtectedRoute>} />
+          <Route path="/AccomplishmentReportInstruction" element={<ProtectedRoute requiredRoles={['teacher']}><AccomplishmentReportInstruction /></ProtectedRoute>} />
+          <Route path="/ClassificationOfGradesInstruction" element={<ProtectedRoute requiredRoles={['teacher']}><ClassificationOfGradesInstruction /></ProtectedRoute>} />
+          <Route path="/SubmittedReport" element={<ProtectedRoute requiredRoles={['teacher']}><SubmittedReport /></ProtectedRoute>} />
+          <Route path="/submission/:submissionId" element={<ProtectedRoute requiredRoles={['teacher']}><ViewSubmissionTeacher /></ProtectedRoute>} />
+          
+          {/* Coordinator Routes */}
+          <Route path="/DashboardCoordinator" element={<ProtectedRoute requiredRoles={['coordinator', 'principal', 'admin']}><DashboardCoordinator /></ProtectedRoute>} />
+          <Route path="/ViewReports" element={<ProtectedRoute requiredRoles={['coordinator', 'principal', 'admin']}><ViewReports /></ProtectedRoute>} />
+          <Route path="/SetReport" element={<ProtectedRoute requiredRoles={['coordinator', 'principal', 'admin']}><SetReport /></ProtectedRoute>} />
+          <Route path="/AssignedReport" element={<ProtectedRoute requiredRoles={['coordinator', 'principal', 'admin']}><AssignedReport /></ProtectedRoute>} />
+          <Route path="/AssignedReportData/:submissionId" element={<ProtectedRoute requiredRoles={['coordinator', 'principal', 'admin']}><AssignedReportData /></ProtectedRoute>} />
+          
+          {/* Principal Routes */}
+          <Route path="/DashboardPrincipal" element={<ProtectedRoute requiredRoles={['principal', 'admin']}><DashboardPrincipal /></ProtectedRoute>} />
+          <Route path="/ViewSubmission" element={<ProtectedRoute requiredRoles={['principal', 'admin']}><ViewSubmission /></ProtectedRoute>} />
+          <Route path="/ForApproval" element={<ProtectedRoute requiredRoles={['principal', 'admin']}><ForApproval /></ProtectedRoute>} />
+          <Route path="/SubmissionData" element={<ProtectedRoute requiredRoles={['principal', 'admin']}><SubmissionData /></ProtectedRoute>} />
+          <Route path="/ForApprovalData" element={<ProtectedRoute requiredRoles={['principal', 'admin']}><ForApprovalData /></ProtectedRoute>} />
+          <Route path="/ViewSubmissionData" element={<ProtectedRoute requiredRoles={['principal', 'admin']}><ViewSubmissionData /></ProtectedRoute>} />
+          
+          {/* Admin Routes */}
+          <Route path="/UserManagement" element={<ProtectedRoute requiredRoles={['admin']}><UserManagement /></ProtectedRoute>} />
+          <Route path="/AssignUser" element={<ProtectedRoute requiredRoles={['admin']}><AssignUser /></ProtectedRoute>} />
+          <Route path="/AddSchool" element={<ProtectedRoute requiredRoles={['admin']}><AddSchoolPage /></ProtectedRoute>} />
+          
+          {/* Catch-all route - redirect to login */}
+          <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </main>
   )

@@ -34,6 +34,42 @@ const parseFields = (raw) => {
   }
 };
 
+// Helper function to sanitize keys from database (e.g., "English (15 - 25 points)" -> "english")
+const sanitizeKey = (rawKey) => {
+  // Remove "(XX - YY points)" part and convert to snake_case
+  let cleanKey = rawKey.replace(/\s*\(\d+\s*-\s*\d+\s*points\)/g, '').trim();
+  cleanKey = cleanKey.toLowerCase().replace(/\s/g, '_');
+  return cleanKey;
+};
+
+// Helper function to get column labels
+const getColumnLabel = (key, subjectNames = {}) => {
+  const labelMap = {
+    'm': 'M',
+    'f': 'F',
+    'gmrc': 'GMRC (15 - 25 points)',
+    'math': 'Mathematics (15 - 25 points)',
+    'lang': 'Language (15 - 25 points)',
+    'read': 'Reading and Literacy (15 - 25 points)',
+    'makabasa': 'MAKABASA (15 - 25 points)',
+    'english': 'English (15 - 25 points)',
+    'araling_panlipunan': 'Araling Panlipunan (15 - 25 points)',
+    'total_score': 'Total Score',
+    'hs': 'HS',
+    'ls': 'LS',
+    'total_items': 'Total no. of Items'
+  };
+  
+  // Handle subject IDs (e.g., subject_8, subject_10)
+  if (key.startsWith('subject_')) {
+    const subjectId = key.replace('subject_', '');
+    const subjectName = subjectNames[subjectId];
+    return subjectName || `Subject ${subjectId}`;
+  }
+  
+  return labelMap[key] || key.toUpperCase();
+};
+
 /* ---------- export to word ---------- */
 const exportToWord = async (submissionData) => {
   if (!submissionData || !submissionData.fields) {
@@ -265,6 +301,7 @@ const exportToWord = async (submissionData) => {
   }
 };
 
+
 function ViewSubmission() {
   const { submissionId } = useParams();
   const navigate = useNavigate();
@@ -273,6 +310,31 @@ function ViewSubmission() {
   const [submission, setSubmission] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [subjectNames, setSubjectNames] = useState({});
+  
+
+  // Function to fetch subject names
+  const fetchSubjectNames = async (subjectIds) => {
+    if (!subjectIds || subjectIds.length === 0) return;
+    
+    try {
+      const response = await fetch(`${API_BASE}/subjects`, {
+        credentials: "include"
+      });
+      
+      if (response.ok) {
+        const subjects = await response.json();
+        const subjectMap = {};
+        subjects.forEach(subject => {
+          subjectMap[subject.subject_id] = subject.subject_name;
+        });
+        setSubjectNames(subjectMap);
+        console.log('Subject names fetched:', subjectMap);
+      }
+    } catch (error) {
+      console.error('Error fetching subject names:', error);
+    }
+  };
 
   const role = (user?.role || "").toLowerCase();
   const isTeacher = role === "teacher";
@@ -305,6 +367,21 @@ function ViewSubmission() {
         }
         const data = await res.json();
         setSubmission(data);
+        
+        // Extract subject IDs and fetch subject names if this is a LAEMPL report
+        if (data.fields && data.fields.rows && Array.isArray(data.fields.rows)) {
+          const firstRow = data.fields.rows[0];
+          if (firstRow) {
+            const subjectIds = Object.keys(firstRow)
+              .filter(key => key.startsWith('subject_'))
+              .map(key => key.replace('subject_', ''));
+            
+            if (subjectIds.length > 0) {
+              console.log('Found subject IDs:', subjectIds);
+              fetchSubjectNames(subjectIds);
+            }
+          }
+        }
       } catch (err) {
         setError("Error loading submission");
         console.error("Error fetching submission:", err);
@@ -334,78 +411,21 @@ function ViewSubmission() {
        ...answersRaw,
        images: normalizeImages(answersRaw.images),
      };
+     
+     // Get the title from the submission data
+     const submissionTitle = submission?.value || submission?.title || answers.activityName || "";
 
      return (
        <div className="accomplishment-report-display" id="content-card">
-         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+         <div style={{ marginBottom: '20px' }}>
            <h4>Activity Completion Report</h4>
-           <button 
-             onClick={() => exportToWord({ fields })}
-             style={{
-               backgroundColor: '#28a745',
-               color: 'white',
-               border: 'none',
-               padding: '8px 16px',
-               borderRadius: '4px',
-               cursor: 'pointer',
-               fontSize: '14px'
-             }}
-           >
-             Export to Word
-           </button>
          </div>
 
         <div className="form-display">
+          {/* Simplified format - only Title, Picture/s, and Narrative */}
           <div className="form-row">
-            <label>Program/Activity Title:</label>
-            <div className="readonly-field">{answers.activityName || ""}</div>
-          </div>
-
-          <div className="form-row">
-            <label>Facilitator/s:</label>
-            <div className="readonly-field">{answers.facilitators || ""}</div>
-          </div>
-
-          <div className="form-row">
-            <label>Objectives:</label>
-            <div className="readonly-field">{answers.objectives || ""}</div>
-          </div>
-
-          {/* Program/Activity Design Section */}
-          <div className="activity-design-section">
-            <div className="form-row">
-              <label>Date:</label>
-              <div className="readonly-field">{answers.date || ""}</div>
-            </div>
-            <div className="form-row">
-              <label>Time:</label>
-              <div className="readonly-field">{answers.time || ""}</div>
-            </div>
-            <div className="form-row">
-              <label>Venue:</label>
-              <div className="readonly-field">{answers.venue || ""}</div>
-            </div>
-            <div className="form-row">
-              <label>Key Results:</label>
-              <div className="readonly-field">{answers.keyResult || ""}</div>
-            </div>
-          </div>
-
-          <div className="form-row">
-            <label>Person/s Involved:</label>
-            <div className="readonly-field">{answers.personsInvolved || ""}</div>
-          </div>
-
-          <div className="form-row">
-            <label>Expenses:</label>
-            <div className="readonly-field">{answers.expenses || ""}</div>
-          </div>
-
-          <div className="form-row">
-            <label>Lesson Learned/Recommendation:</label>
-            <div className="readonly-field narrative-content">
-              {answers.lessonLearned || ""}
-            </div>
+            <label>Title:</label>
+            <div className="readonly-field">{submissionTitle}</div>
           </div>
 
           {answers.images?.length > 0 && (
@@ -434,16 +454,19 @@ function ViewSubmission() {
 
   const renderLAEMPLReport = (fields) => {
     const rows = fields.rows || [];
-    const traits = ["Masipag", "Matulungin", "Masunurin", "Magalang", "Matapat", "Matiyaga"];
-    const cols = [
-      { key: "m", label: "M" },
-      { key: "f", label: "F" },
-      { key: "gmrc", label: "GMRC (15 - 25 points)" },
-      { key: "math", label: "Mathematics (15 - 25 points)" },
-      { key: "lang", label: "Language (15 - 25 points)" },
-      { key: "read", label: "Reading and Literacy (15 - 25 points)" },
-      { key: "makabasa", label: "MAKABASA (15 - 25 points)" },
-    ];
+    
+    // Extract dynamic traits and columns from the actual data
+    const traits = rows.map(row => row.trait).filter(Boolean);
+    const cols = rows.length > 0 ? Object.keys(rows[0])
+      .filter(key => key !== 'trait')
+      .map(key => {
+        const cleanKey = sanitizeKey(key);
+        return {
+          key: cleanKey,
+          originalKey: key,
+          label: getColumnLabel(cleanKey, subjectNames)
+        };
+      }) : [];
 
     return (
       <div className="laempl-report-display">
@@ -466,7 +489,7 @@ function ViewSubmission() {
                     <td className="trait-cell">{trait}</td>
                     {cols.map((col) => (
                       <td key={col.key} className="data-cell">
-                        {rowData[col.key] || ""}
+                        {rowData[col.originalKey] || ""}
                       </td>
                     ))}
                   </tr>
@@ -560,7 +583,25 @@ function ViewSubmission() {
         )}
         <div className="dashboard-content">
           <div className="dashboard-main">
-            <h2>Submission Details</h2>
+            <div className="page-header">
+              <button 
+                onClick={() => navigate(-1)} 
+                className="back-button"
+                style={{
+                  backgroundColor: '#3b82f6',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  marginBottom: '20px'
+                }}
+              >
+                ← Back
+              </button>
+              <h2>Submission Details</h2>
+            </div>
             <div className="submission-details">
               <div className="detail-row">
                 <label>Title:</label>
@@ -584,19 +625,17 @@ function ViewSubmission() {
 
             {submission.fields && (
               <div className="submission-content">
-                <h3>Content</h3>
                 <div className="content-section">{renderSubmissionContent(submission)}</div>
               </div>
             )}
 
-            <div className="action-buttons">
-              <button onClick={() => navigate(-1)}>Go Back</button>
-              {isTeacher && submission.status < 2 && (
+            {isTeacher && submission.status < 2 && (
+              <div className="action-buttons">
                 <button onClick={() => navigate(`/AccomplishmentReport/${submissionId}`)}>
                   Edit Submission
                 </button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

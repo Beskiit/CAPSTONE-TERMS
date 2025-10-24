@@ -604,8 +604,15 @@ export const submitToPrincipal = (req, res) => {
     }
 
     // Check if submission is at least completed by teacher (status 2)
+    // For LAEMPL reports, allow coordinator to submit consolidated reports even if individual teacher status < 2
     if (currentStatus < 2) {
-      return res.status(400).send('Submission must be completed by teacher before coordinator can submit to principal.');
+      // Check if this is a LAEMPL report by looking at the fields
+      const fields = submission.fields ? JSON.parse(submission.fields) : {};
+      if (fields.type !== 'LAEMPL') {
+        return res.status(400).send('Submission must be completed by teacher before coordinator can submit to principal.');
+      }
+      // Allow LAEMPL coordinator submission for consolidated reports
+      console.log('LAEMPL coordinator submission - allowing override for consolidated report');
     }
 
     // Update submission status to "Completed" (status 2) - ready for principal review
@@ -784,6 +791,66 @@ export const getApprovedSubmissionsByPrincipal = (req, res) => {
     LEFT JOIN school_year sy ON sy.year_id = ra.year
     LEFT JOIN quarter_period qp ON qp.quarter_period_id = ra.quarter
     WHERE s.status = 3 
+      AND ra.given_by = ?
+    ORDER BY s.date_submitted DESC
+  `;
+
+  db.query(sql, [principalId], (err, results) => {
+    if (err) return res.status(500).send('Database error: ' + err);
+    
+    // Parse fields for each submission
+    const submissions = results.map(row => {
+      const out = { ...row };
+      try { 
+        out.fields = typeof out.fields === 'string' ? JSON.parse(out.fields) : out.fields; 
+      } catch {
+        out.fields = {};
+      }
+      return out;
+    });
+    
+    res.json(submissions);
+  });
+};
+
+/**
+ * GET /submissions/rejected-by-principal
+ * Returns submissions that were assigned BY the current principal and have been rejected (status 4)
+ */
+export const getRejectedSubmissionsByPrincipal = (req, res) => {
+  const principalId = req.user?.user_id;
+  
+  if (!principalId) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  const sql = `
+    SELECT 
+      s.submission_id,
+      s.category_id,
+      s.submitted_by,
+      s.status,
+      s.number_of_submission,
+      s.value as title,
+      DATE_FORMAT(s.date_submitted, '%Y-%m-%d %H:%i:%s') AS date_submitted,
+      s.fields,
+      ud.name as submitted_by_name,
+      ud.role as submitted_by_role,
+      c.category_name,
+      ra.title as assignment_title,
+      ra.to_date as due_date,
+      ra.given_by as assigned_by_principal,
+      ra.year as assignment_year,
+      ra.quarter as assignment_quarter,
+      sy.school_year,
+      qp.quarter AS quarter_name
+    FROM submission s
+    LEFT JOIN user_details ud ON s.submitted_by = ud.user_id
+    LEFT JOIN category c ON s.category_id = c.category_id
+    LEFT JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
+    LEFT JOIN school_year sy ON sy.year_id = ra.year
+    LEFT JOIN quarter_period qp ON qp.quarter_period_id = ra.quarter
+    WHERE s.status = 4 
       AND ra.given_by = ?
     ORDER BY s.date_submitted DESC
   `;

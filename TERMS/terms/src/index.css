@@ -1,8 +1,8 @@
-/* Import Aleo font directly in CSS as backup */
-@import url('https://fonts.googleapis.com/css2?family=Aleo:ital,wght@0,300;0,400;0,700;1,300;1,400;1,700&display=swap');
+/* Import Lato font directly in CSS as backup */
+@import url('https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,300;0,400;0,700;0,900;1,300;1,400;1,700&display=swap');
 
 :root {
-  font-family: 'Aleo', system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: 'Lato', system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
@@ -22,12 +22,12 @@ html, body {
     height: 100%;
     width: 100%;
     overflow-y: auto;
-    font-family: 'Aleo', system-ui, Avenir, Helvetica, Arial, sans-serif;
+    font-family: 'Lato', system-ui, Avenir, Helvetica, Arial, sans-serif;
 }
 
 /* Apply Aleo font to all elements */
 * {
-    font-family: 'Aleo', system-ui, Avenir, Helvetica, Arial, sans-serif;
+    font-family: 'Lato', system-ui, Avenir, Helvetica, Arial, sans-serif;
 }
 
 /* Ensure font is applied to all text elements */

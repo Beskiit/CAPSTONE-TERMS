@@ -179,6 +179,27 @@
   font-weight: 500;
 }
 
+/* Ensure no action buttons in Add School table */
+.read-only-row {
+  cursor: default !important;
+}
+
+.read-only-row:hover {
+  background-color: #f8f9fa !important;
+  box-shadow: none !important;
+}
+
+.read-only-row td {
+  pointer-events: none;
+}
+
+/* Hide any potential action buttons */
+.schools-list-table .edit-btn,
+.schools-list-table .delete-btn,
+.schools-list-table .action-btn {
+  display: none !important;
+}
+
 .loading {
   text-align: center;
   color: #666;
@@ -201,7 +222,7 @@
   .report-table thead th {
     text-align: left;
     padding: 8px 12px;
-    font-weight: bold;
+    font-weight: 600;
     color: #555;
     border-bottom: 2px solid #ddd;
   }

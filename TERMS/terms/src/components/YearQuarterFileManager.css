@@ -85,7 +85,7 @@
 
 .quarter-label {
   font-size: 18px;
-  font-weight: bold;
+  font-weight: 600;
   margin-bottom: 5px;
 }
 
@@ -188,7 +188,7 @@
   content: "→";
   float: right;
   color: #1a73e8;
-  font-weight: bold;
+  font-weight: 600;
   font-size: 16px;
   opacity: 0.6;
   transition: opacity 0.3s ease;

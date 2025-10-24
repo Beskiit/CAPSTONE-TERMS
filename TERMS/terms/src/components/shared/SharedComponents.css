@@ -4,7 +4,7 @@ body{
   margin: 0;
   padding: 0;
   min-height: 100vh;
-  font-family: 'Aleo', system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: 'Lato', system-ui, Avenir, Helvetica, Arial, sans-serif;
 }
 
 /* Header Styles */
@@ -103,6 +103,23 @@ ul > li {
 .sidebar-menu-logout {
   margin-top: auto;
   padding-bottom: 2rem;
+}
+
+.sidebar-menu-logout button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin-top: 2.5rem;
+  padding: 0.75rem 1rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.sidebar-menu-logout button:hover {
+  background-color: #163D75;
 }
 
 /* Dropdown container */

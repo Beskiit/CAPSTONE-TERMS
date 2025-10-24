@@ -66,18 +66,6 @@ function AccomplishmentReportInstruction() {
                             + Prepare Report</button>
                     </div>
                 </div>
-                <div className="dashboard-sidebar">
-                    <div className="report-card">
-                        <h3 className="report-card-header">{title || "Report"}</h3>
-                        <p className="report-card-text">Start Date: {fromDate || "—"}</p>
-                        <p className="report-card-text">Due Date: {toDate || "—"}</p>
-                    </div>
-                    <div className="report-card">
-                        <h3 className="report-card-header">Submission</h3>
-                        <p className="report-card-text">Submissions: {attempts ?? "—"}</p>
-                        <p className="report-card-text">Allow late submissions: {Number(allowLate) ? "Yes" : "No"}</p>
-                    </div>
-                </div>
             </div> 
         </>
     )

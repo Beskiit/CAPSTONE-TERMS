@@ -27,7 +27,7 @@ body{
 .dashboard-container {
   display: flex;
   margin-top: 2.5rem;
-  height: 88vh;
+  height: calc(100vh - 2.5rem);
   width: 100vw;
   color: black;
   position: fixed;
@@ -41,19 +41,22 @@ body{
 .dashboard-card{
   background-color: white;
   border-radius: 8px;
-  padding: 1.5rem;
-  margin: 1rem;
+  padding: 1rem;
+  margin: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
+  flex: 1;
+  text-align: center;
 }
 
 .dashboard-cards{
   display: flex;
-  gap: 7rem;
+  gap: 1rem;
   flex-direction: row;
   padding: 1rem;
-  height: 195px;
+  height: 150px;
   width: 100%;
 }
 
@@ -71,23 +74,26 @@ body{
   display: flex;
   flex-direction: row;
   justify-content: space-between;
+  align-items: stretch;
 }
 
 .submitted-reports{
   padding: 1rem 1.5rem 1rem 1.5rem;
   background-color: white;
   border-radius: 1.5rem;
-  min-height: 200px;
-  max-height: 400px;
+  height: 650px;
+  min-height: 650px;
+  max-height: 650px;
+  margin-top: 0.5rem;
 }
 
 .approved-reports{
   padding: 1rem 1.5rem 1rem 1.5rem;
   background-color: white;
   border-radius: 1.5rem;
-  min-height: 150px;
-  max-height: 300px;
-  margin-top: 1rem;
+  min-height: 500px;
+  max-height: 500px;
+  margin-top: 0.5rem;
 }
 
 .reports-list {
@@ -130,9 +136,10 @@ body{
   flex-direction: row;
   justify-content: space-between;
   border-radius: 1rem;
-  padding: 0 .5rem 0 .5rem;
+  padding: 1rem;
   background-color: #FF8686;
-  margin-top: 0.25rem;
+  flex-shrink: 0;
+  min-height: 60px;
 }
 
 .deadline-details{
@@ -141,7 +148,7 @@ body{
 
 .deadline-title{
   font-size: 13px;
-  font-weight: bold;
+  font-weight: 600;
 }
 
 .deadline-component{
@@ -149,8 +156,36 @@ body{
   padding: 1rem;
   background-color: white;
   border-radius: .5rem;
-  max-height: 300px;
+  height: 500px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.deadline-list {
+  flex: 1;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.deadline-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.deadline-list::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.deadline-list::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.deadline-list::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
 }
 
 /* Custom scrollbar for deadline component */
@@ -187,7 +222,7 @@ body{
   background-color: #dc2626;
   color: white;
   font-size: 10px;
-  font-weight: bold;
+  font-weight: 600;
   padding: 2px 6px;
   border-radius: 4px;
   margin-left: 8px;
@@ -229,7 +264,7 @@ body{
 .react-calendar__month-view__weekdays {
   background: #f0f4fa;
   color: #1E56A0;
-  font-weight: bold;
+  font-weight: 600;
 }
 
 .react-calendar__tile {
@@ -245,13 +280,13 @@ body{
 }
 
 .react-calendar__tile--now {
-  background: #FF8686;
+  background: #1E56A0;
   color: #fff;
 }
 
 /* Deadline styling */
 .react-calendar__tile--deadline {
-  font-weight: bold !important;
+  font-weight: 600 !important;
   background: #fff3cd !important;
   border: 2px solid #ffc107 !important;
   color: #856404 !important;
@@ -267,17 +302,18 @@ body{
   right: 2px;
   color: #dc3545;
   font-size: 8px;
-  font-weight: bold;
+  font-weight: 600;
 }
 
 /* === Compact list containers (override) === */
 
 /* Let the cards size to content instead of being tall boxes */
-.submitted-reports,
-.approved-reports {
-  min-height: 0;          /* override previous min-height */
-  max-height: none;       /* let content + list decide */
-  padding: 0.75rem 1rem;  /* slightly tighter padding */
+
+.submitted-reports {
+  height: 670px;
+  min-height: 670px;
+  max-height: 670px;
+  padding: 0.75rem 1rem; /* slightly tighter padding */
 }
 
 /* Make only the list area short + scrollable */
@@ -352,4 +388,76 @@ body{
 
 .filter-dropdown:hover {
   border-color: #adb5bd;
+}
+
+/* Responsive Design for Smaller Screens */
+@media (max-width: 1600px) {
+  .dashboard-cards {
+    gap: 2rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  
+  .dashboard-card {
+    flex: 1;
+    min-width: 200px;
+    max-width: 250px;
+  }
+}
+
+@media (max-width: 1200px) {
+  .dashboard-cards {
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+  
+  .dashboard-card {
+    flex: 1;
+    min-width: 180px;
+    max-width: 220px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .dashboard-cards {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+    height: auto;
+  }
+  
+  .dashboard-card {
+    min-width: auto;
+    max-width: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .dashboard-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    height: auto;
+  }
+  
+  .dashboard-card {
+    width: 100%;
+    max-width: none;
+  }
+  
+  .dashboard-container {
+    height: auto;
+    min-height: 100vh;
+  }
+  
+  .submitted-reports-container {
+    flex-direction: column;
+    gap: 1rem;
+  }
+  
+  .submitted-reports,
+  .approved-reports {
+    width: 100%;
+  }
 }

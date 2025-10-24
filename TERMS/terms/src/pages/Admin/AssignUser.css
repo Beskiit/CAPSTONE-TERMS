@@ -7,7 +7,7 @@
   .report-table thead th {
     text-align: left;
     padding: 8px 12px;
-    font-weight: bold;
+    font-weight: 600;
     color: #555;
     border-bottom: 2px solid #ddd;
   }

@@ -32,9 +32,12 @@ function AssignedReportData() {
 
     // Confirmation Modal
     const [showSubmitModal, setShowSubmitModal] = useState(false);
+    
+    // Export format state
 
     const role = (user?.role || "").toLowerCase();
     const isCoordinator = role === "coordinator";
+
 
     useEffect(() => {
         const fetchUser = async () => {
@@ -498,6 +501,7 @@ function AssignedReportData() {
         }
     };
 
+
     const renderSubmissionContent = (submission) => {
         const fields = submission.fields || {};
         
@@ -513,88 +517,135 @@ function AssignedReportData() {
     };
 
     const renderAccomplishmentReport = (fields) => {
+        // Debug: Log the fields structure
+        console.log('🔍 [DEBUG] Fields structure:', fields);
+        
         const answers = fields._answers || {};
+        
+        // Debug: Log the answers structure
+        console.log('🔍 [DEBUG] Answers structure:', answers);
+        console.log('🔍 [DEBUG] Activity name:', answers.activityName);
+        console.log('🔍 [DEBUG] Narrative:', answers.narrative);
+        console.log('🔍 [DEBUG] Images:', answers.images);
+        
+        // Try different possible field names for title
+        const title = answers.activityName || answers.title || answers.activity_title || answers.program_title || '';
+        
+        // Try different possible field names for narrative
+        const narrative = answers.narrative || answers.description || answers.summary || '';
+        
+        // Handle images - check different possible structures
+        let images = [];
+        
+        // Check multiple possible image field names and structures
+        const possibleImageFields = ['images', 'pictures', 'photos', 'attachments', 'files'];
+        const possibleImagePaths = [
+            answers.images,
+            answers.pictures, 
+            answers.photos,
+            answers.attachments,
+            answers.files,
+            // Also check if images are in a nested structure
+            answers._images,
+            answers._pictures,
+            answers._photos
+        ];
+        
+        console.log('🔍 [DEBUG] Checking for images in answers:', answers);
+        console.log('🔍 [DEBUG] Possible image paths:', possibleImagePaths);
+        
+        for (const imageField of possibleImagePaths) {
+            if (imageField && Array.isArray(imageField) && imageField.length > 0) {
+                console.log('🔍 [DEBUG] Found images in field:', imageField);
+                images = imageField;
+                break;
+            }
+        }
+        
+        // If no images found in answers, check the main fields object
+        if (images.length === 0) {
+            console.log('🔍 [DEBUG] No images in answers, checking main fields object');
+            console.log('🔍 [DEBUG] Main fields object:', fields);
+            
+            for (const fieldName of possibleImageFields) {
+                if (fields[fieldName] && Array.isArray(fields[fieldName]) && fields[fieldName].length > 0) {
+                    console.log('🔍 [DEBUG] Found images in main fields:', fieldName, fields[fieldName]);
+                    images = fields[fieldName];
+                    break;
+                }
+            }
+        }
+        
+        console.log('🔍 [DEBUG] Final title:', title);
+        console.log('🔍 [DEBUG] Final narrative:', narrative);
+        console.log('🔍 [DEBUG] Final images:', images);
         
         return (
             <div className="accomplishment-report-display">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                     <h4>Activity Completion Report</h4>
-                    <button 
-                        onClick={() => exportToWord({ fields })}
-                        style={{
-                            backgroundColor: '#28a745',
-                            color: 'white',
-                            border: 'none',
-                            padding: '8px 16px',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            fontSize: '14px'
-                        }}
-                    >
-                        Export to Word
-                    </button>
                 </div>
                 <div className="form-display">
+                    {/* Simplified format - only Title, Picture/s, and Narrative */}
                     <div className="form-row">
-                        <label>Program/Activity Title:</label>
-                        <div className="readonly-field">{answers.activityName || ''}</div>
-                    </div>
-                    <div className="form-row">
-                        <label>Facilitator/s:</label>
-                        <div className="readonly-field">{answers.facilitators || ''}</div>
-                    </div>
-                    <div className="form-row">
-                        <label>Objectives:</label>
-                        <div className="readonly-field">{answers.objectives || ''}</div>
+                        <label>Title:</label>
+                        <div className="readonly-field">{title || 'No title provided'}</div>
                     </div>
                     
-                    {/* Program/Activity Design Section */}
-                    <div className="activity-design-section">
-                        <div className="form-row">
-                            <label>Date:</label>
-                            <div className="readonly-field">{answers.date || ''}</div>
-                        </div>
-                        <div className="form-row">
-                            <label>Time:</label>
-                            <div className="readonly-field">{answers.time || ''}</div>
-                        </div>
-                        <div className="form-row">
-                            <label>Venue:</label>
-                            <div className="readonly-field">{answers.venue || ''}</div>
-                        </div>
-                        <div className="form-row">
-                            <label>Key Results:</label>
-                            <div className="readonly-field">{answers.keyResult || ''}</div>
-                        </div>
-                    </div>
-                    
-                    <div className="form-row">
-                        <label>Person/s Involved:</label>
-                        <div className="readonly-field">{answers.personsInvolved || ''}</div>
-                    </div>
-                    <div className="form-row">
-                        <label>Expenses:</label>
-                        <div className="readonly-field">{answers.expenses || ''}</div>
-                    </div>
-                    <div className="form-row">
-                        <label>Lesson Learned/Recommendation:</label>
-                        <div className="readonly-field narrative-content">{answers.lessonLearned || ''}</div>
-                    </div>
-                    {answers.images && answers.images.length > 0 && (
+                    {images && images.length > 0 && (
                         <div className="form-row">
                             <label>Picture/s:</label>
                             <div className="image-gallery">
-                                {answers.images.map((img, index) => (
-                                    <div key={index} className="image-item">
-                                        <img src={img.url || img} alt={`Activity image ${index + 1}`} />
-                                    </div>
-                                ))}
+                                {images.map((img, index) => {
+                                    // Handle different image formats and construct proper URLs
+                                    let imageUrl = '';
+                                    
+                                    if (typeof img === 'string') {
+                                        // If it's a string, it might be a filename or full URL
+                                        if (img.startsWith('http') || img.startsWith('blob:')) {
+                                            imageUrl = img;
+                                        } else {
+                                            // Construct full URL for filename
+                                            imageUrl = `${API_BASE}/uploads/accomplishments/${img}`;
+                                        }
+                                    } else if (typeof img === 'object' && img !== null) {
+                                        // Handle object format
+                                        const rawUrl = img.url || img.src || img.path || img.filename;
+                                        if (rawUrl) {
+                                            if (rawUrl.startsWith('http') || rawUrl.startsWith('blob:')) {
+                                                imageUrl = rawUrl;
+                                            } else {
+                                                imageUrl = `${API_BASE}/uploads/accomplishments/${rawUrl}`;
+                                            }
+                                        }
+                                    }
+                                    
+                                    console.log('🖼️ [DEBUG] Processing image:', { img, imageUrl, index });
+                                    
+                                    return (
+                                        <div key={index} className="image-item">
+                                            <img 
+                                                src={imageUrl} 
+                                                alt={`Activity image ${index + 1}`}
+                                                style={{ maxWidth: '200px', maxHeight: '200px', objectFit: 'cover' }}
+                                                onError={(e) => {
+                                                    console.error('❌ [DEBUG] Image failed to load:', imageUrl, e);
+                                                    e.target.style.display = 'none';
+                                                }}
+                                                onLoad={() => {
+                                                    console.log('✅ [DEBUG] Image loaded successfully:', imageUrl);
+                                                }}
+                                            />
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
                     )}
+                    
                     <div className="form-row">
                         <label>Narrative:</label>
-                        <div className="readonly-field narrative-content">{answers.narrative || ''}</div>
+                        <div className="readonly-field narrative-content">{narrative || 'No narrative provided'}</div>
                     </div>
                 </div>
             </div>
@@ -804,7 +855,25 @@ function AssignedReportData() {
                 )}
                 <div className="dashboard-content">
                     <div className="dashboard-main">
-                        <h2>Submitted Report Details</h2>
+                        <div className="page-header">
+                            <button 
+                                onClick={() => navigate(-1)} 
+                                className="back-button"
+                                style={{
+                                    backgroundColor: '#3b82f6',
+                                    color: 'white',
+                                    border: 'none',
+                                    padding: '8px 16px',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    fontSize: '14px',
+                                    marginBottom: '20px'
+                                }}
+                            >
+                                ← Back
+                            </button>
+                            <h2>Submitted Report Details</h2>
+                        </div>
                         
                         {/* Assignment Navigation */}
                         {assignmentInfo && (
@@ -858,7 +927,6 @@ function AssignedReportData() {
                         
                         {submission.fields && (
                             <div className="submission-content">
-                                <h3>Content</h3>
                                 <div className="content-section">
                                     {renderSubmissionContent(submission)}
                                 </div>
@@ -894,9 +962,6 @@ function AssignedReportData() {
                             </div>
                         )}
                         
-                        <div className="action-buttons">
-                            <button onClick={() => navigate(-1)}>Go Back</button>
-                        </div>
                     </div>
                 </div>
             </div> 

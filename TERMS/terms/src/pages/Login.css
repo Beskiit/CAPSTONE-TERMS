@@ -16,38 +16,43 @@ body {
 
 .main-content-card {
   display: flex;
-  max-width: 1280px;          /* wider card */
-  min-height: 560px;          /* a bit taller for balance */
-  border: 1px solid #e5e7eb;  /* light gray border (#e5e7eb ≈ Tailwind gray-200) */
-  border-radius: 12px;        /* smooth rounded corners */
+  width: 900px;              /* exact width for two 450px panels */
+  height: 650px;             /* exact height as specified */
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
   background: #fff;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08); /* optional soft shadow */
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
 }
 
 
 .left-panel {
-  /* old */
-  /* flex: 1 1 58%; */
-  flex: 0 0 66%;              /* take ~2/3 of the card */
-  min-height: 560px;
-  width: 600px;
+  flex: 0 0 450px;           /* exact width */
+  height: 650px;             /* exact height */
+  width: 450px;
+  background: #EEF5FF;
+  display: block;            /* changed to block to remove flex spacing */
+  position: relative;        /* for image positioning */
+  overflow: hidden;          /* ensure image stays within bounds */
 }
 
 .TermsImage {
   object-fit: cover;
-  object-position: left center; /* show more of the graphic text side */
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .right-panel {
-  /* old */
-  /* flex: 1 1 42%; */
-  flex: 0 0 34%;              /* remaining ~1/3 for the form */
-  width: 300px;
+  flex: 0 0 450px;           /* exact width */
+  height: 650px;             /* exact height */
+  width: 450px;
   align-items: center;
   padding: 3rem 2rem;
   display: flex;
   flex-direction: column;
   justify-content: center;
+  background: white;
 }
 
 

@@ -1,3 +1,40 @@
+/* Dashboard Container Height Constraints */
+.dashboard-container {
+  display: flex;
+  margin-top: 2.5rem;
+  height: calc(100vh - 2.5rem);
+  width: 100vw;
+  color: black;
+  position: fixed;
+}
+
+.dashboard-content {
+  padding-left: 1rem;
+  width: 100%;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+  max-height: calc(100vh - 2.5rem);
+  padding-bottom: 2rem;
+}
+
+.dashboard-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.dashboard-content::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 10px;
+}
+
+.dashboard-content::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 10px;
+}
+
+.dashboard-content::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
 .report-table {
   width: 100%;
   border-collapse: separate;
@@ -7,7 +44,7 @@
 .report-table thead th {
   text-align: left;
   padding: 8px 12px;
-  font-weight: bold;
+  font-weight: 600;
   color: #555;
   border-bottom: 2px solid #ddd;
 }

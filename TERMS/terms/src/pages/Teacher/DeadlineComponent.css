@@ -1,21 +1,27 @@
 /* ===== Upcoming Deadlines box ===== */
 .deadline-component {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 .deadline-box {
   display: flex;
   flex-direction: column;
-  gap: 8px; /* space between list and the footer button */
+  flex: 1;
+  overflow: hidden;
 }
 
 /* The list is ALWAYS scrollable within a fixed-height container */
 .deadline-list {
-  max-height: 360px;      /* tweak to fit ~3 of your cards */
+  flex: 1;
   overflow-y: auto;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
   padding-right: 6px;     /* room for scrollbar so content doesn't jump */
+  max-height: 400px;     /* force scrollbar when content exceeds this height */
 }
 
 /* Each deadline card */
@@ -26,6 +32,8 @@
   outline: 1px solid rgba(255,255,255,0.08);
   cursor: pointer;
   text-decoration: none;
+  flex-shrink: 0;
+  min-height: 60px;
 }
 
 .deadline-item:focus {

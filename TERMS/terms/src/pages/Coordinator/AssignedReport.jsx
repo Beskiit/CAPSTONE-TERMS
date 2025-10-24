@@ -4,27 +4,29 @@ import "./AssignedReport.css";
 import "../../components/shared/StatusBadges.css";
 import SidebarPrincipal from "../../components/shared/SidebarPrincipal";
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import Header from "../../components/shared/Header";
 import YearQuarterFileManager from "../../components/YearQuarterFileManager";
 import QuarterEnumService from "../../services/quarterEnumService";
-import QuarterSelector from "../../components/QuarterSelector";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
 
 function AssignedReport() {
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
 
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
     const [assignedReports, setAssignedReports] = useState([]);
     const [loadingReports, setLoadingReports] = useState(true);
     const [groupedReports, setGroupedReports] = useState([]);
+    const [filteredGroupedReports, setFilteredGroupedReports] = useState([]);
     const [viewMode, setViewMode] = useState('list'); // 'list' or 'year-quarter'
     
     // Dropdown states
-    const [selectedSchoolYear, setSelectedSchoolYear] = useState(2025);
-    const [selectedQuarter, setSelectedQuarter] = useState(1);
+    const [selectedSchoolYear, setSelectedSchoolYear] = useState('');
+    const [selectedQuarter, setSelectedQuarter] = useState('');
+    const [selectedCategory, setSelectedCategory] = useState('');
     const [schoolYears, setSchoolYears] = useState([{ value: 2025, label: '2025-2026' }]);
     const [quarters, setQuarters] = useState([
         { value: 1, label: '1st Quarter' },
@@ -32,6 +34,7 @@ function AssignedReport() {
         { value: 3, label: '3rd Quarter' },
         { value: 4, label: '4th Quarter' }
     ]);
+    const [categories, setCategories] = useState([]);
 
     const role = (user?.role || "").toLowerCase();
     const isCoordinator = role === "coordinator";
@@ -53,8 +56,20 @@ function AssignedReport() {
         fetchUser();
     }, []);
 
-    // Fetch school years
+    // Handle URL parameters and fetch school years
     useEffect(() => {
+        const yearParam = searchParams.get('year');
+        const quarterParam = searchParams.get('quarter');
+        
+        console.log('URL parameters:', { yearParam, quarterParam });
+        
+        // No default values from URL parameters
+        
+        // Debug: Log current state values
+        console.log('Current state:', { selectedSchoolYear, selectedQuarter });
+        console.log('Available school years:', schoolYears);
+
+        // Then fetch school years
         const fetchSchoolYears = async () => {
             try {
                 const res = await fetch(`${API_BASE}/admin/school-years`, {
@@ -62,35 +77,46 @@ function AssignedReport() {
                 });
                 if (res.ok) {
                     const data = await res.json();
-                    // Format years properly
-                    const formattedYears = data.map(year => ({
-                        value: year.year_id,
-                        label: year.school_year
-                    }));
-                    setSchoolYears(formattedYears);
+                    console.log('🔍 [DEBUG] School years data:', data);
+                    setSchoolYears(data); // Use raw data like submitted reports
                     
-                    // Set default to the first year if available
-                    if (formattedYears.length > 0 && !selectedSchoolYear) {
-                        setSelectedSchoolYear(formattedYears[0].value);
-                    }
+                    // No default year selection
                 } else {
-                    // If API fails, set default school year
-                    setSchoolYears([{ value: 1, label: '2025-2026' }]);
-                    if (!selectedSchoolYear) {
-                        setSelectedSchoolYear(1);
-                    }
+                    console.error("Failed to fetch school years");
+                    setSchoolYears([]);
                 }
             } catch (err) {
                 console.error("Failed to fetch school years:", err);
-                // Set a default school year if API fails
-                setSchoolYears([{ value: 1, label: '2025-2026' }]);
-                if (!selectedSchoolYear) {
-                    setSelectedSchoolYear(1);
-                }
+                setSchoolYears([]);
             }
         };
+        
+        const fetchCategories = async () => {
+            try {
+                const res = await fetch(`${API_BASE}/categories`, {
+                    credentials: "include"
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    setCategories(data); // Use raw data like submitted reports
+                } else {
+                    console.error("Failed to fetch categories");
+                    setCategories([]);
+                }
+            } catch (err) {
+                console.error("Failed to fetch categories:", err);
+                setCategories([]);
+            }
+        };
+        
         fetchSchoolYears();
-    }, []);
+        fetchCategories();
+    }, [searchParams]);
+
+    // Debug: Monitor state changes
+    useEffect(() => {
+        console.log('State changed - selectedSchoolYear:', selectedSchoolYear, 'selectedQuarter:', selectedQuarter, 'selectedCategory:', selectedCategory);
+    }, [selectedSchoolYear, selectedQuarter, selectedCategory]);
 
     // Set quarters using quarter enum service when year changes
     useEffect(() => {
@@ -100,10 +126,7 @@ function AssignedReport() {
                     const formattedQuarters = await QuarterEnumService.getFormattedQuarters();
                     setQuarters(formattedQuarters);
                     
-                    // Set default to the first quarter if not already selected
-                    if (!selectedQuarter) {
-                        setSelectedQuarter(1);
-                    }
+                    // No default quarter selection
                 } catch (error) {
                     console.error('Error fetching quarters:', error);
                     // Fallback to static quarters
@@ -115,9 +138,7 @@ function AssignedReport() {
                     ];
                     setQuarters(staticQuarters);
                     
-                    if (!selectedQuarter) {
-                        setSelectedQuarter(1);
-                    }
+                    // No default quarter selection
                 }
             };
             
@@ -129,12 +150,12 @@ function AssignedReport() {
     // Fetch assigned reports grouped by assignment
     useEffect(() => {
         const fetchGroupedReports = async () => {
-            if (!user?.user_id || !selectedSchoolYear || !selectedQuarter) return;
+            if (!user?.user_id) return;
             
             try {
                 setLoadingReports(true);
                 
-                // Fetch all report assignments created by this user using existing endpoint
+                // Fetch ALL report assignments (no server-side filtering)
                 const assignmentsRes = await fetch(`${API_BASE}/reports/assigned_by/${user.user_id}`, {
                     credentials: "include"
                 });
@@ -146,21 +167,11 @@ function AssignedReport() {
                 }
                 
                 const allReports = await assignmentsRes.json();
+                console.log('🔍 [DEBUG] All reports fetched from API:', allReports);
+                console.log('🔍 [DEBUG] Reports count:', allReports.length);
                 
-                // Filter reports by selected year and quarter
-                const filteredReports = allReports.filter(report => {
-                    // Check if the report matches the selected year and quarter
-                    // Handle both year_id format (1) and actual year format (2025)
-                    const reportYear = report.year;
-                    const selectedYear = parseInt(selectedSchoolYear);
-                    
-                    // If report year is 1, it means it's using year_id format
-                    // If report year is 2025, it means it's using actual year format
-                    const yearMatches = (reportYear === selectedYear) || 
-                                      (reportYear === 1 && selectedYear === 2025);
-                    
-                    return yearMatches && report.quarter === parseInt(selectedQuarter);
-                });
+                // Use all reports for client-side filtering
+                const filteredReports = allReports;
                 
                 // Group reports by assignment_id and calculate submission counts
                 const assignmentMap = new Map();
@@ -177,7 +188,7 @@ function AssignedReport() {
                             sub_category_name: report.sub_category_name,
                             due_date: report.due_date,
                             to_date: report.to_date,
-                            created_at: report.created_at,
+                            from_date: report.from_date,
                             year: report.year,
                             quarter: report.quarter,
                             totalAssigned: 0,
@@ -205,7 +216,7 @@ function AssignedReport() {
                     sub_category_name: assignment.sub_category_name,
                     due_date: assignment.due_date,
                     to_date: assignment.to_date,
-                    created_at: assignment.created_at,
+                    from_date: assignment.from_date,
                     year: assignment.year,
                     quarter: assignment.quarter,
                     submitted: assignment.submittedCount,
@@ -214,6 +225,8 @@ function AssignedReport() {
                     first_submission_id: assignment.reports.length > 0 ? assignment.reports[0].submission_id : null
                 }));
                 
+                console.log('🔍 [DEBUG] Final grouped reports:', groupedData);
+                console.log('🔍 [DEBUG] Number of grouped reports:', groupedData.length);
                 setGroupedReports(groupedData);
             } catch (err) {
                 console.error("Error fetching grouped reports:", err);
@@ -223,10 +236,97 @@ function AssignedReport() {
             }
         };
 
-        if (user?.user_id && selectedSchoolYear && selectedQuarter) {
+        if (user?.user_id) {
             fetchGroupedReports();
         }
-    }, [user?.user_id, selectedSchoolYear, selectedQuarter]);
+    }, [user?.user_id]);
+
+    // Client-side filtering function (similar to submitted reports)
+    useEffect(() => {
+        const filterGroupedReports = () => {
+            console.log('🔍 [DEBUG] Filtering reports:', {
+                groupedReports: groupedReports.length,
+                selectedSchoolYear,
+                selectedQuarter,
+                selectedCategory,
+                schoolYears: schoolYears.length,
+                quarters: quarters.length,
+                categories: categories.length
+            });
+
+            if (!groupedReports.length) {
+                console.log('🔍 [DEBUG] No grouped reports to filter');
+                setFilteredGroupedReports([]);
+                return;
+            }
+
+            let filtered = [...groupedReports];
+            console.log('🔍 [DEBUG] Initial filtered reports:', filtered.length);
+
+            // If no filters are applied, show all reports
+            if (!selectedSchoolYear && !selectedQuarter && !selectedCategory) {
+                console.log('🔍 [DEBUG] No filters applied, showing all reports');
+                setFilteredGroupedReports(filtered);
+                return;
+            }
+
+            // Filter by school year
+            if (selectedSchoolYear) {
+                const selectedYearObj = schoolYears.find(year => year.year_id.toString() === selectedSchoolYear);
+                console.log('🔍 [DEBUG] Selected year object:', selectedYearObj);
+                if (selectedYearObj) {
+                    filtered = filtered.filter(group => {
+                        const matches = group.school_year === selectedYearObj.school_year;
+                        console.log('🔍 [DEBUG] Year filter:', {
+                            groupYear: group.school_year,
+                            selectedSchoolYear: selectedYearObj.school_year,
+                            matches
+                        });
+                        return matches;
+                    });
+                }
+            }
+
+            // Filter by quarter
+            if (selectedQuarter) {
+                const selectedQuarterObj = quarters.find(quarter => quarter.value === selectedQuarter);
+                console.log('🔍 [DEBUG] Selected quarter object:', selectedQuarterObj);
+                if (selectedQuarterObj) {
+                    filtered = filtered.filter(group => {
+                        const matches = group.quarter_name === selectedQuarterObj.label;
+                        console.log('🔍 [DEBUG] Quarter filter:', {
+                            groupQuarter: group.quarter_name,
+                            selectedLabel: selectedQuarterObj.label,
+                            matches
+                        });
+                        return matches;
+                    });
+                }
+            }
+
+            // Filter by category
+            if (selectedCategory) {
+                const selectedCategoryObj = categories.find(cat => cat.category_id.toString() === selectedCategory);
+                console.log('🔍 [DEBUG] Selected category object:', selectedCategoryObj);
+                if (selectedCategoryObj) {
+                    filtered = filtered.filter(group => {
+                        const matches = group.category_name === selectedCategoryObj.category_name;
+                        console.log('🔍 [DEBUG] Category filter:', {
+                            groupCategory: group.category_name,
+                            selectedCategoryName: selectedCategoryObj.category_name,
+                            matches
+                        });
+                        return matches;
+                    });
+                }
+            }
+
+            console.log('🔍 [DEBUG] Final filtered reports:', filtered.length);
+            setFilteredGroupedReports(filtered);
+        };
+
+        filterGroupedReports();
+    }, [groupedReports, selectedSchoolYear, selectedQuarter, selectedCategory, schoolYears, quarters, categories]);
 
     return(
         <>
@@ -253,8 +353,8 @@ function AssignedReport() {
                                 >
                                     <option value="">Select School Year</option>
                                     {schoolYears.map(year => (
-                                        <option key={year.value} value={year.value}>
-                                            {year.label}
+                                        <option key={year.year_id} value={year.year_id}>
+                                            {year.school_year}
                                         </option>
                                     ))}
                                 </select>
@@ -262,12 +362,36 @@ function AssignedReport() {
                             
                             <div className="dropdown-group">
                                 <label htmlFor="quarter-select">Quarter:</label>
-                                <QuarterSelector
+                                <select
                                     id="quarter-select"
-                                    selectedQuarter={selectedQuarter}
-                                    onQuarterChange={setSelectedQuarter}
-                                    placeholder="Select Quarter"
-                                />
+                                    value={selectedQuarter || ''}
+                                    onChange={(e) => setSelectedQuarter(e.target.value)}
+                                    className="dropdown-select"
+                                >
+                                    <option value="">All Quarters</option>
+                                    {quarters.map(quarter => (
+                                        <option key={quarter.value} value={quarter.value}>
+                                            {quarter.label}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            
+                            <div className="dropdown-group">
+                                <label htmlFor="category-select">Category:</label>
+                                <select 
+                                    id="category-select"
+                                    value={selectedCategory} 
+                                    onChange={(e) => setSelectedCategory(e.target.value)}
+                                    className="dropdown-select"
+                                >
+                                    <option value="">All Categories</option>
+                                    {categories.map(category => (
+                                        <option key={category.category_id} value={category.category_id}>
+                                            {category.category_name}
+                                        </option>
+                                    ))}
+                                </select>
                             </div>
                         </div>
                     </div>
@@ -282,29 +406,28 @@ function AssignedReport() {
                                     <table className="report-table">
                                         <thead>
                                             <tr>
-                                                <th>Report Title</th>
                                                 <th>Category</th>
-                                                <th>Grade & Section</th>
+                                                <th>Assignment Title</th>
+                                                <th>Created Date</th>
                                                 <th>Status</th>
                                                 <th>Submitted</th>
                                                 <th>Due Date</th>
-                                                <th>Created Date</th>
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {groupedReports.map((report) => (
+                                            {filteredGroupedReports.map((report) => (
                                                 <tr key={report.report_assignment_id} onClick={() => navigate(`/AssignedReportData/${report.first_submission_id}`)}>
                                                     <td className="file-cell">
-                                                        <span className="file-name">{report.assignment_title || 'Report'}</span>
+                                                        <span className="file-name">{report.category_name || 'N/A'}</span>
                                                     </td>
                                                     <td>
-                                                        <span className="category-info">
-                                                            {report.category_name} - {report.sub_category_name}
+                                                        <span className="file-name">
+                                                            {report.assignment_title || 'Report'}
                                                         </span>
                                                     </td>
                                                     <td>
-                                                        <span className="grade-section-info">
-                                                            {report.grade_level ? `Grade ${report.grade_level}` : 'N/A'} - {report.section_name || 'N/A'}
+                                                        <span className="created-date-info">
+                                                            {report.from_date || 'N/A'}
                                                         </span>
                                                     </td>
                                                     <td>
@@ -319,7 +442,6 @@ function AssignedReport() {
                                                         </span>
                                                     </td>
                                                     <td>{report.to_date || report.due_date || 'No due date'}</td>
-                                                    <td>{report.created_at ? new Date(report.created_at).toLocaleDateString() : 'N/A'}</td>
                                                 </tr>
                                             ))}
                                         </tbody>

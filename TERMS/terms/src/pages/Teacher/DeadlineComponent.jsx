@@ -1,9 +1,8 @@
-import React, { useState } from "react";
+import React from "react";
 import { useNavigate } from "react-router-dom";
 
 export default function DeadlineComponent({ deadlines = [] }) {
   const navigate = useNavigate();
-  const [expanded, setExpanded] = useState(false);
 
   // The API already filters for upcoming deadlines, so we don't need to filter again
   const filteredDeadlines = deadlines;
@@ -66,8 +65,8 @@ export default function DeadlineComponent({ deadlines = [] }) {
     return navigate("/SubmittedReport");
   };
 
-  // render top 3 by default; expand to show all but keep the box scrollable
-  const visible = expanded ? filteredDeadlines : filteredDeadlines.slice(0, 3);
+  // show all deadlines
+  const visible = filteredDeadlines;
 
   return (
     <div className="deadline-component">
@@ -125,16 +124,6 @@ export default function DeadlineComponent({ deadlines = [] }) {
           )}
         </div>
 
-        {/* Footer UNDER the box; toggles within the same container */}
-        {filteredDeadlines.length > 3 && (
-          <button
-            type="button"
-            className="see-all-footer"
-            onClick={() => setExpanded(v => !v)}
-          >
-            {expanded ? "Show less" : `See all (${filteredDeadlines.length}) →`}
-          </button>
-        )}
       </div>
     </div>
   );

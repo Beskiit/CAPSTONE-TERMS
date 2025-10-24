@@ -1389,6 +1389,9 @@ function LAEMPLReport() {
       
       setConsolidateSuccess(`Successfully consolidated data from ${selectedPeers.length} peer submissions. Subjects: ${subjectsList}`);
       
+      // Generate AI Summary after successful consolidation
+      await generateAISummary(selectedPeers, consolidatedData);
+      
     } catch (error) {
       console.error("[Consolidate] Error consolidating:", error);
       setConsolidateError(error.message || "Failed to consolidate data");
@@ -1625,12 +1628,6 @@ function LAEMPLReport() {
                     ))
                   )}
 
-                  <tr className="total-row">
-                    <th scope="row" className="row-head">Total</th>
-                    {dynamicCols.map((col) => (
-                      <td key={col.key} className="total-cell">{totals[col.key]}</td>
-                    ))}
-                  </tr>
                 </tbody>
               </table>
             </div>
@@ -1787,12 +1784,6 @@ function LAEMPLReport() {
                       </tr>
                     ))
                   )}
-                  <tr className="total-row">
-                    <th scope="row" className="row-head">Total</th>
-                    {COLS_MPS.map(col => (
-                      <td key={col.key} className="total-cell">{mpsTotals[col.key]}</td>
-                    ))}
-                  </tr>
                 </tbody>
               </table>
             </div>
@@ -1807,19 +1798,6 @@ function LAEMPLReport() {
           </div>
         </div>
 
-        <div className="dashboard-sidebar">
-          <div className="report-card">
-            <h3 className="report-card-header">This is where the name of the report go</h3>
-            <p className="report-card-text">Start Date</p>
-            <p className="report-card-text">Due Date</p>
-          </div>
-          <div className="report-card">
-            <h3 className="report-card-header">Submission</h3>
-            <p className="report-card-text">Submissions: "Number of submission"</p>
-            <p className="report-card-text">Max. Attempts: "Number of Maximum Attempts"</p>
-            <p className="report-card-text">Allow late submissions: "logiccc"</p>
-          </div>
-        </div>
       </div>
       {/* Consolidate Modal */}
       {showConsolidate && (

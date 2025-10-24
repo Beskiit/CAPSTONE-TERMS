@@ -49,10 +49,12 @@ export function ConfirmationModal({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="modal-header">
-            <div className="modal-icon">
-              {getIcon()}
+            <div className="modal-header-content">
+              <div className="modal-icon">
+                {getIcon()}
+              </div>
+              <h3 className="modal-title">{title}</h3>
             </div>
-            <h3 className="modal-title">{title}</h3>
           </div>
           
           <div className="modal-body">
