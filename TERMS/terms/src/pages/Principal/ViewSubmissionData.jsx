@@ -4,10 +4,12 @@ import Sidebar from "../../components/shared/SidebarPrincipal.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import "../Teacher/LAEMPLReport.css";
 import "./ForApprovalData.css";
+import "./ForApproval.css";
 import "../Coordinator/AssignedReport.css";
 import "../Teacher/ViewSubmission.css";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle, ImageRun } from "docx";
 import { saveAs } from "file-saver";
+import { useAuth } from "../../context/AuthContext.jsx";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
 
@@ -38,9 +40,46 @@ const getSubmissionId = () => {
 
 const SUBMISSION_ID = getSubmissionId();
 
-const TRAITS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
+// Helper function to sanitize keys from database (e.g., "English (15 - 25 points)" -> "english")
+const sanitizeKey = (rawKey) => {
+  // Remove "(XX - YY points)" part and convert to snake_case
+  let cleanKey = rawKey.replace(/\s*\(\d+\s*-\s*\d+\s*points\)/g, '').trim();
+  cleanKey = cleanKey.toLowerCase().replace(/\s/g, '_');
+  return cleanKey;
+};
 
-const COLS = [
+// Helper function to get column labels
+const getColumnLabel = (key, subjectNames = {}) => {
+  const labelMap = {
+    'm': 'M',
+    'f': 'F',
+    'gmrc': 'GMRC (15 - 25 points)',
+    'math': 'Mathematics (15 - 25 points)',
+    'lang': 'Language (15 - 25 points)',
+    'read': 'Reading and Literacy (15 - 25 points)',
+    'makabasa': 'MAKABASA (15 - 25 points)',
+    'english': 'English (15 - 25 points)',
+    'araling_panlipunan': 'Araling Panlipunan (15 - 25 points)',
+    'total_score': 'Total Score',
+    'hs': 'HS',
+    'ls': 'LS',
+    'total_items': 'Total no. of Items'
+  };
+  
+  // Handle subject IDs (e.g., subject_8, subject_10)
+  if (key.startsWith('subject_')) {
+    const subjectId = key.replace('subject_', '');
+    const subjectName = subjectNames[subjectId];
+    return subjectName || `Subject ${subjectId}`;
+  }
+  
+  return labelMap[key] || key.toUpperCase();
+};
+
+// Default traits and columns - will be replaced with dynamic data
+const DEFAULT_TRAITS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
+
+const DEFAULT_COLS = [
   { key: "m",        label: "M" },
   { key: "f",        label: "F" },
   { key: "gmrc",     label: "GMRC (15 - 25 points)" },
@@ -48,6 +87,21 @@ const COLS = [
   { key: "lang",     label: "Language (15 - 25 points)" },
   { key: "read",     label: "Reading and Literacy (15 - 25 points)" },
   { key: "makabasa", label: "MAKABASA (15 - 25 points)" },
+];
+
+const DEFAULT_COLS_MPS = [
+  { key: "m",      label: "Male" },
+  { key: "f",      label: "Female" },
+  { key: "total",  label: "Total no. of Pupils" },
+  { key: "total_score", label: "Total Score" },
+  { key: "mean",   label: "Mean" },
+  { key: "median", label: "Median" },
+  { key: "pl",     label: "PL" },
+  { key: "mps",    label: "MPS" },
+  { key: "sd",     label: "SD" },
+  { key: "target", label: "Target" },
+  { key: "hs",     label: "HS" },
+  { key: "ls",     label: "LS" },
 ];
 
 const COL_RULES = {
@@ -72,6 +126,7 @@ const clampVal = (k, v) => {
 const LOCK_STATUSES = new Set([1]); // e.g., 1=submitted
 
 function ViewSubmissionData() {
+  const { user } = useAuth();
   const [openPopup, setOpenPopup] = useState(false);
 
   // NEW: submission data state
@@ -81,8 +136,11 @@ function ViewSubmissionData() {
   const [submissionError, setSubmissionError] = useState(null);
   const [currentSubmissionId, setCurrentSubmissionId] = useState(SUBMISSION_ID);
 
-  // NEW: user state
-  const [user, setUser] = useState(null);
+  // Dynamic data structure from database
+  const [TRAITS, setTRAITS] = useState(DEFAULT_TRAITS);
+  const [COLS, setCOLS] = useState(DEFAULT_COLS);
+  const [COLS_MPS, setCOLS_MPS] = useState(DEFAULT_COLS_MPS);
+  const [subjectNames, setSubjectNames] = useState({});
   
   // Export format state
 
@@ -121,54 +179,54 @@ function ViewSubmissionData() {
         console.log(`URL Search Params: ${window.location.search}`);
         console.log(`Attempting to fetch submission with ID: ${submissionId}`);
 
-        // First try accomplishment endpoint
+        // First try submissions endpoint (includes assignment title)
         try {
-          console.log(`Trying accomplishment endpoint: ${API_BASE}/reports/accomplishment/${submissionId}`);
-          response = await fetch(`${API_BASE}/reports/accomplishment/${submissionId}`, {
+          console.log(`Trying submissions endpoint: ${API_BASE}/submissions/${submissionId}`);
+          response = await fetch(`${API_BASE}/submissions/${submissionId}`, {
             credentials: "include"
           });
-          console.log(`Accomplishment endpoint response status: ${response.status}`);
+          console.log(`Submissions endpoint response status: ${response.status}`);
           
           if (response.ok) {
             data = await response.json();
-            setSubmissionType('ACCOMPLISHMENT');
-            console.log('Successfully fetched from accomplishment endpoint');
+            console.log('Successfully fetched from submissions endpoint');
+            
+            // Determine submission type based on fields
+            const fields = data.fields || {};
+            if (fields.type === 'ACCOMPLISHMENT') {
+              setSubmissionType('ACCOMPLISHMENT');
+            } else if (fields._form || fields._answers) {
+              setSubmissionType('LAEMPL');
+            } else {
+              // Default to LAEMPL for backward compatibility
+              setSubmissionType('LAEMPL');
+            }
           } else {
-            lastError = `Accomplishment endpoint returned ${response.status}`;
+            lastError = `Submissions endpoint returned ${response.status}`;
           }
         } catch (error) {
-          console.log("Accomplishment endpoint failed:", error.message);
+          console.log("Submissions endpoint failed:", error.message);
           lastError = error.message;
         }
 
-        // If accomplishment endpoint failed, try submissions endpoint
+        // If submissions endpoint failed, try accomplishment endpoint as fallback
         if (!data) {
           try {
-            console.log(`Trying submissions endpoint: ${API_BASE}/submissions/${submissionId}`);
-            response = await fetch(`${API_BASE}/submissions/${submissionId}`, {
+            console.log(`Trying accomplishment endpoint: ${API_BASE}/reports/accomplishment/${submissionId}`);
+            response = await fetch(`${API_BASE}/reports/accomplishment/${submissionId}`, {
               credentials: "include"
             });
-            console.log(`Submissions endpoint response status: ${response.status}`);
+            console.log(`Accomplishment endpoint response status: ${response.status}`);
             
             if (response.ok) {
               data = await response.json();
-              console.log('Successfully fetched from submissions endpoint');
-              
-              // Determine submission type based on fields
-              const fields = data.fields || {};
-              if (fields.type === 'ACCOMPLISHMENT') {
-                setSubmissionType('ACCOMPLISHMENT');
-              } else if (fields._form || fields._answers) {
-                setSubmissionType('LAEMPL');
-              } else {
-                // Default to LAEMPL for backward compatibility
-                setSubmissionType('LAEMPL');
-              }
+              setSubmissionType('ACCOMPLISHMENT');
+              console.log('Successfully fetched from accomplishment endpoint');
             } else {
-              lastError = `Submissions endpoint returned ${response.status}`;
+              lastError = `Accomplishment endpoint returned ${response.status}`;
             }
           } catch (error) {
-            console.log("Submissions endpoint also failed:", error.message);
+            console.log("Accomplishment endpoint also failed:", error.message);
             lastError = error.message;
           }
         }
@@ -183,6 +241,34 @@ function ViewSubmissionData() {
         console.log('Fields data:', data.fields);
         console.log('Activity data:', data.fields?.activity);
         setSubmissionData(data);
+
+        // Extract dynamic table structure from submission data
+        const fields = data.fields || {};
+        if (fields.rows && Array.isArray(fields.rows) && fields.rows.length > 0) {
+          // Extract dynamic traits from the actual data
+          const actualTraits = fields.rows.map(row => row.trait).filter(Boolean);
+          if (actualTraits.length > 0) {
+            setTRAITS(actualTraits);
+            console.log('Dynamic traits extracted from database:', actualTraits);
+          }
+          
+          // Extract dynamic columns from the first row
+          const firstRow = fields.rows[0];
+          if (firstRow) {
+            const actualCols = Object.keys(firstRow)
+              .filter(key => key !== 'trait')
+              .map(key => ({
+                key: sanitizeKey(key),
+                originalKey: key,
+                label: getColumnLabel(sanitizeKey(key), subjectNames)
+              }));
+            
+            if (actualCols.length > 0) {
+              setCOLS(actualCols);
+              console.log('Dynamic columns extracted from database:', actualCols);
+            }
+          }
+        }
 
       } catch (error) {
         console.error("Error fetching submission data:", error);
@@ -220,6 +306,82 @@ function ViewSubmissionData() {
       case 4: return 'Rejected';
       default: return 'Unknown';
     }
+  };
+
+  // Combined export function for both LAEMPL and MPS reports
+  const exportBothReportsToCSV = (fields) => {
+    const lines = [];
+    
+    // Export LAEMPL Report
+    if (fields.rows && fields.rows.length > 0) {
+      const rows = fields.rows;
+      const traits = rows.map(row => row.trait).filter(Boolean);
+      
+      // Get dynamic columns from the first row
+      let cols = [];
+      if (rows.length > 0) {
+        const firstRow = rows[0];
+        cols = Object.keys(firstRow)
+          .filter(key => key !== 'trait')
+          .map(key => {
+            const cleanKey = key.replace(/[^a-zA-Z0-9]/g, '_');
+            return {
+              key: cleanKey,
+              originalKey: key,
+              label: getColumnLabel(cleanKey, subjectNames)
+            };
+          });
+      }
+      
+      lines.push("=== LAEMPL REPORT ===");
+      const laemplHeader = ["Trait", ...cols.map(c => c.label)];
+      const laemplRows = traits.map(trait => {
+        const rowData = rows.find(r => r.trait === trait) || {};
+        return [
+          trait,
+          ...cols.map(c => rowData[c.originalKey || c.key] || "")
+        ];
+      });
+      
+      lines.push(laemplHeader.map(x => `"${String(x).replace(/"/g, '""')}"`).join(","));
+      laemplRows.forEach(row => {
+        lines.push(row.map(x => `"${String(x).replace(/"/g, '""')}"`).join(","));
+      });
+    }
+    
+    // Export MPS Report if available
+    if (fields.mps_rows && fields.mps_rows.length > 0) {
+      lines.push(""); // Empty line separator
+      lines.push("=== MPS REPORT ===");
+      
+      const mpsRows = fields.mps_rows;
+      const mpsTraits = mpsRows.map(row => row.trait).filter(Boolean);
+      const mpsCols = COLS_MPS;
+      
+      const mpsHeader = ["Trait", ...mpsCols.map(c => c.label)];
+      const mpsCsvRows = mpsTraits.map(trait => {
+        const rowData = mpsRows.find(r => r.trait === trait) || {};
+        return [
+          trait,
+          ...mpsCols.map(c => rowData[c.key] || "")
+        ];
+      });
+      
+      lines.push(mpsHeader.map(x => `"${String(x).replace(/"/g, '""')}"`).join(","));
+      mpsCsvRows.forEach(row => {
+        lines.push(row.map(x => `"${String(x).replace(/"/g, '""')}"`).join(","));
+      });
+    }
+    
+    // Create and download the combined CSV
+    const csvContent = lines.join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Combined_Reports_${SUBMISSION_ID || 'export'}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   // Export to Word function (exact copy from ForApprovalData)
@@ -461,7 +623,17 @@ function ViewSubmissionData() {
     if (fields.type === 'ACCOMPLISHMENT' || fields._answers) {
       return renderAccomplishmentReport(fields);
     } else if (fields.rows && Array.isArray(fields.rows)) {
-      return renderLAEMPLReport(fields);
+      // For LAEMPL submissions, show both LAEMPL and MPS tables
+      return (
+        <div>
+          {renderLAEMPLReport(fields)}
+          {fields.mps_rows && Array.isArray(fields.mps_rows) && fields.mps_rows.length > 0 && (
+            <div style={{ marginTop: '2rem' }}>
+              {renderMPSReport({ rows: fields.mps_rows })}
+            </div>
+          )}
+        </div>
+      );
     } else {
       // Fallback to generic display
       return renderGenericContent(fields);
@@ -559,22 +731,70 @@ function ViewSubmissionData() {
 
   const renderLAEMPLReport = (fields) => {
     const rows = fields.rows || [];
-    const traits = ["Masipag", "Matulungin", "Masunurin", "Magalang", "Matapat", "Matiyaga"];
-    const cols = [
-      { key: "m", label: "M" },
-      { key: "f", label: "F" },
-      { key: "gmrc", label: "GMRC (15 - 25 points)" },
-      { key: "math", label: "Mathematics (15 - 25 points)" },
-      { key: "lang", label: "Language (15 - 25 points)" },
-      { key: "read", label: "Reading and Literacy (15 - 25 points)" },
-      { key: "makabasa", label: "MAKABASA (15 - 25 points)" },
-    ];
+    // Use dynamic data structure from state
+    const traits = TRAITS;
+    const cols = COLS;
 
     return (
       <div className="laempl-report-display">
-        <h4>LAEMPL Report</h4>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <h4>LAEMPL Report</h4>
+          <button 
+            onClick={() => exportBothReportsToCSV(fields)}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#007bff',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '14px'
+            }}
+          >
+            Export Both Reports
+          </button>
+        </div>
         <div className="table-container">
           <table className="laempl-table">
+            <thead>
+              <tr>
+                <th>Trait</th>
+                {cols.map(col => (
+                  <th key={col.key}>{col.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {traits.map(trait => {
+                const rowData = rows.find(r => r.trait === trait) || {};
+                return (
+                  <tr key={trait}>
+                    <td className="trait-cell">{trait}</td>
+                    {cols.map(col => (
+                      <td key={col.key} className="data-cell">
+                        {rowData[col.key] || ''}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  const renderMPSReport = (fields) => {
+    const rows = fields.rows || [];
+    const traits = TRAITS;
+    const cols = COLS_MPS;
+
+    return (
+      <div className="mps-report-display">
+        <h4>MPS Report</h4>
+        <div className="table-container">
+          <table className="mps-table">
             <thead>
               <tr>
                 <th>Trait</th>
@@ -701,7 +921,7 @@ function ViewSubmissionData() {
             <div className="submission-details">
               <div className="detail-row">
                 <label>Title:</label>
-                <span>{submissionData.value || 'Report'}</span>
+                <span>{submissionData.assignment_title || submissionData.title || submissionData.value || 'Report'}</span>
               </div>
               <div className="detail-row">
                 <label>Status:</label>

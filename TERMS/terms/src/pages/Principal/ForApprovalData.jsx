@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import Header from "../../components/shared/Header.jsx";
 import Sidebar from "../../components/shared/SidebarPrincipal.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
@@ -125,6 +126,7 @@ const clampVal = (k, v) => {
 const LOCK_STATUSES = new Set([1]); // e.g., 1=submitted
 
 function ForApprovalData() {
+  const navigate = useNavigate();
   const [openPopup, setOpenPopup] = useState(false);
 
   // NEW: reject & approve modal state
@@ -271,6 +273,8 @@ function ForApprovalData() {
         console.log('Activity data:', data.fields?.activity);
         console.log('Subject ID:', data.fields?.subject_id);
         console.log('Subject Name:', data.fields?.subject_name);
+        console.log('Rejection reason (direct):', data.rejection_reason);
+        console.log('Rejection reason (fields):', data.fields?.rejection_reason);
         setSubmissionData(data);
         
         // Extract dynamic data structure from database
@@ -718,6 +722,11 @@ function ForApprovalData() {
 
       setMsg("Submission rejected successfully.");
       setIsRejectOpen(false);
+      
+      // Redirect to dashboard after successful rejection
+      setTimeout(() => {
+        navigate('/DashboardPrincipal');
+      }, 1000); // Small delay to show success message
       setRejectReason("");
       setReasonErr("");
     } catch (error) {
@@ -770,6 +779,11 @@ function ForApprovalData() {
 
       setMsg("Submission approved successfully.");
       setIsApproveOpen(false);
+      
+      // Redirect to ViewSubmission after successful approval
+      setTimeout(() => {
+        navigate(`/ViewSubmission?id=${submissionId}`);
+      }, 1000); // Small delay to show success message
     } catch (error) {
       console.error("Error approving submission:", error);
       setErr(`Failed to approve submission: ${error.message}`);
@@ -1426,6 +1440,14 @@ function ForApprovalData() {
                 <div className="detail-row">
                   <label>Subject ID:</label>
                   <span>{submissionData.fields.subject_id}</span>
+                </div>
+              )}
+              {(submissionData.rejection_reason || submissionData.fields?.rejection_reason) && (
+                <div className="detail-row">
+                  <label>Rejection Reason:</label>
+                  <span style={{ color: '#e74c3c', fontStyle: 'italic' }}>
+                    {submissionData.rejection_reason || submissionData.fields?.rejection_reason}
+                  </span>
                 </div>
               )}
             </div>

@@ -930,6 +930,7 @@ export const patchSubmission = (req, res) => {
   }
 
   if (rejection_reason !== undefined) {
+    console.log('Adding rejection_reason to update:', rejection_reason);
     updates.push('fields = JSON_SET(COALESCE(fields, "{}"), "$.rejection_reason", ?)');
     values.push(rejection_reason);
   }
@@ -947,6 +948,9 @@ export const patchSubmission = (req, res) => {
   values.push(id);
 
   const sql = `UPDATE submission SET ${updates.join(', ')} WHERE submission_id = ?`;
+  
+  console.log('Final SQL query:', sql);
+  console.log('Final values:', values);
 
   db.query(sql, values, (err, result) => {
     if (err) return res.status(500).send('Update failed: ' + err);
