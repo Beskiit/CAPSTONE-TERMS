@@ -7,6 +7,7 @@ import { ConfirmationModal } from "../../components/ConfirmationModal";
 import toast from "react-hot-toast";
 import "./SetReport.css";
 import Laempl from "../../assets/templates/LAEMPL.png";
+import LaemplTeacher from "../../assets/templates/LAEMPLTeacher.png";
 import AccomplishmentReport from "../../assets/templates/accomplishment-report.png";
 // import MpsTemplate from "../../assets/templates/mps.png";
 
@@ -78,9 +79,25 @@ function SetReport() {
     }
     
     if (!selectedSubCategory) return "";
+    
+    // Special handling for LAEMPL & MPS based on user role
+    if (String(selectedCategory) === "2" && String(selectedSubCategory) === "3") {
+      // Check if any of the selected users are teachers
+      const allSelectedUsers = [...selectedTeachers, selectedTeacher].filter(Boolean);
+      const hasTeacherSelected = allSelectedUsers.some(userId => {
+        const user = users.find(u => u.user_id === userId);
+        return user && user.role && user.role.toLowerCase() === "teacher";
+      });
+      
+      if (hasTeacherSelected) {
+        return LaemplTeacher; // Show teacher template
+      }
+      return Laempl; // Show coordinator template
+    }
+    
     const cat = TEMPLATE_MAP[String(selectedCategory)];
     return cat ? cat[String(selectedSubCategory)] || "" : "";
-  }, [selectedCategory, selectedSubCategory]);
+  }, [selectedCategory, selectedSubCategory, selectedTeacher, selectedTeachers, users]);
 
   // Merge teachers + coordinators for principals, with grade filtering for LAEMPL & MPS
   const selectableUsers = useMemo(() => {

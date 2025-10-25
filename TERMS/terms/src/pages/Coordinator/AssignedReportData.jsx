@@ -22,21 +22,204 @@ function AssignedReportData() {
     const [submission, setSubmission] = useState(null);
     const [error, setError] = useState("");
     const [retryCount, setRetryCount] = useState(0);
-    const [submitting, setSubmitting] = useState(false);
-    const [submitMessage, setSubmitMessage] = useState("");
 
     // New states for assignment navigation
     const [allSubmissions, setAllSubmissions] = useState([]);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [assignmentInfo, setAssignmentInfo] = useState(null);
 
-    // Confirmation Modal
-    const [showSubmitModal, setShowSubmitModal] = useState(false);
+
+    // States for LAEMPL and MPS data (extracted from submission)
+    const [laemplData, setLaemplData] = useState(null);
+    const [mpsData, setMpsData] = useState(null);
+    
+    // States for consolidated view (Principal/Coordinator)
+    const [isPrincipalView, setIsPrincipalView] = useState(false);
+    const [allSections, setAllSections] = useState([]);
+    const [consolidatedData, setConsolidatedData] = useState({});
+    const [peerData, setPeerData] = useState([]);
+    const [loadingConsolidated, setLoadingConsolidated] = useState(false);
+    
+    // Subject names for dynamic column labels
+    const [subjectNames, setSubjectNames] = useState({});
+    
+    // Debug assignmentInfo changes
+    useEffect(() => {
+        console.log('AssignmentInfo updated:', assignmentInfo);
+    }, [assignmentInfo]);
+    
+    // MPS column definitions (from ForApprovalData)
+    const DEFAULT_COLS_MPS = [
+        { key: "m",      label: "Male" },
+        { key: "f",      label: "Female" },
+        { key: "total",  label: "Total no. of Pupils" },
+        { key: "total_score", label: "Total Score" },
+        { key: "mean",   label: "Mean" },
+        { key: "median", label: "Median" },
+        { key: "pl",     label: "PL" },
+        { key: "mps",    label: "MPS" },
+        { key: "sd",     label: "SD" },
+        { key: "target", label: "Target" },
+        { key: "hs",     label: "HS" },
+        { key: "ls",     label: "LS" },
+    ];
+    
+    const [COLS_MPS, setCOLS_MPS] = useState(DEFAULT_COLS_MPS);
+    
+    // Helper function to get column labels (from ForApprovalData)
+    const getColumnLabel = (key, subjectNames = {}) => {
+        const labelMap = {
+            'm': 'M',
+            'f': 'F',
+            'gmrc': 'GMRC (15 - 25 points)',
+            'math': 'Mathematics (15 - 25 points)',
+            'lang': 'Language (15 - 25 points)',
+            'read': 'Reading and Literacy (15 - 25 points)',
+            'makabasa': 'MAKABASA (15 - 25 points)',
+            'english': 'English (15 - 25 points)',
+            'araling_panlipunan': 'Araling Panlipunan (15 - 25 points)',
+            'total_score': 'Total Score',
+            'hs': 'HS',
+            'ls': 'LS',
+            'total_items': 'Total no. of Items'
+        };
+        
+        // Handle subject IDs (e.g., subject_8, subject_10)
+        if (key.startsWith('subject_')) {
+            const subjectId = key.replace('subject_', '');
+            const subjectName = subjectNames[subjectId];
+            return subjectName || `Subject ${subjectId}`;
+        }
+        
+        return labelMap[key] || key.toUpperCase();
+    };
+    
+    // Combined export function for both LAEMPL and MPS reports
+    const exportBothReportsToCSV = (fields) => {
+        const lines = [];
+        
+        // Export LAEMPL Report
+        if (fields.rows && fields.rows.length > 0) {
+            const rows = fields.rows;
+            const traits = rows.map(row => row.trait).filter(Boolean);
+            
+            // Get dynamic columns from the first row
+            let cols = [];
+            if (rows.length > 0) {
+                const firstRow = rows[0];
+                cols = Object.keys(firstRow)
+                    .filter(key => key !== 'trait')
+                    .map(key => {
+                        const cleanKey = key.replace(/[^a-zA-Z0-9]/g, '_');
+                        return {
+                            key: cleanKey,
+                            originalKey: key,
+                            label: getColumnLabel(cleanKey, subjectNames)
+                        };
+                    });
+            }
+            
+            lines.push("=== LAEMPL REPORT ===");
+            const laemplHeader = ["Trait", ...cols.map(c => c.label)];
+            const laemplRows = traits.map(trait => {
+                const rowData = rows.find(r => r.trait === trait) || {};
+                return [
+                    trait,
+                    ...cols.map(c => rowData[c.originalKey || c.key] || "")
+                ];
+            });
+            
+            lines.push(laemplHeader.map(x => `"${String(x).replace(/"/g, '""')}"`).join(","));
+            laemplRows.forEach(row => {
+                lines.push(row.map(x => `"${String(x).replace(/"/g, '""')}"`).join(","));
+            });
+        }
+        
+        // Export MPS Report if available
+        if (fields.mps_rows && fields.mps_rows.length > 0) {
+            lines.push(""); // Empty line separator
+            lines.push("=== MPS REPORT ===");
+            
+            const mpsRows = fields.mps_rows;
+            const mpsTraits = mpsRows.map(row => row.trait).filter(Boolean);
+            const mpsCols = COLS_MPS;
+            
+            const mpsHeader = ["Trait", ...mpsCols.map(c => c.label)];
+            const mpsCsvRows = mpsTraits.map(trait => {
+                const rowData = mpsRows.find(r => r.trait === trait) || {};
+                return [
+                    trait,
+                    ...mpsCols.map(c => rowData[c.key] || "")
+                ];
+            });
+            
+            lines.push(mpsHeader.map(x => `"${String(x).replace(/"/g, '""')}"`).join(","));
+            mpsCsvRows.forEach(row => {
+                lines.push(row.map(x => `"${String(x).replace(/"/g, '""')}"`).join(","));
+            });
+        }
+        
+        // Create and download the combined CSV
+        const csvContent = lines.join("\n");
+        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `Combined_Reports_${submissionId || 'export'}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    // Function to fetch assignment details from report_assignment table
+    const fetchAssignmentDetails = async (assignmentId) => {
+        if (!assignmentId) return null;
+        
+        try {
+            const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
+            const response = await fetch(`${API_BASE}/reports/${assignmentId}`, {
+                credentials: "include"
+            });
+            
+            if (response.ok) {
+                const assignmentData = await response.json();
+                console.log('Report assignment details fetched:', assignmentData);
+                return assignmentData;
+            }
+        } catch (error) {
+            console.error('Failed to fetch report assignment details:', error);
+        }
+        return null;
+    };
+
+    // Function to fetch subject names (from ForApprovalData)
+    const fetchSubjectNames = async (subjectIds) => {
+        if (!subjectIds || subjectIds.length === 0) return;
+        
+        try {
+            const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
+            const response = await fetch(`${API_BASE}/subjects`, {
+                credentials: "include"
+            });
+            
+            if (response.ok) {
+                const subjects = await response.json();
+                const subjectMap = {};
+                subjects.forEach(subject => {
+                    subjectMap[subject.subject_id] = subject.subject_name;
+                });
+                setSubjectNames(subjectMap);
+                console.log('Subject names fetched:', subjectMap);
+            }
+        } catch (error) {
+            console.error('Failed to fetch subject names:', error);
+        }
+    };
     
     // Export format state
 
     const role = (user?.role || "").toLowerCase();
     const isCoordinator = role === "coordinator";
+    const isPrincipal = role === "principal";
 
 
     useEffect(() => {
@@ -55,6 +238,133 @@ function AssignedReportData() {
         };
         fetchUser();
     }, []);
+
+    // Extract LAEMPL and MPS data from submission when it changes
+    useEffect(() => {
+        if (submission && submission.fields) {
+            const fields = submission.fields;
+            
+            // Check if this is LAEMPL data
+            if (fields.type === 'LAEMPL' || (fields.rows && fields.rows.some(row => row.gmrc !== undefined || row.math !== undefined))) {
+                setLaemplData(submission);
+                console.log('LAEMPL data extracted from submission:', submission);
+                
+                // If this is a principal view, fetch consolidated data
+                if (isPrincipal) {
+                    setIsPrincipalView(true);
+                    fetchConsolidatedData();
+                }
+            }
+            
+            // Check if this is MPS data
+            if (fields.type === 'MPS' || (fields.rows && fields.rows.some(row => row.mps !== undefined || row.mean !== undefined))) {
+                setMpsData(submission);
+                console.log('MPS data extracted from submission:', submission);
+                
+                // If this is a principal view, fetch consolidated data
+                if (isPrincipal) {
+                    setIsPrincipalView(true);
+                    fetchConsolidatedData();
+                }
+            }
+        }
+    }, [submission, isPrincipal]);
+    
+    // Update column labels when subject names are fetched
+    useEffect(() => {
+        if (Object.keys(subjectNames).length > 0) {
+            console.log('Subject names updated, refreshing column labels');
+            // This will trigger a re-render with updated subject names
+        }
+    }, [subjectNames]);
+
+    // Fetch consolidated data for principal view
+    const fetchConsolidatedData = async () => {
+        if (!submissionId || !isPrincipal) return;
+        
+        try {
+            setLoadingConsolidated(true);
+            const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
+            
+            // Fetch peer data for consolidation
+            const response = await fetch(`${API_BASE}/reports/laempl-mps/${submissionId}/peers`, {
+                credentials: "include"
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                console.log('Consolidated peer data:', data);
+                setPeerData(data);
+                
+                // Set up sections based on grade level
+                const gradeLevel = submission?.fields?.grade || 2;
+                const sections = getSectionsForGrade(gradeLevel);
+                setAllSections(sections);
+                
+                // Process consolidated data
+                const consolidated = processConsolidatedData(data, sections);
+                setConsolidatedData(consolidated);
+            }
+        } catch (err) {
+            console.error('Failed to fetch consolidated data:', err);
+        } finally {
+            setLoadingConsolidated(false);
+        }
+    };
+
+    // Get sections for a specific grade level
+    const getSectionsForGrade = (gradeLevel) => {
+        // This should match the sections in the database for the grade level
+        // For now, using hardcoded sections for Grade 2
+        if (gradeLevel === 2) {
+            return [
+                { section_name: "Gumamela", section_id: 9 },
+                { section_name: "Rosal", section_id: 10 },
+                { section_name: "Rose", section_id: 8 },
+                { section_name: "Sampaguita", section_id: 7 }
+            ];
+        }
+        // Add more grade levels as needed
+        return [
+            { section_name: "Section A", section_id: 1 },
+            { section_name: "Section B", section_id: 2 }
+        ];
+    };
+
+    // Process consolidated data from peer submissions
+    const processConsolidatedData = (peerData, sections) => {
+        const consolidated = {};
+        
+        sections.forEach(section => {
+            consolidated[section.section_name] = {};
+        });
+        
+        // Process each peer submission
+        peerData.forEach(peer => {
+            try {
+                const fields = typeof peer.fields === 'string' ? JSON.parse(peer.fields) : peer.fields;
+                const sectionName = peer.section_name || "Rosal";
+                
+                if (consolidated[sectionName]) {
+                    // Merge the data for this section
+                    if (fields.rows) {
+                        fields.rows.forEach(row => {
+                            if (row.trait) {
+                                if (!consolidated[sectionName][row.trait]) {
+                                    consolidated[sectionName][row.trait] = {};
+                                }
+                                Object.assign(consolidated[sectionName][row.trait], row);
+                            }
+                        });
+                    }
+                }
+            } catch (err) {
+                console.error('Error processing peer data:', err);
+            }
+        });
+        
+        return consolidated;
+    };
 
     useEffect(() => {
         const fetchAssignmentData = async () => {
@@ -128,8 +438,25 @@ function AssignedReportData() {
                     
                     // Always set assignment info if we have it
                     if (submissionData.report_assignment_id) {
+                        // Always fetch assignment title from report_assignment table
+                        console.log('Fetching report assignment details for ID:', submissionData.report_assignment_id);
+                        const assignmentDetails = await fetchAssignmentDetails(submissionData.report_assignment_id);
+                        console.log('Report assignment details fetched:', assignmentDetails);
+                        
+                        // Try different possible fields for the assignment title
+                        let assignmentTitle = assignmentDetails?.title || 
+                                           assignmentDetails?.assignment_title || 
+                                           assignmentDetails?.report_title ||
+                                           assignmentDetails?.name ||
+                                           submissionData.assignment_title || 
+                                           submissionData.value || 
+                                           submissionData.title || 
+                                           'Report Assignment';
+                        
+                        console.log('Final assignment title:', assignmentTitle);
+                        
                         setAssignmentInfo({
-                            assignment_title: submissionData.assignment_title || submissionData.value || 'Report Assignment',
+                            assignment_title: assignmentTitle || 'Report Assignment',
                             category_name: submissionData.category_name || 'Unknown Category',
                             sub_category_name: submissionData.sub_category_name || 'Unknown Sub-Category',
                             due_date: submissionData.due_date,
@@ -161,8 +488,25 @@ function AssignedReportData() {
                     
                     // Still set assignment info
                     if (submissionData.report_assignment_id) {
+                        // Always fetch assignment title from report_assignment table
+                        console.log('Fetching report assignment details for ID (fallback):', submissionData.report_assignment_id);
+                        const assignmentDetails = await fetchAssignmentDetails(submissionData.report_assignment_id);
+                        console.log('Report assignment details fetched (fallback):', assignmentDetails);
+                        
+                        // Try different possible fields for the assignment title
+                        let assignmentTitle = assignmentDetails?.title || 
+                                           assignmentDetails?.assignment_title || 
+                                           assignmentDetails?.report_title ||
+                                           assignmentDetails?.name ||
+                                           submissionData.assignment_title || 
+                                           submissionData.value || 
+                                           submissionData.title || 
+                                           'Report Assignment';
+                        
+                        console.log('Final assignment title (fallback):', assignmentTitle);
+                        
                         setAssignmentInfo({
-                            assignment_title: submissionData.assignment_title || submissionData.value || 'Report Assignment',
+                            assignment_title: assignmentTitle || 'Report Assignment',
                             category_name: submissionData.category_name || 'Unknown Category',
                             sub_category_name: submissionData.sub_category_name || 'Unknown Sub-Category',
                             due_date: submissionData.due_date,
@@ -508,8 +852,40 @@ function AssignedReportData() {
         // Determine submission type based on fields structure
         if (fields.type === 'ACCOMPLISHMENT' || fields._answers) {
             return renderAccomplishmentReport(fields);
+        } else if (fields.type === 'LAEMPL' && fields.rows && Array.isArray(fields.rows)) {
+            return (
+                <div>
+                    {renderLAEMPLReport(fields)}
+                    {fields.mps_rows && fields.mps_totals && (
+                        <div style={{ marginTop: '2rem' }}>
+                            {renderMPSReport({ rows: fields.mps_rows, totals: fields.mps_totals })}
+                        </div>
+                    )}
+                </div>
+            );
+        } else if (fields.type === 'MPS' && fields.rows && Array.isArray(fields.rows)) {
+            return renderMPSReport(fields);
         } else if (fields.rows && Array.isArray(fields.rows)) {
-            return renderLAEMPLReport(fields);
+            // Check if it's LAEMPL or MPS based on column structure
+            const hasLAEMPLCols = fields.rows.some(row => row.gmrc !== undefined || row.math !== undefined);
+            const hasMPSCols = fields.rows.some(row => row.mps !== undefined || row.mean !== undefined);
+            
+            if (hasLAEMPLCols) {
+                return (
+                    <div>
+                        {renderLAEMPLReport(fields)}
+                        {fields.mps_rows && fields.mps_totals && (
+                            <div style={{ marginTop: '2rem' }}>
+                                {renderMPSReport({ rows: fields.mps_rows, totals: fields.mps_totals })}
+                            </div>
+                        )}
+                    </div>
+                );
+            } else if (hasMPSCols) {
+                return renderMPSReport(fields);
+            } else {
+                return renderLAEMPLReport(fields); // Default to LAEMPL
+            }
         } else {
             // Fallback to generic display
             return renderGenericContent(fields);
@@ -654,8 +1030,13 @@ function AssignedReportData() {
 
     const renderLAEMPLReport = (fields) => {
         const rows = fields.rows || [];
-        const traits = ["Masipag", "Matulungin", "Masunurin", "Magalang", "Matapat", "Matiyaga"];
-        const cols = [
+        
+        // Extract dynamic traits and columns from the actual data (like ForApprovalData)
+        const actualTraits = rows.map(row => row.trait).filter(Boolean);
+        const traits = actualTraits.length > 0 ? actualTraits : ["Masipag", "Matulungin", "Masunurin", "Magalang", "Matapat", "Matiyaga"];
+        
+        // Extract columns from the first row
+        let cols = [
             { key: "m", label: "M" },
             { key: "f", label: "F" },
             { key: "gmrc", label: "GMRC (15 - 25 points)" },
@@ -664,39 +1045,279 @@ function AssignedReportData() {
             { key: "read", label: "Reading and Literacy (15 - 25 points)" },
             { key: "makabasa", label: "MAKABASA (15 - 25 points)" },
         ];
+        
+        if (rows.length > 0) {
+            const firstRow = rows[0];
+            const actualCols = Object.keys(firstRow)
+                .filter(key => key !== 'trait')
+                .map(key => {
+                    const cleanKey = key.replace(/[^a-zA-Z0-9]/g, '_');
+                    return {
+                        key: cleanKey,
+                        originalKey: key,
+                        label: getColumnLabel(cleanKey, subjectNames)
+                    };
+                });
+            if (actualCols.length > 0) {
+                cols = actualCols;
+            }
+            
+            // Extract subject IDs and fetch subject names
+            const subjectIds = Object.keys(firstRow)
+                .filter(key => key.startsWith('subject_'))
+                .map(key => key.replace('subject_', ''));
+            
+            if (subjectIds.length > 0) {
+                console.log('Found subject IDs:', subjectIds);
+                fetchSubjectNames(subjectIds);
+            }
+        }
 
-        return (
-            <div className="laempl-report-display">
-                <h4>LAEMPL Report</h4>
-                <div className="table-container">
-                    <table className="laempl-table">
-                        <thead>
-                            <tr>
-                                <th>Trait</th>
-                                {cols.map(col => (
-                                    <th key={col.key}>{col.label}</th>
-                                ))}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {traits.map(trait => {
-                                const rowData = rows.find(r => r.trait === trait) || {};
-                                return (
-                                    <tr key={trait}>
-                                        <td className="trait-cell">{trait}</td>
-                                        {cols.map(col => (
-                                            <td key={col.key} className="data-cell">
-                                                {rowData[col.key] || ''}
-                                            </td>
-                                        ))}
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
+        console.log('LAEMPL Report - Fields:', fields);
+        console.log('LAEMPL Report - Is Principal View:', isPrincipalView);
+        console.log('LAEMPL Report - All Sections:', allSections);
+        console.log('LAEMPL Report - Consolidated Data:', consolidatedData);
+
+        if (loadingConsolidated) {
+            return (
+                <div className="laempl-report-display">
+                    <h4>LAEMPL Report - Loading Consolidated Data...</h4>
+                    <div className="loading-message">Loading data from all sections...</div>
                 </div>
-            </div>
-        );
+            );
+        }
+
+        if (isPrincipalView) {
+            // Principal view: show the same structure as ForApprovalData (traits as rows)
+            return (
+                <div className="laempl-report-display">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                        <h4>LAEMPL Report</h4>
+                        <button 
+                            onClick={() => exportBothReportsToCSV(fields)}
+                            style={{
+                                padding: '8px 16px',
+                                backgroundColor: '#007bff',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                fontSize: '14px'
+                            }}
+                        >
+                            Export Both Reports
+                        </button>
+                    </div>
+                    <div className="table-container">
+                        <table className="laempl-table">
+                            <thead>
+                                <tr>
+                                    <th>Trait</th>
+                                    {cols.map(col => (
+                                        <th key={col.key}>{col.label}</th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {traits.map(trait => {
+                                    const rowData = rows.find(r => r.trait === trait) || {};
+                                    return (
+                                        <tr key={trait}>
+                                            <td className="trait-cell">{trait}</td>
+                                            {cols.map(col => (
+                                                <td key={col.key} className="data-cell">
+                                                    {rowData[col.originalKey || col.key] || ''}
+                                                </td>
+                                            ))}
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+        } else {
+            // Regular view: show single submission data
+            const rows = fields.rows || [];
+            console.log('LAEMPL Report - Rows:', rows);
+
+            return (
+                <div className="laempl-report-display">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                        <h4>LAEMPL Report</h4>
+                        <button 
+                            onClick={() => exportBothReportsToCSV(fields)}
+                            style={{
+                                padding: '8px 16px',
+                                backgroundColor: '#007bff',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                fontSize: '14px'
+                            }}
+                        >
+                            Export Both Reports
+                        </button>
+                    </div>
+                    <div className="table-container">
+                        <table className="laempl-table">
+                            <thead>
+                                <tr>
+                                    <th>Trait</th>
+                                    {cols.map(col => (
+                                        <th key={col.key}>{col.label}</th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {traits.map(trait => {
+                                    const rowData = rows.find(r => r.trait === trait) || {};
+                                    console.log(`Row data for ${trait}:`, rowData);
+                                    return (
+                                        <tr key={trait}>
+                                            <td className="trait-cell">{trait}</td>
+                                            {cols.map(col => (
+                                                <td key={col.key} className="data-cell">
+                                                    {rowData[col.originalKey || col.key] || ''}
+                                                </td>
+                                            ))}
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+        }
+    };
+
+    const renderMPSReport = (fields) => {
+        const rows = fields.rows || [];
+        
+        // Extract dynamic traits and columns from the actual data (like ForApprovalData)
+        const actualTraits = rows.map(row => row.trait).filter(Boolean);
+        const traits = actualTraits.length > 0 ? actualTraits : ["Masipag", "Matulungin", "Masunurin", "Magalang", "Matapat", "Matiyaga"];
+        
+        // Use the state variable for MPS columns
+        let cols = COLS_MPS;
+        
+        if (rows.length > 0) {
+            const firstRow = rows[0];
+            const actualCols = Object.keys(firstRow)
+                .filter(key => key !== 'trait')
+                .map(key => {
+                    const cleanKey = key.replace(/[^a-zA-Z0-9]/g, '_');
+                    return {
+                        key: cleanKey,
+                        originalKey: key,
+                        label: getColumnLabel(cleanKey, subjectNames)
+                    };
+                });
+            if (actualCols.length > 0) {
+                cols = actualCols;
+            }
+            
+            // Extract subject IDs and fetch subject names
+            const subjectIds = Object.keys(firstRow)
+                .filter(key => key.startsWith('subject_'))
+                .map(key => key.replace('subject_', ''));
+            
+            if (subjectIds.length > 0) {
+                console.log('Found subject IDs:', subjectIds);
+                fetchSubjectNames(subjectIds);
+            }
+        }
+
+        console.log('MPS Report - Fields:', fields);
+        console.log('MPS Report - Is Principal View:', isPrincipalView);
+        console.log('MPS Report - All Sections:', allSections);
+        console.log('MPS Report - Consolidated Data:', consolidatedData);
+
+        if (loadingConsolidated) {
+            return (
+                <div className="mps-report-display">
+                    <h4>MPS Report - Loading Consolidated Data...</h4>
+                    <div className="loading-message">Loading data from all sections...</div>
+                </div>
+            );
+        }
+
+        if (isPrincipalView) {
+            // Principal view: show the same structure as ForApprovalData (traits as rows)
+            return (
+                <div className="mps-report-display">
+                    <h4>MPS Report</h4>
+                    <div className="table-container">
+                        <table className="mps-table">
+                            <thead>
+                                <tr>
+                                    <th>Trait</th>
+                                    {cols.map(col => (
+                                        <th key={col.key}>{col.label}</th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {traits.map(trait => {
+                                    const rowData = rows.find(r => r.trait === trait) || {};
+                                    return (
+                                        <tr key={trait}>
+                                            <td className="trait-cell">{trait}</td>
+                                            {cols.map(col => (
+                                                <td key={col.key} className="data-cell">
+                                                    {rowData[col.originalKey || col.key] || ''}
+                                                </td>
+                                            ))}
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+        } else {
+            // Regular view: show single submission data
+            const rows = fields.rows || [];
+            console.log('MPS Report - Rows:', rows);
+
+            return (
+                <div className="mps-report-display">
+                    <h4>MPS Report</h4>
+                    <div className="table-container">
+                        <table className="mps-table">
+                            <thead>
+                                <tr>
+                                    <th>Trait</th>
+                                    {cols.map(col => (
+                                        <th key={col.key}>{col.label}</th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {traits.map(trait => {
+                                    const rowData = rows.find(r => r.trait === trait) || {};
+                                    console.log(`MPS Row data for ${trait}:`, rowData);
+                                    return (
+                                        <tr key={trait}>
+                                            <td className="trait-cell">{trait}</td>
+                                            {cols.map(col => (
+                                                <td key={col.key} className="data-cell">
+                                                    {rowData[col.originalKey || col.key] || ''}
+                                                </td>
+                                            ))}
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+        }
     };
 
     const renderGenericContent = (fields) => {
@@ -724,62 +1345,6 @@ function AssignedReportData() {
         );
     };
 
-    const handleSubmitToPrincipal = async () => {
-        if (!submissionId) return;
-        
-        try {
-            setSubmitting(true);
-            setSubmitMessage("");
-            
-            const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
-            
-            const response = await fetch(`${API_BASE}/submissions/${submissionId}/submit-to-principal`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                credentials: 'include',
-                body: JSON.stringify({
-                    coordinator_notes: 'Submitted by coordinator for principal approval'
-                })
-            });
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(errorText || 'Failed to submit to principal');
-            }
-
-            const result = await response.json();
-            setSubmitMessage(result.message || 'Successfully submitted to principal!');
-            toast.success(result.message || 'Successfully submitted to principal!');
-            
-            // Refresh the submission data to show updated status
-            const updatedSubmission = await fetch(`${API_BASE}/submissions/${submissionId}`, {
-                credentials: "include"
-            });
-            
-            if (updatedSubmission.ok) {
-                const updatedData = await updatedSubmission.json();
-                setSubmission(updatedData);
-            }
-            
-        } catch (err) {
-            console.error('Error submitting to principal:', err);
-            setSubmitMessage(`Error: ${err.message}`);
-            toast.error(`Error: ${err.message}`);
-        } finally {
-            setSubmitting(false);
-        }
-    };
-
-    const handleSubmitConfirmation = () => {
-        setShowSubmitModal(true);
-    };
-
-    const handleSubmitConfirm = async () => {
-        setShowSubmitModal(false);
-        await handleSubmitToPrincipal();
-    };
 
     if (loading) {
         return (
@@ -879,7 +1444,7 @@ function AssignedReportData() {
                         {assignmentInfo && (
                             <div className="assignment-navigation">
                                 <div className="assignment-info">
-                                    <h3>{assignmentInfo.assignment_title}</h3>
+                                    <h3>{submission.title || submission.value || assignmentInfo.assignment_title}</h3>
                                     <p>{assignmentInfo.category_name} - {assignmentInfo.sub_category_name}</p>
                                 </div>
                                 <div className="submission-navigation">
@@ -907,7 +1472,19 @@ function AssignedReportData() {
                         <div className="submission-details">
                             <div className="detail-row">
                                 <label>Title:</label>
-                                <span>{submission.value || 'Report'}</span>
+                                <span>{(() => {
+                                    const title = assignmentInfo?.assignment_title || submission.title || submission.value || 'Report';
+                                    console.log('Title display debug:', {
+                                        assignmentInfo: assignmentInfo,
+                                        assignmentInfo_title: assignmentInfo?.assignment_title,
+                                        submission_title: submission.title,
+                                        submission_value: submission.value,
+                                        submission_id: submission.submission_id,
+                                        report_assignment_id: submission.report_assignment_id,
+                                        final_title: title
+                                    });
+                                    return title;
+                                })()}</span>
                             </div>
                             <div className="detail-row">
                                 <label>Status:</label>
@@ -933,25 +1510,6 @@ function AssignedReportData() {
                             </div>
                         )}
                         
-                        {/* Submit to Principal Section */}
-                        {isCoordinator && submission && submission.status === 1 && (
-                            <div className="submit-section">
-                                <h3>Submit to Principal</h3>
-                                <p>This submission is ready to be submitted to the principal for approval.</p>
-                                {submitMessage && (
-                                    <div className={`message ${submitMessage.includes('Error') ? 'error' : 'success'}`}>
-                                        {submitMessage}
-                                    </div>
-                                )}
-                                <button 
-                                    onClick={handleSubmitConfirmation}
-                                    disabled={submitting}
-                                    className="submit-button"
-                                >
-                                    {submitting ? 'Submitting...' : 'Submit to Principal'}
-                                </button>
-                            </div>
-                        )}
                         
                         {/* Show status if already completed and ready for principal review */}
                         {submission && submission.status === 2 && (
@@ -966,17 +1524,6 @@ function AssignedReportData() {
                 </div>
             </div> 
 
-            {/* Confirmation Modal */}
-            <ConfirmationModal
-                isOpen={showSubmitModal}
-                onClose={() => setShowSubmitModal(false)}
-                onConfirm={handleSubmitConfirm}
-                title="Submit to Principal"
-                message="Are you sure you want to submit this report to the principal? Once submitted, the principal will review and approve or reject the submission."
-                confirmText="Submit to Principal"
-                cancelText="Cancel"
-                type="warning"
-            />
         </>
     )
 }

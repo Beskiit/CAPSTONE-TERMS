@@ -401,6 +401,12 @@ export const patchLAEMPLBySubmissionId = (req, res) => {
       meta: { ...(current.meta || {}), updatedAt: new Date().toISOString() }
     };
     
+    // Add MPS data if provided
+    if (body.mps_rows && body.mps_totals) {
+      nextFields.mps_rows = body.mps_rows;
+      nextFields.mps_totals = body.mps_totals;
+    }
+    
     // Add subject information if available from the request
     if (body.subject_id) {
       nextFields.subject_id = body.subject_id;

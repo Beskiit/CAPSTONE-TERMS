@@ -553,6 +553,9 @@ function LAEMPLReport() {
         totals: totals, // Include totals in the payload
         subject_id: submissionData?.fields?.subject_id,
         subject_name: submissionData?.fields?.subject_name,
+        // Include MPS data in the same submission
+        mps_rows: mpsToRows(),
+        mps_totals: mpsToTotals(),
       };
       
       console.log("Final payload:", payload);
@@ -647,42 +650,78 @@ function LAEMPLReport() {
     load();
   }, []);
 
-  // Export CSV
+  // Export CSV with both LAEMPL and MPS data
   const toCSV = () => {
     console.log("Exporting LAEMPL data:", { dynamicCols, data, totals });
+    console.log("Exporting MPS data:", { mpsData, mpsTotals });
     
-    const header = ["Trait", ...dynamicCols.map((c) => c.label)];
-    const rows = TRAITS.map((trait) => [
+    const lines = [];
+    
+    // LAEMPL Report section
+    lines.push("=== LAEMPL REPORT ===");
+    const laemplHeader = ["Trait", ...dynamicCols.map((c) => c.label)];
+    const laemplRows = TRAITS.map((trait) => [
       trait,
       ...dynamicCols.map((c) => data[trait]?.[c.key] || ""),
     ]);
-    const totalRow = ["Total", ...dynamicCols.map((c) => totals[c.key] || 0)];
+    const laemplTotalRow = ["Total", ...dynamicCols.map((c) => totals[c.key] || 0)];
     
-    console.log("Export data:", { header, rows, totalRow });
+    const laemplLines = [laemplHeader, ...laemplRows, laemplTotalRow]
+      .map((r) => r.map((x) => `"${String(x).replace(/"/g, '""')}"`).join(","));
+    lines.push(...laemplLines);
+    
+    // MPS Report section
+    lines.push(""); // Empty line separator
+    lines.push("=== MPS REPORT ===");
+    const mpsHeader = ["Trait", ...COLS_MPS.map(c => c.label)];
+    const mpsRows = TRAITS.map(trait => [
+      trait,
+      ...COLS_MPS.map(c => mpsData[trait][c.key] === "" ? "" : mpsData[trait][c.key])
+    ]);
+    const mpsTotalRow = ["Total", ...COLS_MPS.map(c => mpsTotals[c.key])];
+    
+    const mpsLines = [mpsHeader, ...mpsRows, mpsTotalRow]
+      .map(r => r.map(esc => {
+        const s = (esc ?? "").toString();
+        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      }).join(","));
+    lines.push(...mpsLines);
 
-    const lines = [header, ...rows, totalRow]
-      .map((r) => r.map((x) => `"${String(x).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
-
-    const blob = new Blob([lines], { type: "text/csv;charset=utf-8;" });
+    const csv = lines.join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "LAEMPL_Grade1.csv";
+    a.download = "LAEMPL_MPS_Grade1.csv";
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  // Generate blank template CSV
+  // Generate blank template CSV with both LAEMPL and MPS tables
   const handleGenerateTemplate = () => {
-    const header = ["Trait", ...dynamicCols.map((c) => c.label)];
-    const blank = TRAITS.map((trait) => [trait, ...dynamicCols.map(() => "")]);
-    const csv = [header, ...blank].map((r) => r.join(",")).join("\n");
+    const lines = [];
+    
+    // LAEMPL Report section
+    lines.push("=== LAEMPL REPORT ===");
+    const laemplHeader = ["Trait", ...dynamicCols.map((c) => c.label)];
+    const laemplBlank = TRAITS.map((trait) => [trait, ...dynamicCols.map(() => "")]);
+    lines.push(laemplHeader.join(","));
+    laemplBlank.forEach(row => lines.push(row.join(",")));
+    
+    // MPS Report section
+    lines.push(""); // Empty line separator
+    lines.push("=== MPS REPORT ===");
+    const mpsHeader = ["Trait", ...COLS_MPS.map((c) => c.label)];
+    const mpsBlank = TRAITS.map((trait) => [trait, ...COLS_MPS.map(() => "")]);
+    lines.push(mpsHeader.join(","));
+    mpsBlank.forEach(row => lines.push(row.join(",")));
+    
+    const csv = lines.join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "LAEMPL_Template.csv";
+    a.download = "LAEMPL_MPS_Template.csv";
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -1497,47 +1536,6 @@ function LAEMPLReport() {
               )}
             </div>
 
-            {/* Drop down for qtr and section */}
-            <div className="dropdown-container">
-              <div className="dropdown">
-                <button
-                  className="dropdown-btn"
-                  onClick={() => setOpen(!open)}
-                >
-                  Select Quarter {open ? "▲" : "▼"}
-                </button>
-
-                {open && (
-                  <div className="dropdown-content">
-                    <button>1st Quarter</button>
-                    <button>2nd Quarter</button>
-                    <button>3rd Quarter</button>
-                    <button>4th Quarter</button>
-                  </div>
-                )}
-              </div>
-
-              <div className="dropdown">
-                <button
-                  className="dropdown-btn"
-                  onClick={() => setOpenSec(!openSec)}
-                >
-                  Select Section {openSec ? "▲" : "▼"}
-                </button>
-
-                {openSec && (
-                  <div className="dropdown-content">
-                    <button>Masipag</button>
-                    <button>Matulungin</button>
-                    <button>Masunurin</button>
-                    <button>Magalang</button>
-                    <button>Matapat</button>
-                    <button>Matiyaga</button>
-                  </div>
-                )}
-              </div>
-            </div>
-
             {/* status messages */}
             {loading && <div className="ok-text" style={{ marginTop: 8 }}>Loading...</div>}
             {!!msg && <div className="ok-text" style={{ marginTop: 8 }}>{msg}</div>}
@@ -1648,50 +1646,6 @@ function LAEMPLReport() {
             ========================== */}
             <div className="dashboard-main" style={{ marginTop: 28 }}>
               <h2>MPS</h2>
-            </div>
-
-            <div className="buttons">
-              <button onClick={handleMpsGenerateTemplate}>Generate Template</button>
-              <button onClick={() => setMpsOpenPopup(true)} disabled={mpsDisabled}>Import File</button>
-              {mpsOpenPopup && (
-                <div className="modal-overlay">
-                  <div className="import-popup">
-                    <div className="popup-header">
-                      <h2>Import File</h2>
-                      <button className="close-button" onClick={() => setMpsOpenPopup(false)}>X</button>
-                    </div>
-                    <hr />
-                    <form className="import-form" onSubmit={(e)=>e.preventDefault()}>
-                      <label
-                        htmlFor="mpsFileInput"
-                        className="file-upload-label"
-                        onClick={(e)=>{ e.preventDefault(); mpsFileInput.current?.click(); }}
-                      >
-                        Click here to upload a file
-                      </label>
-                      <input
-                        id="mpsFileInput"
-                        type="file"
-                        accept=".csv"
-                        ref={mpsFileInput}
-                        style={{ display: "none" }}
-                        onChange={(e)=>{
-                          const f = e.target.files?.[0];
-                          if (f) {
-                            onMpsImport(f);
-                            e.target.value = "";
-                          }
-                        }}
-                      />
-                      <button type="button" onClick={()=>mpsFileInput.current?.click()}>
-                        Upload
-                      </button>
-                    </form>
-                  </div>
-                </div>
-              )}
-              <button onClick={handleMpsExport}>Export</button>
-              <button onClick={handleMpsClear}>Clear Table</button>
             </div>
 
             {/* MPS table */}

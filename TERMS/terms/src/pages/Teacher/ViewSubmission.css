@@ -152,6 +152,43 @@
   .data-cell {
     background-color: #fff;
   }
+
+  /* MPS Report Display */
+  .mps-report-display {
+    background: #fff;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 20px 0;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
+  
+  .mps-report-display h4 {
+    color: #2c3e50;
+    margin-bottom: 20px;
+    font-size: 1.3em;
+    border-bottom: 2px solid #3498db;
+    padding-bottom: 10px;
+  }
+  
+  .mps-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+  }
+  
+  .mps-table th,
+  .mps-table td {
+    border: 1px solid #dee2e6;
+    padding: 8px 12px;
+    text-align: center;
+  }
+  
+  .mps-table th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+    color: #495057;
+  }
   
   /* Generic Content Display */
   .generic-content {

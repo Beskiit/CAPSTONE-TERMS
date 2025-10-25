@@ -57,7 +57,15 @@ const getColumnLabel = (key, subjectNames = {}) => {
     'total_score': 'Total Score',
     'hs': 'HS',
     'ls': 'LS',
-    'total_items': 'Total no. of Items'
+    'total_items': 'Total no. of Items',
+    // MPS columns
+    'total': 'Total no. of Pupils',
+    'mean': 'Mean',
+    'median': 'Median',
+    'pl': 'PL',
+    'mps': 'MPS',
+    'sd': 'SD',
+    'target': 'Target'
   };
   
   // Handle subject IDs (e.g., subject_8, subject_10)
@@ -311,7 +319,40 @@ function ViewSubmission() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [subjectNames, setSubjectNames] = useState({});
+  const [assignmentDetails, setAssignmentDetails] = useState(null);
+  const [COLS_MPS, setCOLS_MPS] = useState([
+    { key: "m",      label: "Male" },
+    { key: "f",      label: "Female" },
+    { key: "total",  label: "Total no. of Pupils" },
+    { key: "total_score", label: "Total Score" },
+    { key: "mean",   label: "Mean" },
+    { key: "median", label: "Median" },
+    { key: "pl",     label: "PL" },
+    { key: "mps",    label: "MPS" },
+    { key: "sd",     label: "SD" },
+    { key: "target", label: "Target" },
+    { key: "hs",     label: "HS" },
+    { key: "ls",     label: "LS" },
+  ]);
   
+
+  // Function to fetch assignment details
+  const fetchAssignmentDetails = async (assignmentId) => {
+    if (!assignmentId) return null;
+    try {
+      const response = await fetch(`${API_BASE}/reports/${assignmentId}`, {
+        credentials: "include"
+      });
+      if (response.ok) {
+        const assignmentData = await response.json();
+        console.log('Assignment details fetched:', assignmentData);
+        return assignmentData;
+      }
+    } catch (error) {
+      console.error('Failed to fetch assignment details:', error);
+    }
+    return null;
+  };
 
   // Function to fetch subject names
   const fetchSubjectNames = async (subjectIds) => {
@@ -367,6 +408,14 @@ function ViewSubmission() {
         }
         const data = await res.json();
         setSubmission(data);
+        
+        // Fetch assignment details if report_assignment_id is available
+        if (data.report_assignment_id) {
+          const assignmentData = await fetchAssignmentDetails(data.report_assignment_id);
+          if (assignmentData) {
+            setAssignmentDetails(assignmentData);
+          }
+        }
         
         // Extract subject IDs and fetch subject names if this is a LAEMPL report
         if (data.fields && data.fields.rows && Array.isArray(data.fields.rows)) {
@@ -470,7 +519,23 @@ function ViewSubmission() {
 
     return (
       <div className="laempl-report-display">
-        <h4>LAEMPL Report</h4>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <h4>LAEMPL Report</h4>
+          <button 
+            onClick={() => exportBothReportsToCSV(fields)}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#007bff', // Blue color
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '14px'
+            }}
+          >
+            Export Both Reports
+          </button>
+        </div>
         <div className="table-container">
           <table className="laempl-table">
             <thead>
@@ -500,6 +565,102 @@ function ViewSubmission() {
         </div>
       </div>
     );
+  };
+
+  const renderMPSReport = (fields) => {
+    const mpsRows = fields.mps_rows || [];
+    
+    return (
+      <div className="mps-report-display">
+        <h4>MPS Report</h4>
+        <div className="table-container">
+          <table className="mps-table">
+            <thead>
+              <tr>
+                <th>Trait</th>
+                {COLS_MPS.map((col) => (
+                  <th key={col.key}>{col.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {mpsRows.map((row, index) => (
+                <tr key={index}>
+                  <td className="trait-cell">{row.trait || ""}</td>
+                  {COLS_MPS.map((col) => (
+                    <td key={col.key} className="data-cell">
+                      {row[col.key] || ""}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  // Function to export both LAEMPL and MPS reports to CSV
+  const exportBothReportsToCSV = (fields) => {
+    const lines = [];
+    
+    // LAEMPL Report section
+    if (fields.rows && fields.rows.length > 0) {
+      lines.push("=== LAEMPL REPORT ===");
+      
+      // Extract traits and columns
+      const traits = fields.rows.map(row => row.trait).filter(Boolean);
+      const cols = fields.rows.length > 0 ? Object.keys(fields.rows[0])
+        .filter(key => key !== 'trait')
+        .map(key => {
+          const cleanKey = sanitizeKey(key);
+          return {
+            key: cleanKey,
+            originalKey: key,
+            label: getColumnLabel(cleanKey, subjectNames)
+          };
+        }) : [];
+
+      // Add header row
+      const headerRow = ['Trait', ...cols.map(col => col.label)];
+      lines.push(headerRow.join(','));
+
+      // Add data rows
+      traits.forEach(trait => {
+        const rowData = fields.rows.find(r => r.trait === trait) || {};
+        const row = [trait, ...cols.map(col => rowData[col.originalKey] || '')];
+        lines.push(row.join(','));
+      });
+    }
+
+    // MPS Report section
+    if (fields.mps_rows && fields.mps_rows.length > 0) {
+      lines.push(""); // Empty line separator
+      lines.push("=== MPS REPORT ===");
+      
+      // Add MPS header row
+      const mpsHeaderRow = ['Trait', ...COLS_MPS.map(col => col.label)];
+      lines.push(mpsHeaderRow.join(','));
+
+      // Add MPS data rows
+      fields.mps_rows.forEach(row => {
+        const mpsRow = [row.trait || '', ...COLS_MPS.map(col => row[col.key] || '')];
+        lines.push(mpsRow.join(','));
+      });
+    }
+
+    // Create and download CSV
+    const csvContent = lines.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `Combined_Reports_${submissionId || 'export'}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const renderGenericContent = (fields) => {
@@ -534,7 +695,12 @@ function ViewSubmission() {
     if (fields.type === "ACCOMPLISHMENT" || fields._answers) {
       return renderAccomplishmentReport(fields);
     } else if (fields.rows && Array.isArray(fields.rows)) {
-      return renderLAEMPLReport(fields);
+      return (
+        <div>
+          {renderLAEMPLReport(fields)}
+          {fields.mps_rows && fields.mps_rows.length > 0 && renderMPSReport(fields)}
+        </div>
+      );
     } else {
       return renderGenericContent(fields);
     }
@@ -605,7 +771,21 @@ function ViewSubmission() {
             <div className="submission-details">
               <div className="detail-row">
                 <label>Title:</label>
-                <span>{submission.value || "Report"}</span>
+                <span>{(() => {
+                  const title = assignmentDetails?.title || 
+                               assignmentDetails?.assignment_title || 
+                               assignmentDetails?.report_title ||
+                               assignmentDetails?.name ||
+                               submission.value || 
+                               "Report";
+                  console.log('Title display debug:', {
+                    assignmentDetails: assignmentDetails,
+                    assignmentDetails_title: assignmentDetails?.title,
+                    submission_value: submission.value,
+                    final_title: title
+                  });
+                  return title;
+                })()}</span>
               </div>
               <div className="detail-row">
                 <label>Status:</label>

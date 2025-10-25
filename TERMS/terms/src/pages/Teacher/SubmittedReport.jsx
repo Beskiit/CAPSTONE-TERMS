@@ -29,9 +29,30 @@ function SubmittedReport() {
     const [quarters, setQuarters] = useState([]);
     const [categories, setCategories] = useState([]);
     const [filteredSubmissions, setFilteredSubmissions] = useState([]);
+    const [assignmentDetails, setAssignmentDetails] = useState({});
 
     const role = (user?.role || "").toLowerCase();
     const isTeacher = role === "teacher";
+
+    // Function to fetch assignment details from report_assignment table
+    const fetchAssignmentDetails = async (assignmentId) => {
+        if (!assignmentId) return null;
+        
+        try {
+            const response = await fetch(`${API_BASE}/reports/${assignmentId}`, {
+                credentials: "include"
+            });
+            
+            if (response.ok) {
+                const assignmentData = await response.json();
+                console.log('Report assignment details fetched:', assignmentData);
+                return assignmentData;
+            }
+        } catch (error) {
+            console.error('Failed to fetch report assignment details:', error);
+        }
+        return null;
+    };
 
     useEffect(() => {
         const fetchUser = async () => {
@@ -113,6 +134,22 @@ function SubmittedReport() {
                 const data = await res.json();
                 console.log("All submissions:", data);
                 setSubmissions(data);
+                
+                // Fetch assignment details for each submission
+                const assignmentDetailsMap = {};
+                for (const submission of data) {
+                    if (submission.report_assignment_id) {
+                        try {
+                            const assignmentDetails = await fetchAssignmentDetails(submission.report_assignment_id);
+                            if (assignmentDetails) {
+                                assignmentDetailsMap[submission.report_assignment_id] = assignmentDetails;
+                            }
+                        } catch (error) {
+                            console.error(`Failed to fetch assignment details for ${submission.report_assignment_id}:`, error);
+                        }
+                    }
+                }
+                setAssignmentDetails(assignmentDetailsMap);
             } catch (err) {
                 console.error("Error fetching submissions:", err);
                 setSubmissions([]);
@@ -267,7 +304,17 @@ function SubmittedReport() {
                                                     <td className="file-cell">
                                                         <span className="file-name">{submission.value || submission.category_name || 'Report'}</span>
                                                     </td>
-                                                    <td>{submission.assignment_title || submission.title || 'N/A'}</td>
+                                                    <td>{(() => {
+                                                        const assignmentInfo = assignmentDetails[submission.report_assignment_id];
+                                                        const title = assignmentInfo?.title || 
+                                                                   assignmentInfo?.assignment_title || 
+                                                                   assignmentInfo?.report_title ||
+                                                                   assignmentInfo?.name ||
+                                                                   submission.assignment_title || 
+                                                                   submission.title || 
+                                                                   'N/A';
+                                                        return title;
+                                                    })()}</td>
                                                     <td>{submission.date_submitted || 'Not submitted'}</td>
                                                     <td>{submission.quarter_name || 'N/A'}</td>
                                                     <td>{submission.school_year || 'N/A'}</td>

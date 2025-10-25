@@ -273,6 +273,7 @@ body{
     gap: 1rem;
     flex-wrap: wrap;
     justify-content: center;
+    width: 100%;
   }
   
   .dashboard-card {
