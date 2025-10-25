@@ -18,6 +18,7 @@ import {
   getApprovedSubmissionsByPrincipal, // ⬅️ NEW
   getRejectedSubmissionsByPrincipal, // ⬅️ NEW
   patchSubmissionFormData,          // ⬅️ NEW
+  patchSubmission,                 // ⬅️ NEW - Generic PATCH endpoint
 } from "../controllers/submissionController.js";
 import { requireAuth } from "../middleware/auth.js";
 
@@ -77,6 +78,7 @@ router.patch("/mps/submissions/:id", patchMPSBySubmissionId);
 
 // Generic
 router.get("/:id", getSubmission);
+router.patch("/:id", patchSubmission);  // ⬅️ NEW - Generic PATCH for status updates
 router.patch("/:id/answers", submitAnswers);
 router.patch("/:id/formdata", upload.array('images', 10), patchSubmissionFormData);  // ⬅️ NEW with multer
 router.post("/", createSubmission);

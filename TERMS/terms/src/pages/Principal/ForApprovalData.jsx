@@ -684,6 +684,14 @@ function ForApprovalData() {
         ? `${API_BASE}/reports/accomplishment/${submissionId}`
         : `${API_BASE}/submissions/${submissionId}`;
       
+      console.log('Rejecting submission:', {
+        submissionId,
+        submissionType,
+        endpoint,
+        status: 4,
+        rejection_reason: rejectReason
+      });
+      
       const response = await fetch(endpoint, {
         method: 'PATCH',
         headers: {
@@ -696,9 +704,17 @@ function ForApprovalData() {
         })
       });
 
+      console.log('Reject response status:', response.status);
+      console.log('Reject response headers:', response.headers);
+
       if (!response.ok) {
-        throw new Error('Failed to reject submission');
+        const errorText = await response.text();
+        console.error('Reject error response:', errorText);
+        throw new Error(`Failed to reject submission: ${response.status} ${errorText}`);
       }
+
+      const result = await response.json();
+      console.log('Reject success response:', result);
 
       setMsg("Submission rejected successfully.");
       setIsRejectOpen(false);
@@ -706,7 +722,7 @@ function ForApprovalData() {
       setReasonErr("");
     } catch (error) {
       console.error("Error rejecting submission:", error);
-      setErr("Failed to reject submission. Please try again.");
+      setErr(`Failed to reject submission: ${error.message}`);
     } finally {
       setSaving(false);
     }
@@ -722,6 +738,13 @@ function ForApprovalData() {
         ? `${API_BASE}/reports/accomplishment/${submissionId}`
         : `${API_BASE}/submissions/${submissionId}`;
       
+      console.log('Approving submission:', {
+        submissionId,
+        submissionType,
+        endpoint,
+        status: 3
+      });
+      
       const response = await fetch(endpoint, {
         method: 'PATCH',
         headers: {
@@ -733,15 +756,23 @@ function ForApprovalData() {
         })
       });
 
+      console.log('Approve response status:', response.status);
+      console.log('Approve response headers:', response.headers);
+
       if (!response.ok) {
-        throw new Error('Failed to approve submission');
+        const errorText = await response.text();
+        console.error('Approve error response:', errorText);
+        throw new Error(`Failed to approve submission: ${response.status} ${errorText}`);
       }
+
+      const result = await response.json();
+      console.log('Approve success response:', result);
 
       setMsg("Submission approved successfully.");
       setIsApproveOpen(false);
     } catch (error) {
       console.error("Error approving submission:", error);
-      setErr("Failed to approve submission. Please try again.");
+      setErr(`Failed to approve submission: ${error.message}`);
     } finally {
       setSaving(false);
     }

@@ -1,5 +1,5 @@
 import db from "../db.js";
-import { createNotificationsBulk } from './notificationsController.js';
+import { createNotificationsBulk, createNotification } from './notificationsController.js';
 
 /** Build initial blank JSON for the accomplishment submission */
 function buildInitialAccFields() {
@@ -325,14 +325,14 @@ export const patchAccomplishmentSubmission = (req, res) => {
             const meta = mRows[0];
             const title = newStatus === 3 ? `Submission approved: ${meta.title}` : `Submission rejected: ${meta.title}`;
             const message = newStatus === 3 ? 'Your submission has been approved.' : 'Your submission was rejected. Please review the feedback.';
-            import('./notificationsController.js').then(({ createNotification }) => {
-              createNotification(meta.submitted_by, {
-                title,
-                message,
-                type: newStatus === 3 ? 'submission_approved' : 'submission_rejected',
-                ref_type: 'submission',
-                ref_id: Number(id),
-              });
+            createNotification(meta.submitted_by, {
+              title,
+              message,
+              type: newStatus === 3 ? 'submission_approved' : 'submission_rejected',
+              ref_type: 'submission',
+              ref_id: Number(id),
+            }, (err, result) => {
+              if (err) console.error('Failed to create notification:', err);
             });
           }
         });

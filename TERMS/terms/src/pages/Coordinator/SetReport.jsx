@@ -641,10 +641,16 @@ function SetReport() {
                   >
                     <span className="teacher-trigger-label">
                       {selectedTeachers.length
-                        ? selectableUsers
-                            .filter(u => selectedTeachers.includes(u.user_id))
-                            .map(u => u.name)
-                            .join(", ")
+                        ? selectedTeachers.length === 1
+                          ? selectableUsers
+                              .filter(u => selectedTeachers.includes(u.user_id))
+                              .map(u => u.name)[0]
+                          : selectedTeachers.length <= 3
+                          ? selectableUsers
+                              .filter(u => selectedTeachers.includes(u.user_id))
+                              .map(u => u.name)
+                              .join(", ")
+                          : `${selectedTeachers.length} teachers selected`
                         : "Select Teachers & Coordinators"}
                     </span>
                   </button>

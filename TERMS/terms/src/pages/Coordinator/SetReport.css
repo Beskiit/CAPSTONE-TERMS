@@ -353,6 +353,7 @@ button {
   border-radius: 4px;
   background: #fff;
   cursor: pointer;
+  color: #000000;
 }
 
 .teacher-trigger-label {
@@ -360,6 +361,7 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: #000000;
 }
 
 .teacher-menu {

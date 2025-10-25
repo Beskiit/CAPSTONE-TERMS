@@ -2,13 +2,31 @@ import db from '../db.js';
 
 export const createNotification = (userId, payload, cb) => {
   const { title, message = null, type = null, ref_type = null, ref_id = null } = payload || {};
-  if (!userId || !title) return cb?.(new Error('userId and title are required'));
+  if (!userId || !title) {
+    const error = new Error('userId and title are required');
+    if (cb) return cb(error);
+    return Promise.reject(error);
+  }
+  
   const sql = `
     INSERT INTO notifications (user_id, title, message, type, ref_type, ref_id)
     VALUES (?, ?, ?, ?, ?, ?)
   `;
-  db.query(sql, [userId, title, message, type, ref_type, ref_id], (err, res) => {
-    if (cb) return cb(err, res?.insertId);
+  
+  // If callback is provided, use callback pattern
+  if (cb) {
+    db.query(sql, [userId, title, message, type, ref_type, ref_id], (err, res) => {
+      return cb(err, res?.insertId);
+    });
+    return;
+  }
+  
+  // Return Promise if no callback
+  return new Promise((resolve, reject) => {
+    db.query(sql, [userId, title, message, type, ref_type, ref_id], (err, res) => {
+      if (err) return reject(err);
+      resolve(res?.insertId);
+    });
   });
 };
 

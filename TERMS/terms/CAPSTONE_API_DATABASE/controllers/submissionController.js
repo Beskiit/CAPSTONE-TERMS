@@ -251,6 +251,8 @@ export const submitAnswers = (req, res) => {
                 type: 'report_submitted',
                 ref_type: 'submission',
                 ref_id: Number(id)
+              }, (err, result) => {
+                if (err) console.error('Failed to create notification:', err);
               });
             }
           });
@@ -558,6 +560,8 @@ export const patchMPSBySubmissionId = (req, res) => {
                 type: 'report_submitted',
                 ref_type: 'submission',
                 ref_id: Number(id)
+              }, (err, result) => {
+                if (err) console.error('Failed to create notification:', err);
               });
             }
           });
@@ -662,13 +666,17 @@ export const submitToPrincipal = (req, res) => {
           ref_id: Number(id)
         };
         // Notify the assigner (often the principal)
-        createNotification(meta.given_by, payload);
+        createNotification(meta.given_by, payload, (err, result) => {
+          if (err) console.error('Failed to create notification for assigner:', err);
+        });
         // Also notify all principals (fallback), excluding the assigner to avoid duplicates
         db.query(`SELECT user_id FROM user_details WHERE LOWER(role)='principal'`, [], (pErr, pRows) => {
           if (pErr || !pRows?.length) return;
           pRows.forEach((row) => {
             if (Number(row.user_id) !== Number(meta.given_by)) {
-              createNotification(row.user_id, payload);
+              createNotification(row.user_id, payload, (err, result) => {
+                if (err) console.error('Failed to create notification for principal:', err);
+              });
             }
           });
         });

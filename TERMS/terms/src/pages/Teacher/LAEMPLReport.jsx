@@ -3,6 +3,7 @@ import Header from "../../components/shared/Header.jsx";
 import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import "./LAEMPLReport.css";
+import toast from "react-hot-toast";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
 
@@ -513,23 +514,25 @@ function LAEMPLReport() {
   const onSubmit = async () => {
     if (!SUBMISSION_ID || SUBMISSION_ID === "null" || SUBMISSION_ID === "undefined") {
       setErr("Missing submission id. Open this page with ?id=<submission_id> from the assignment link.");
+      toast.error("Missing submission ID. Please access this page from the assignment link.");
       return;
     }
     if (isDisabled) {
       setErr("This submission is locked and cannot be changed.");
+      toast.error("This submission is locked and cannot be changed.");
       return;
     }
 
     // Validate form before saving
     const validationErrors = validateLAEMPLForm();
     if (validationErrors.length > 0) {
-      setErr(`Please fill all required fields: ${validationErrors.slice(0, 3).join(", ")}${validationErrors.length > 3 ? "..." : ""}`);
+      const errorMsg = `Please fill all required fields: ${validationErrors.slice(0, 3).join(", ")}${validationErrors.length > 3 ? "..." : ""}`;
+      setErr(errorMsg);
+      toast.error("Please fill all required fields before submitting.");
       return;
     }
 
     setSaving(true);
-    setMsg("");
-    setErr("");
     try {
       // Get grade from submission data or teacher's section
       const gradeLevel = submissionData?.fields?.grade || teacherSection?.grade_level || 2;
@@ -574,7 +577,7 @@ function LAEMPLReport() {
         throw new Error(t || `HTTP ${res.status}`);
       }
       const json = await res.json();
-      setMsg("Saved successfully.");
+      toast.success("LAEMPL report submitted successfully!");
 
       if (typeof json?.status !== "undefined") setStatus(json.status);
 
@@ -596,7 +599,7 @@ function LAEMPLReport() {
 
       setEditOverride(false); // re-lock after save
     } catch (e) {
-      setErr(e.message || "Failed to save.");
+      toast.error("Failed to submit LAEMPL report. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -759,8 +762,7 @@ function LAEMPLReport() {
       touchedRef.current = true; // user-intended change
       setEditOverride(true);     // allow editing even if locked
       setData(next);
-      setMsg("Imported file successfully.");
-      setErr("");
+      toast.success("File imported successfully!");
       setOpenPopup(false);       // close modal after success (optional)
     } catch (e) {
       setErr("Failed to import CSV. " + (e?.message || ""));
@@ -991,7 +993,7 @@ function LAEMPLReport() {
       });
       if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
       const json = await res.json();
-      setMpsMsg("Saved successfully.");
+      toast.success("MPS data saved successfully!");
       if (json?.status !== undefined) setMpsStatus(json.status);
       setMpsEditOverride(false);
     } catch (e) {
@@ -1107,8 +1109,7 @@ function LAEMPLReport() {
       mpsTouchedRef.current = true;
       setMpsEditOverride(true);
       setMpsData(nextData);
-      setMpsMsg(`Imported ${importedCount} row(s).`);
-      setMpsErr("");
+      toast.success(`Imported ${importedCount} row(s) successfully!`);
       setMpsOpenPopup(false);
     } catch (e) {
       setMpsErr("Failed to import CSV. " + (e?.message || ""));
@@ -1534,12 +1535,18 @@ function LAEMPLReport() {
               {isCoordinatorView && (
                 <button onClick={handleConsolidate}>Consolidate</button>
               )}
+              {/* Submit button */}
+              <button
+                type="submit"
+                onClick={onSubmit}
+                disabled={!canSubmit || isDisabled}
+              >
+                {saving ? "Saving..." : "Submit"}
+              </button>
             </div>
 
             {/* status messages */}
             {loading && <div className="ok-text" style={{ marginTop: 8 }}>Loading...</div>}
-            {!!msg && <div className="ok-text" style={{ marginTop: 8 }}>{msg}</div>}
-            {!!err && <div className="error-text" style={{ marginTop: 8 }}>{err}</div>}
 
             {/* DYNAMIC TABLE — LAEMPL */}
             <div className="table-wrap">
@@ -1630,16 +1637,6 @@ function LAEMPLReport() {
               </table>
             </div>
 
-            {/* Submit button */}
-            <div className="table-actions">
-              <button
-                type="submit"
-                onClick={onSubmit}
-                disabled={!canSubmit || isDisabled}
-              >
-                {saving ? "Saving..." : "Submit"}
-              </button>
-            </div>
 
             {/* =========================
                 SECOND TABLE — MPS
@@ -1742,13 +1739,6 @@ function LAEMPLReport() {
               </table>
             </div>
 
-            <div className="table-actions">
-              <button type="button" disabled={mpsSaving || mpsDisabled} onClick={onSubmitMps}>
-                {mpsSaving ? "Saving..." : "Save"}
-              </button>
-            </div>
-            {!!mpsMsg && <div className="ok-text" style={{ marginTop: 8 }}>{mpsMsg}</div>}
-            {!!mpsErr && <div className="error-text" style={{ marginTop: 8 }}>{mpsErr}</div>}
           </div>
         </div>
 

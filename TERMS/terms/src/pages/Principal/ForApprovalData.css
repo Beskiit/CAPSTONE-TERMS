@@ -181,6 +181,38 @@
   cursor: not-allowed;
 }
 
+/* Modal button styles */
+.modal-action button[type="button"] {
+  background-color: #dc3545;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.modal-action button[type="button"]:hover:not(:disabled) {
+  background-color: #c82333;
+}
+
+.modal-action button[type="button"]:disabled {
+  background-color: #6c757d;
+  cursor: not-allowed;
+}
+
+.modal-action button[type="submit"],
+.modal-action button[type="button"]:last-child {
+  background-color: #28a745;
+}
+
+.modal-action button[type="submit"]:hover:not(:disabled),
+.modal-action button[type="button"]:last-child:hover:not(:disabled) {
+  background-color: #218838;
+}
+
 /* Message styles */
 .message {
   padding: 10px 15px;
