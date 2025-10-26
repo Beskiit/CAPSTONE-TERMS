@@ -43,7 +43,6 @@ function SidebarTeacher({ activeLink }) {
                                         <ul className="dropdown-menu">
                                         <li className={`${activeLink === 'LAEMPL & MPS' ? 'active' : ''}`}><a href="/LAEMPL">LAEMPL & MPS</a></li>
                                         <li className={`${activeLink === 'Accomplishment Report' ? 'active' : ''}`}><a href="/Accomplishment">Accomplishment Report</a></li>
-                                        <li className={`${activeLink === 'Classification of Grades' ? 'active' : ''}`}><a href="/ClassificationOfGrades">Classification of Grades</a></li>
                                         </ul>
                                     )}
                             </li>
