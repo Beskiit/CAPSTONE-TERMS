@@ -793,8 +793,8 @@ setError(e.message || "Failed to load peers");
             {isTeacher ? (
               <>
                 <div className="buttons">
-                  <button onClick={onSubmit} disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}>
-                    {saving ? "Saving…" : "Save Draft"}
+                  <button className="btn primary" disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}>
+                      {saving ? "Saving…" : "Save Changes"}
                   </button>
                   <button
                     onClick={handleCoordinatorConfirmation}
@@ -1336,14 +1336,6 @@ setError(e.message || "Failed to load peers");
                       </button>
                     </div>
                   </>
-                )}
-
-                {isTeacher && (
-                  <div className="form-row">
-                    <button className="btn primary" disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}>
-                      {saving ? "Saving…" : "Save Changes"}
-                    </button>
-                  </div>
                 )}
               </form>
             </div>
