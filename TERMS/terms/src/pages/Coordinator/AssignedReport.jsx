@@ -28,12 +28,8 @@ function AssignedReport() {
     const [selectedQuarter, setSelectedQuarter] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('');
     const [schoolYears, setSchoolYears] = useState([{ value: 2025, label: '2025-2026' }]);
-    const [quarters, setQuarters] = useState([
-        { value: 1, label: '1st Quarter' },
-        { value: 2, label: '2nd Quarter' },
-        { value: 3, label: '3rd Quarter' },
-        { value: 4, label: '4th Quarter' }
-    ]);
+    const [assignmentYearsAndQuarters, setAssignmentYearsAndQuarters] = useState([]);
+    const [quarters, setQuarters] = useState([]);
     const [categories, setCategories] = useState([]);
 
     const role = (user?.role || "").toLowerCase();
@@ -69,25 +65,103 @@ function AssignedReport() {
         console.log('Current state:', { selectedSchoolYear, selectedQuarter });
         console.log('Available school years:', schoolYears);
 
-        // Then fetch school years
-        const fetchSchoolYears = async () => {
+        // Fetch all school years and quarters from admin API
+        const fetchAllSchoolYearsAndQuarters = async () => {
             try {
-                const res = await fetch(`${API_BASE}/admin/school-years`, {
+                console.log('🔍 [DEBUG] Fetching all school years and quarters');
+                
+                // Fetch school years
+                const schoolYearsRes = await fetch(`${API_BASE}/admin/school-years`, {
                     credentials: "include"
                 });
-                if (res.ok) {
-                    const data = await res.json();
-                    console.log('🔍 [DEBUG] School years data:', data);
-                    setSchoolYears(data); // Use raw data like submitted reports
+                
+                if (schoolYearsRes.ok) {
+                    const schoolYearsData = await schoolYearsRes.json();
+                    console.log('🔍 [DEBUG] School years data:', schoolYearsData);
                     
-                    // No default year selection
+                    // Fetch quarters for each school year
+                    const quartersRes = await fetch(`${API_BASE}/admin/quarters-comprehensive`, {
+                        credentials: "include"
+                    });
+                    
+                    if (quartersRes.ok) {
+                        const quartersData = await quartersRes.json();
+                        console.log('🔍 [DEBUG] Quarters data:', quartersData);
+                        
+                        // Combine school years with their quarters
+                        const combinedData = schoolYearsData.map(year => {
+                            const yearQuarters = quartersData.filter(q => q.year === year.year_id);
+                            return {
+                                ...year,
+                                quarters: yearQuarters.map(q => ({
+                                    quarter: q.quarter,
+                                    quarter_name: q.quarter_name,
+                                    quarter_short_name: q.quarter_short_name
+                                }))
+                            };
+                        });
+                        
+                        console.log('🔍 [DEBUG] Combined data:', combinedData);
+                        setAssignmentYearsAndQuarters(combinedData);
+                        setSchoolYears(schoolYearsData); // Keep separate for filtering
+                    } else {
+                        console.error("Failed to fetch quarters");
+                        setAssignmentYearsAndQuarters(schoolYearsData);
+                        setSchoolYears(schoolYearsData);
+                    }
                 } else {
                     console.error("Failed to fetch school years");
+                    setAssignmentYearsAndQuarters([]);
                     setSchoolYears([]);
                 }
             } catch (err) {
-                console.error("Failed to fetch school years:", err);
+                console.error("Failed to fetch school years and quarters:", err);
+                setAssignmentYearsAndQuarters([]);
                 setSchoolYears([]);
+            }
+        };
+
+        // Then fetch school years and quarters from actual report assignments
+        const fetchSchoolYearsAndQuarters = async () => {
+            try {
+                if (!user?.user_id) {
+                    console.log('🔍 [DEBUG] No user ID available yet');
+                    return;
+                }
+                
+                console.log('🔍 [DEBUG] Fetching assignment years and quarters for user:', user.user_id);
+                const res = await fetch(`${API_BASE}/reports/assignment-years-quarters/${user.user_id}`, {
+                    credentials: "include"
+                });
+                
+                console.log('🔍 [DEBUG] API response status:', res.status);
+                
+                if (res.ok) {
+                    const data = await res.json();
+                    console.log('🔍 [DEBUG] Assignment years and quarters data:', data);
+                    console.log('🔍 [DEBUG] Data length:', data.length);
+                    setAssignmentYearsAndQuarters(data); // Use new state for assignment data
+                    
+                    // Set default selection if URL parameters are provided
+                    const yearParam = searchParams.get('year');
+                    const quarterParam = searchParams.get('quarter');
+                    
+                    if (yearParam && quarterParam && data.length > 0) {
+                        const selectedYear = data.find(year => year.year_id.toString() === yearParam);
+                        if (selectedYear) {
+                            setSelectedSchoolYear(selectedYear.school_year);
+                            setSelectedQuarter(quarterParam);
+                        }
+                    } else if (data.length > 0) {
+                        // Set default to the first available year if no URL params
+                        setSelectedSchoolYear(data[0].school_year);
+                    }
+                } else {
+                    const errorText = await res.text();
+                    console.error("Failed to fetch assignment years and quarters:", res.status, errorText);
+                }
+            } catch (err) {
+                console.error("Failed to fetch assignment years and quarters:", err);
             }
         };
         
@@ -109,42 +183,48 @@ function AssignedReport() {
             }
         };
         
-        fetchSchoolYears();
+        // Fetch all school years and quarters
+        fetchAllSchoolYearsAndQuarters();
+        
+        if (user?.user_id) {
+            fetchSchoolYearsAndQuarters();
+        }
         fetchCategories();
-    }, [searchParams]);
+    }, [searchParams, user?.user_id]);
+
+    // Update quarters when school year changes
+    useEffect(() => {
+        if (selectedSchoolYear && assignmentYearsAndQuarters.length > 0) {
+            const selectedYear = assignmentYearsAndQuarters.find(year => year.school_year === selectedSchoolYear);
+            console.log('🔍 [DEBUG] Selected year for quarters:', selectedYear);
+            if (selectedYear && selectedYear.quarters) {
+                const quarterOptions = selectedYear.quarters.map(q => ({
+                    value: q.quarter,
+                    label: q.quarter_name
+                }));
+                console.log('🔍 [DEBUG] Quarter options:', quarterOptions);
+                setQuarters(quarterOptions);
+                
+                // Reset quarter selection if current selection is not available in new year
+                if (selectedQuarter && !selectedYear.quarters.some(q => q.quarter.toString() === selectedQuarter)) {
+                    setSelectedQuarter('');
+                }
+            } else {
+                console.log('🔍 [DEBUG] No quarters found for selected year');
+                setQuarters([]);
+                setSelectedQuarter('');
+            }
+        } else {
+            setQuarters([]);
+            setSelectedQuarter('');
+        }
+    }, [selectedSchoolYear, assignmentYearsAndQuarters]);
 
     // Debug: Monitor state changes
     useEffect(() => {
         console.log('State changed - selectedSchoolYear:', selectedSchoolYear, 'selectedQuarter:', selectedQuarter, 'selectedCategory:', selectedCategory);
     }, [selectedSchoolYear, selectedQuarter, selectedCategory]);
 
-    // Set quarters using quarter enum service when year changes
-    useEffect(() => {
-        if (selectedSchoolYear) {
-            const fetchQuarters = async () => {
-                try {
-                    const formattedQuarters = await QuarterEnumService.getFormattedQuarters();
-                    setQuarters(formattedQuarters);
-                    
-                    // No default quarter selection
-                } catch (error) {
-                    console.error('Error fetching quarters:', error);
-                    // Fallback to static quarters
-                    const staticQuarters = [
-                        { value: 1, label: 'Quarter 1', quarter: 1 },
-                        { value: 2, label: 'Quarter 2', quarter: 2 },
-                        { value: 3, label: 'Quarter 3', quarter: 3 },
-                        { value: 4, label: 'Quarter 4', quarter: 4 }
-                    ];
-                    setQuarters(staticQuarters);
-                    
-                    // No default quarter selection
-                }
-            };
-            
-            fetchQuarters();
-        }
-    }, [selectedSchoolYear]);
 
 
     // Fetch assigned reports grouped by assignment
@@ -170,8 +250,23 @@ function AssignedReport() {
                 console.log('🔍 [DEBUG] All reports fetched from API:', allReports);
                 console.log('🔍 [DEBUG] Reports count:', allReports.length);
                 
+                // Debug: Check the structure of the first report
+                if (allReports.length > 0) {
+                    console.log('🔍 [DEBUG] First report structure:', allReports[0]);
+                    console.log('🔍 [DEBUG] Available school years in API data:', [...new Set(allReports.map(r => r.school_year))]);
+                    console.log('🔍 [DEBUG] Available years in API data:', [...new Set(allReports.map(r => r.year))]);
+                    console.log('🔍 [DEBUG] First report keys:', Object.keys(allReports[0]));
+                }
+                
                 // Use all reports for client-side filtering
                 const filteredReports = allReports;
+                
+                // Create a mapping from year_id to school_year if school_year is undefined
+                const yearToSchoolYearMap = {
+                    50000: '2025-2026',
+                    51000: '2026-2027', 
+                    52000: '2027-2028'
+                };
                 
                 // Group reports by assignment_id and calculate submission counts
                 const assignmentMap = new Map();
@@ -191,6 +286,8 @@ function AssignedReport() {
                             from_date: report.from_date,
                             year: report.year,
                             quarter: report.quarter,
+                            school_year: report.school_year || yearToSchoolYearMap[report.year], // Add school_year field with fallback
+                            quarter_name: report.quarter_name, // Add quarter_name field
                             totalAssigned: 0,
                             submittedCount: 0,
                             reports: []
@@ -272,36 +369,55 @@ function AssignedReport() {
 
             // Filter by school year
             if (selectedSchoolYear) {
-                const selectedYearObj = schoolYears.find(year => year.year_id.toString() === selectedSchoolYear);
+                console.log('🔍 [DEBUG] Filtering by school year:', selectedSchoolYear);
+                console.log('🔍 [DEBUG] Available school years in data:', [...new Set(filtered.map(g => g.school_year))]);
+                console.log('🔍 [DEBUG] Available school years from admin API:', schoolYears);
+                
+                // Find the selected school year object from the admin API data
+                const selectedYearObj = schoolYears.find(year => year.school_year === selectedSchoolYear);
                 console.log('🔍 [DEBUG] Selected year object:', selectedYearObj);
+                
                 if (selectedYearObj) {
                     filtered = filtered.filter(group => {
-                        const matches = group.school_year === selectedYearObj.school_year;
+                        // Compare using the year_id from the admin API data
+                        const matches = group.year === selectedYearObj.year_id;
                         console.log('🔍 [DEBUG] Year filter:', {
+                            groupYear: group.year,
+                            selectedYearId: selectedYearObj.year_id,
+                            selectedSchoolYear: selectedSchoolYear,
+                            matches,
+                            groupYearType: typeof group.year,
+                            selectedYearIdType: typeof selectedYearObj.year_id
+                        });
+                        return matches;
+                    });
+                } else {
+                    console.log('🔍 [DEBUG] Selected year object not found, using fallback comparison');
+                    filtered = filtered.filter(group => {
+                        const matches = group.school_year === selectedSchoolYear;
+                        console.log('🔍 [DEBUG] Fallback year filter:', {
                             groupYear: group.school_year,
-                            selectedSchoolYear: selectedYearObj.school_year,
+                            selectedSchoolYear: selectedSchoolYear,
                             matches
                         });
                         return matches;
                     });
                 }
+                console.log('🔍 [DEBUG] After school year filter:', filtered.length, 'reports remaining');
             }
 
             // Filter by quarter
             if (selectedQuarter) {
-                const selectedQuarterObj = quarters.find(quarter => quarter.value === selectedQuarter);
-                console.log('🔍 [DEBUG] Selected quarter object:', selectedQuarterObj);
-                if (selectedQuarterObj) {
-                    filtered = filtered.filter(group => {
-                        const matches = group.quarter_name === selectedQuarterObj.label;
-                        console.log('🔍 [DEBUG] Quarter filter:', {
-                            groupQuarter: group.quarter_name,
-                            selectedLabel: selectedQuarterObj.label,
-                            matches
-                        });
-                        return matches;
+                console.log('🔍 [DEBUG] Filtering by quarter:', selectedQuarter);
+                filtered = filtered.filter(group => {
+                    const matches = group.quarter.toString() === selectedQuarter;
+                    console.log('🔍 [DEBUG] Quarter filter:', {
+                        groupQuarter: group.quarter,
+                        selectedQuarter: selectedQuarter,
+                        matches
                     });
-                }
+                    return matches;
+                });
             }
 
             // Filter by category
@@ -348,12 +464,12 @@ function AssignedReport() {
                                 <select 
                                     id="school-year-select"
                                     value={selectedSchoolYear || ''} 
-                                    onChange={(e) => setSelectedSchoolYear(parseInt(e.target.value) || 2025)}
+                                    onChange={(e) => setSelectedSchoolYear(e.target.value)}
                                     className="dropdown-select"
                                 >
                                     <option value="">Select School Year</option>
-                                    {schoolYears.map(year => (
-                                        <option key={year.year_id} value={year.year_id}>
+                                    {assignmentYearsAndQuarters.map(year => (
+                                        <option key={year.year_id} value={year.school_year}>
                                             {year.school_year}
                                         </option>
                                     ))}

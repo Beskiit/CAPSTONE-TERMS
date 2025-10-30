@@ -576,13 +576,15 @@ function AccomplishmentReport() {
     setSuccess("");
     try {
       // Use report_assignment_id so we fetch peers from the correct assignment
+      const paramKey = isTeacher ? 'ra' : 'pra'; // teachers use ra (same assignment); coordinators use pra (parent)
       const url = reportAssignmentId
-        ? `${API_BASE}/reports/accomplishment/${submissionId}/peers?ra=${encodeURIComponent(reportAssignmentId)}`
+        ? `${API_BASE}/reports/accomplishment/${submissionId}/peers?${paramKey}=${encodeURIComponent(reportAssignmentId)}`
         : `${API_BASE}/reports/accomplishment/${submissionId}/peers`;
       
       console.log("[Consolidate] DEBUG - Request details:");
       console.log("- submissionId:", submissionId);
       console.log("- reportAssignmentId:", reportAssignmentId);
+      console.log("- paramKey:", paramKey);
       console.log("- URL:", url);
       
       const res = await fetch(url, { credentials: "include" });
@@ -600,7 +602,7 @@ function AccomplishmentReport() {
       setPeerGroups(Array.isArray(data) ? data : []);
       setShowConsolidate(true);
     } catch (e) {
-setError(e.message || "Failed to load peers");
+      setError(e.message || "Failed to load peers");
     }
   };
 

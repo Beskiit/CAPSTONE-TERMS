@@ -9,6 +9,7 @@ import {
   patchAccomplishmentSubmission,
   getAccomplishmentPeers,
   consolidateAccomplishmentByTitle,
+  linkParentAssignment,
 } from "../controllers/accomplishmentController.js";
 
 const router = express.Router();
@@ -45,5 +46,8 @@ router.get("/:id/peers", getAccomplishmentPeers);
 
 // Consolidate images by title
 router.post("/:id/consolidate", consolidateAccomplishmentByTitle);
+
+// Link parent assignment (for coordinator-teacher hierarchy)
+router.post("/link-parent", linkParentAssignment);
 
 export default router;

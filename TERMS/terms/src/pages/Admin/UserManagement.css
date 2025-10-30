@@ -637,11 +637,11 @@
   /* Year & Quarter Management Styles */
   .year-quarter-btn {
     margin-left: 10px;
-    background-color: #28a745;
+    background-color: #1557b0;
   }
 
   .year-quarter-btn:hover {
-    background-color: #218838;
+    background-color: #1557b0;
   }
 
   .year-quarter-overlay {

@@ -43,8 +43,9 @@ export const getUpcomingDeadlinesByUser = (req, res) => {
     JOIN category c ON c.category_id = ra.category_id
     LEFT JOIN sub_category sc ON sc.sub_category_id = ra.sub_category_id
     WHERE s.submitted_by = ?
-      AND ra.to_date >= NOW()                -- still open
-      AND (LOWER(st.value) = 'pending' OR s.status = 1 OR s.status = 4)  -- pending/not finished/rejected
+      AND ra.to_date >= NOW()
+      AND ra.is_given = 1
+      AND (LOWER(st.value) = 'pending' OR s.status = 1 OR s.status = 4)
     ORDER BY ra.to_date ASC, ra.report_assignment_id ASC
   `;
   db.query(sql, [id], (err, rows) => {

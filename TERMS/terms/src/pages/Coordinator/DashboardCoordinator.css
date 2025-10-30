@@ -168,6 +168,15 @@ body{
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  padding-bottom: 24px;
+}
+
+/* Ensure the last item can scroll fully above the bottom edge */
+.deadline-list::after {
+  content: "";
+  display: block;
+  height: 20px; /* scroll buffer */
+  flex-shrink: 0;
 }
 
 .deadline-list::-webkit-scrollbar {

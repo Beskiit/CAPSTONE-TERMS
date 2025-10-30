@@ -1,5 +1,5 @@
 // db.js
-import mysql from 'mysql';
+import mysql from 'mysql2';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -10,17 +10,13 @@ const database = mysql.createPool({
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'capstone_database',
-  // Performance optimizations
-  acquireTimeout: 60000,
-  timeout: 60000,
-  reconnect: true,
-  charset: 'utf8mb4',
-  // Connection pool settings
+  // Performance / pool options compatible with mysql2
+  waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-  // Additional optimizations
+  // Additional options
   multipleStatements: false,
-  dateStrings: true
+  charset: 'utf8mb4',
 });
 
 // Test the connection

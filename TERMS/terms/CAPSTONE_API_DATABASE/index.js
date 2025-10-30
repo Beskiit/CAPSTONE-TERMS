@@ -4,7 +4,7 @@ import cors from "cors";
 import session from "express-session";
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
-import mysql from "mysql";
+import mysql from "mysql2";
 import fs from "fs";
 import path from "path";
 import multer from "multer";
@@ -40,7 +40,9 @@ const pool = mysql.createPool({
   user: process.env.DB_USER || "root",
   password: process.env.DB_PASSWORD || "",
   database: process.env.DB_NAME || "capstone_database",
+  waitForConnections: true,
   connectionLimit: 10,
+  queueLimit: 0,
 });
 
 pool.getConnection((err, conn) => {
@@ -1243,7 +1245,9 @@ app.get("/reports/submitted_by/:userId", async (req, res) => {
       LEFT JOIN user_details ud2 ON ra.given_by    = ud2.user_id
       LEFT JOIN school_year sy ON sy.year_id = ra.year
       LEFT JOIN quarter_enum qe ON qe.quarter_number = ra.quarter
-      WHERE s.submitted_by = ?
+      WHERE ra.is_given = 0
+        AND s.status = 0
+        AND s.submitted_by = ?
     `;
     
     const params = [userId];
@@ -1957,6 +1961,293 @@ app.get("/admin/quarters/:yearId", async (req, res) => {
   } catch (error) {
     console.error("Error fetching quarters for year:", error);
     res.status(500).json({ error: "Failed to fetch quarters", details: error.message });
+  }
+});
+
+// Get school years and quarters from actual report assignments
+app.get("/reports/assignment-years-quarters/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    console.log('🔍 [DEBUG] Fetching assignment years and quarters for user:', userId);
+    console.log('🔍 [DEBUG] User ID type:', typeof userId);
+    console.log('🔍 [DEBUG] User ID value:', userId);
+    
+    // First, let's check if there are any report assignments for this user
+    const checkQuery = `SELECT COUNT(*) as count FROM report_assignment WHERE given_by = ?`;
+    const checkResult = await new Promise((resolve, reject) => {
+      db.query(checkQuery, [parseInt(userId)], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+    
+    console.log('🔍 [DEBUG] Report assignments count for user', userId, ':', checkResult[0].count);
+    
+    // Let's also check what users have report assignments
+    const allAssignmentsQuery = `SELECT DISTINCT given_by FROM report_assignment LIMIT 10`;
+    const allAssignments = await new Promise((resolve, reject) => {
+      db.query(allAssignmentsQuery, (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+    console.log('🔍 [DEBUG] Users with report assignments:', allAssignments);
+    
+    if (checkResult[0].count === 0) {
+      console.log('🔍 [DEBUG] No report assignments found for user, returning all available school years');
+      
+      // Return all available school years with all quarters as fallback
+      const fallbackQuery = `
+        SELECT DISTINCT
+          sy.year_id,
+          sy.school_year,
+          sy.start_year,
+          sy.end_year,
+          qe.quarter_number as quarter,
+          qe.quarter_name,
+          qe.quarter_short_name
+        FROM school_year sy
+        CROSS JOIN quarter_enum qe
+        ORDER BY sy.start_year DESC, qe.quarter_number ASC
+      `;
+      
+      const fallbackResult = await new Promise((resolve, reject) => {
+        db.query(fallbackQuery, (err, results) => {
+          if (err) reject(err);
+          else resolve(results);
+        });
+      });
+      
+      // Group by school year and quarters
+      const groupedData = {};
+      fallbackResult.forEach(row => {
+        const yearKey = row.school_year;
+        if (!groupedData[yearKey]) {
+          groupedData[yearKey] = {
+            year_id: row.year_id,
+            school_year: row.school_year,
+            start_year: row.start_year,
+            end_year: row.end_year,
+            quarters: []
+          };
+        }
+        
+        // Add quarter if not already present
+        const quarterExists = groupedData[yearKey].quarters.some(q => q.quarter === row.quarter);
+        if (!quarterExists) {
+          groupedData[yearKey].quarters.push({
+            quarter: row.quarter,
+            quarter_name: row.quarter_name,
+            quarter_short_name: row.quarter_short_name
+          });
+        }
+      });
+      
+      const finalResult = Object.values(groupedData);
+      console.log('🔍 [DEBUG] Fallback result:', finalResult);
+      return res.json(finalResult);
+    }
+    
+    const query = `
+      SELECT DISTINCT
+        sy.year_id,
+        sy.school_year,
+        sy.start_year,
+        sy.end_year,
+        ra.quarter,
+        qe.quarter_name,
+        qe.quarter_short_name
+      FROM report_assignment ra
+      JOIN school_year sy ON sy.year_id = ra.year
+      JOIN quarter_enum qe ON qe.quarter_number = ra.quarter
+      WHERE ra.given_by = ?
+      ORDER BY sy.start_year DESC, ra.quarter ASC
+    `;
+    
+    console.log('🔍 [DEBUG] Query:', query);
+    console.log('🔍 [DEBUG] User ID:', userId);
+    
+    const result = await new Promise((resolve, reject) => {
+      db.query(query, [parseInt(userId)], (err, results) => {
+        if (err) {
+          console.error('🔍 [DEBUG] Database error:', err);
+          reject(err);
+        } else {
+          console.log('🔍 [DEBUG] Raw database results:', results);
+          resolve(results);
+        }
+      });
+    });
+    
+    // Group by school year and quarters
+    const groupedData = {};
+    result.forEach(row => {
+      const yearKey = row.school_year;
+      if (!groupedData[yearKey]) {
+        groupedData[yearKey] = {
+          year_id: row.year_id,
+          school_year: row.school_year,
+          start_year: row.start_year,
+          end_year: row.end_year,
+          quarters: []
+        };
+      }
+      
+      // Add quarter if not already present
+      const quarterExists = groupedData[yearKey].quarters.some(q => q.quarter === row.quarter);
+      if (!quarterExists) {
+        groupedData[yearKey].quarters.push({
+          quarter: row.quarter,
+          quarter_name: row.quarter_name,
+          quarter_short_name: row.quarter_short_name
+        });
+      }
+    });
+    
+    // Convert to array format
+    const finalResult = Object.values(groupedData);
+    
+    console.log('🔍 [DEBUG] Grouped data:', groupedData);
+    console.log('🔍 [DEBUG] Final result:', finalResult);
+    console.log('🔍 [DEBUG] Final result length:', finalResult.length);
+    
+    res.json(finalResult);
+  } catch (error) {
+    console.error("Error fetching assignment years and quarters:", error);
+    res.status(500).json({ error: "Failed to fetch assignment years and quarters", details: error.message });
+  }
+});
+
+// Get school years and quarters from submitted reports (for teachers)
+app.get("/reports/submitted-years-quarters/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    const query = `
+      SELECT DISTINCT
+        sy.year_id,
+        sy.school_year,
+        sy.start_year,
+        sy.end_year,
+        s.quarter,
+        qe.quarter_name,
+        qe.quarter_short_name
+      FROM submission s
+      JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
+      JOIN school_year sy ON sy.year_id = ra.year
+      JOIN quarter_enum qe ON qe.quarter_number = s.quarter
+      WHERE s.submitted_by = ?
+      ORDER BY sy.start_year DESC, s.quarter ASC
+    `;
+    
+    const result = await new Promise((resolve, reject) => {
+      db.query(query, [userId], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+    
+    // Group by school year and quarters
+    const groupedData = {};
+    result.forEach(row => {
+      const yearKey = row.school_year;
+      if (!groupedData[yearKey]) {
+        groupedData[yearKey] = {
+          year_id: row.year_id,
+          school_year: row.school_year,
+          start_year: row.start_year,
+          end_year: row.end_year,
+          quarters: []
+        };
+      }
+      
+      // Add quarter if not already present
+      const quarterExists = groupedData[yearKey].quarters.some(q => q.quarter === row.quarter);
+      if (!quarterExists) {
+        groupedData[yearKey].quarters.push({
+          quarter: row.quarter,
+          quarter_name: row.quarter_name,
+          quarter_short_name: row.quarter_short_name
+        });
+      }
+    });
+    
+    // Convert to array format
+    const finalResult = Object.values(groupedData);
+    
+    res.json(finalResult);
+  } catch (error) {
+    console.error("Error fetching submitted years and quarters:", error);
+    res.status(500).json({ error: "Failed to fetch submitted years and quarters", details: error.message });
+  }
+});
+
+// Get school years and quarters from reports for approval (for principals)
+app.get("/reports/approval-years-quarters/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    const query = `
+      SELECT DISTINCT
+        sy.year_id,
+        sy.school_year,
+        sy.start_year,
+        sy.end_year,
+        s.quarter,
+        qe.quarter_name,
+        qe.quarter_short_name
+      FROM submission s
+      JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
+      JOIN school_year sy ON sy.year_id = ra.year
+      JOIN quarter_enum qe ON qe.quarter_number = s.quarter
+      WHERE s.submitted_by IN (
+        SELECT user_id FROM user_details 
+        WHERE role = 'teacher' AND user_id IN (
+          SELECT DISTINCT submitted_by FROM submission
+        )
+      ) AND s.status IN (2, 3)
+      ORDER BY sy.start_year DESC, s.quarter ASC
+    `;
+    
+    const result = await new Promise((resolve, reject) => {
+      db.query(query, [userId], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+    
+    // Group by school year and quarters
+    const groupedData = {};
+    result.forEach(row => {
+      const yearKey = row.school_year;
+      if (!groupedData[yearKey]) {
+        groupedData[yearKey] = {
+          year_id: row.year_id,
+          school_year: row.school_year,
+          start_year: row.start_year,
+          end_year: row.end_year,
+          quarters: []
+        };
+      }
+      
+      // Add quarter if not already present
+      const quarterExists = groupedData[yearKey].quarters.some(q => q.quarter === row.quarter);
+      if (!quarterExists) {
+        groupedData[yearKey].quarters.push({
+          quarter: row.quarter,
+          quarter_name: row.quarter_name,
+          quarter_short_name: row.quarter_short_name
+        });
+      }
+    });
+    
+    // Convert to array format
+    const finalResult = Object.values(groupedData);
+    
+    res.json(finalResult);
+  } catch (error) {
+    console.error("Error fetching approval years and quarters:", error);
+    res.status(500).json({ error: "Failed to fetch approval years and quarters", details: error.message });
   }
 });
 
@@ -2699,6 +2990,143 @@ app.post("/auth/logout", (req, res, next) => {
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 fs.mkdirSync(path.resolve("uploads/accomplishments"), { recursive: true });
 
+// Health check must be defined BEFORE the param route so it isn't captured by :userId
+app.get("/reports/upcoming-deadlines/health", (req, res) => {
+  res.json({ ok: true, route: "/reports/upcoming-deadlines/:userId" });
+});
+
+// Get single report assignment for editing (must be defined BEFORE the param route)
+app.get("/reports/assignment/:reportId", async (req, res) => {
+  try {
+    const { reportId } = req.params;
+    console.log('🔄 [DEBUG] Fetching report assignment for editing:', reportId);
+
+    const query = `
+      SELECT
+        ra.report_assignment_id,
+        ra.category_id,
+        ra.sub_category_id,
+        ra.given_by,
+        ra.quarter,
+        ra.year,
+        ra.title,
+        ra.from_date,
+        ra.to_date,
+        ra.instruction,
+        ra.is_given,
+        ra.is_archived,
+        ra.allow_late,
+        c.category_name,
+        sc.sub_category_name,
+        sy.school_year,
+        ud.name AS given_by_name
+      FROM report_assignment ra
+      JOIN category c ON ra.category_id = c.category_id
+      LEFT JOIN sub_category sc ON ra.sub_category_id = sc.sub_category_id
+      LEFT JOIN user_details ud ON ra.given_by = ud.user_id
+      LEFT JOIN school_year sy ON sy.year_id = ra.year
+      WHERE ra.report_assignment_id = ?
+    `;
+
+    const result = await new Promise((resolve, reject) => {
+      db.query(query, [reportId], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+
+    if (result.length === 0) {
+      return res.status(404).json({ error: "Report assignment not found" });
+    }
+
+    console.log('🔄 [DEBUG] Report assignment found:', result[0]);
+    res.json(result[0]);
+  } catch (error) {
+    console.error("Error fetching report assignment:", error);
+    res.status(500).json({ error: "Failed to fetch report assignment", details: error.message });
+  }
+});
+
+// Mark an existing report assignment as given (is_given = 1) and bump related submissions to status = 1
+app.post("/reports/assignment/:reportId/mark-given", async (req, res) => {
+  const { reportId } = req.params;
+  try {
+    await new Promise((resolve, reject) => {
+      const sql = `UPDATE report_assignment SET is_given = 1 WHERE report_assignment_id = ?`;
+      db.query(sql, [reportId], (err, result) => (err ? reject(err) : resolve(result)));
+    });
+
+    await new Promise((resolve, reject) => {
+      const sql = `UPDATE submission SET status = 1 WHERE report_assignment_id = ? AND status = 0`;
+      db.query(sql, [reportId], (err, result) => (err ? reject(err) : resolve(result)));
+    });
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Error marking report assignment as given:", error);
+    res.status(500).json({ error: "Failed to mark assignment as given", details: error.message });
+  }
+});
+
+// Coordinator upcoming deadlines (must be registered BEFORE the generic /reports router)
+app.get("/reports/upcoming-deadlines/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    console.log('🔄 [DEBUG] Fetching upcoming deadline submissions for coordinator:', userId);
+
+    const query = `
+      SELECT
+        s.submission_id,
+        s.report_assignment_id,
+        s.category_id,
+        s.submitted_by,
+        s.status,
+        s.value AS submission_title,
+        DATE_FORMAT(s.date_submitted, '%m/%d/%Y') AS date_submitted,
+
+        ra.title AS assignment_title,
+        DATE_FORMAT(ra.from_date, '%m/%d/%Y') AS from_date,
+        DATE_FORMAT(ra.to_date, '%m/%d/%Y') AS to_date,
+        ra.instruction,
+        ra.allow_late,
+        ra.is_given,
+        ra.is_archived,
+        ra.quarter,
+        ra.year,
+
+        c.category_name,
+        sc.sub_category_name,
+        sy.school_year,
+
+        ud.name AS submitted_by_name,
+        ud2.name AS given_by_name
+      FROM submission s
+      JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
+      JOIN category c ON ra.category_id = c.category_id
+      LEFT JOIN sub_category sc ON ra.sub_category_id = sc.sub_category_id
+      LEFT JOIN user_details ud ON s.submitted_by = ud.user_id
+      LEFT JOIN user_details ud2 ON ra.given_by = ud2.user_id
+      LEFT JOIN school_year sy ON sy.year_id = ra.year
+      WHERE s.submitted_by = ?
+      AND ra.is_given = 0
+      ORDER BY ra.to_date ASC, s.date_submitted ASC
+    `;
+
+    const result = await new Promise((resolve, reject) => {
+      db.query(query, [userId], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+
+    console.log('🔄 [DEBUG] Upcoming deadline submissions:', result.length);
+    res.json(result);
+  } catch (error) {
+    console.error("Error fetching upcoming deadline submissions:", error);
+    res.status(500).json({ error: "Failed to fetch upcoming deadline submissions", details: error.message });
+  }
+});
+
 /* ----------------- App routes ----------------- */
 app.use("/users", usersRouter);
 app.use("/reports", reportAssignmentRouter);
@@ -3193,6 +3621,251 @@ app.get("/sections/grade/:gradeLevelId", async (req, res) => {
   } catch (error) {
     console.error("Error fetching sections by grade:", error);
     res.status(500).json({ error: "Failed to fetch sections", details: error.message });
+  }
+});
+
+// Update report status from 0 (not given) to 1 (pending) when coordinator assigns to teachers
+app.post("/reports/update-status-to-pending", async (req, res) => {
+  try {
+    const { report_assignment_id, category_id, sub_category_id, quarter, year, assignees } = req.body;
+
+    if (report_assignment_id) {
+      // Strict: update just this assignment
+      const updateQuery = `
+        UPDATE report_assignment SET is_given = 1 WHERE report_assignment_id = ? AND is_given = 0
+      `;
+      const updateResult = await new Promise((resolve, reject) => {
+        db.query(updateQuery, [report_assignment_id], (err, results) => {
+          if (err) reject(err);
+          else resolve(results);
+        });
+      });
+      return res.json({ affectedRows: updateResult.affectedRows, mode: 'report_assignment_id' });
+    }
+
+    // Fallback (legacy): update by filter
+    const updateQuery = `
+      UPDATE report_assignment 
+      SET is_given = 1 
+      WHERE category_id = ? 
+        AND (sub_category_id = ? OR (sub_category_id IS NULL AND ? IS NULL))
+        AND quarter = ? 
+        AND year = ? 
+        AND is_given = 0
+    `;
+
+    const updateResult = await new Promise((resolve, reject) => {
+      db.query(updateQuery, [category_id, sub_category_id, sub_category_id, quarter, year], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+
+    res.json({ affectedRows: updateResult.affectedRows, mode: 'legacy-filter' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get single report assignment for editing
+app.get("/reports/assignment/:reportId", async (req, res) => {
+  try {
+    const { reportId } = req.params;
+    
+    console.log('🔄 [DEBUG] Fetching report assignment for editing:', reportId);
+
+    const query = `
+      SELECT 
+        ra.report_assignment_id,
+        ra.category_id,
+        ra.sub_category_id,
+        ra.given_by,
+        ra.quarter,
+        ra.year,
+        ra.title,
+        ra.from_date,
+        ra.to_date,
+        ra.instruction,
+        ra.is_given,
+        ra.is_archived,
+        ra.allow_late,
+        ra.number_of_submission,
+        c.category_name,
+        sc.sub_category_name,
+        sy.school_year,
+        u.name as given_by_name,
+        u.role as given_by_role
+      FROM report_assignment ra
+      LEFT JOIN category c ON c.category_id = ra.category_id
+      LEFT JOIN sub_category sc ON sc.sub_category_id = ra.sub_category_id
+      LEFT JOIN school_year sy ON sy.year_id = ra.year
+      LEFT JOIN user_details u ON u.user_id = ra.given_by
+      WHERE ra.report_assignment_id = ?
+    `;
+    
+    const result = await new Promise((resolve, reject) => {
+      db.query(query, [reportId], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+
+    if (result.length === 0) {
+      return res.status(404).json({ error: "Report assignment not found" });
+    }
+
+    console.log('🔄 [DEBUG] Report assignment data:', result[0]);
+    res.json(result[0]);
+  } catch (error) {
+    console.error("Error fetching report assignment:", error);
+    res.status(500).json({ error: "Failed to fetch report assignment", details: error.message });
+  }
+});
+
+// Update report assignment
+app.put("/reports/assignment/:reportId", async (req, res) => {
+  try {
+    const { reportId } = req.params;
+    const { title, quarter, year, from_date, to_date, instruction, is_given, allow_late, number_of_submission, assignees } = req.body;
+    
+    console.log('🔄 [DEBUG] Updating report assignment:', reportId, req.body);
+
+    // Update the report assignment
+    const updateQuery = `
+      UPDATE report_assignment 
+      SET title = ?, quarter = ?, year = ?, from_date = ?, to_date = ?, 
+          instruction = ?, is_given = ?, allow_late = ?, number_of_submission = ?
+      WHERE report_assignment_id = ?
+    `;
+    
+    const updateResult = await new Promise((resolve, reject) => {
+      db.query(updateQuery, [
+        title, quarter, year, from_date, to_date, 
+        instruction, is_given, allow_late, number_of_submission, reportId
+      ], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+
+    console.log('🔄 [DEBUG] Updated report assignment:', updateResult.affectedRows);
+
+    // Update existing submissions for the new assignees
+    if (assignees && assignees.length > 0) {
+      // First, get existing submissions for this report
+      const getSubmissionsQuery = `SELECT submission_id FROM submission WHERE report_assignment_id = ?`;
+      const existingSubmissions = await new Promise((resolve, reject) => {
+        db.query(getSubmissionsQuery, [reportId], (err, results) => {
+          if (err) reject(err);
+          else resolve(results);
+        });
+      });
+
+      // Update existing submissions to new assignees
+      for (const submission of existingSubmissions) {
+        const updateSubmissionQuery = `
+          UPDATE submission 
+          SET submitted_by = ?, status = ?
+          WHERE submission_id = ?
+        `;
+        
+        // Assign to first assignee and set status to pending
+        await new Promise((resolve, reject) => {
+          db.query(updateSubmissionQuery, [assignees[0], 1, submission.submission_id], (err, results) => {
+            if (err) reject(err);
+            else resolve(results);
+          });
+        });
+      }
+
+      // Create new submissions for additional assignees
+      for (let i = 1; i < assignees.length; i++) {
+        const insertSubmissionQuery = `
+          INSERT INTO submission (report_assignment_id, category_id, submitted_by, status, number_of_submission, fields)
+          SELECT ?, category_id, ?, 1, ?, '{}'
+          FROM report_assignment 
+          WHERE report_assignment_id = ?
+        `;
+        
+        await new Promise((resolve, reject) => {
+          db.query(insertSubmissionQuery, [reportId, assignees[i], number_of_submission, reportId], (err, results) => {
+            if (err) reject(err);
+            else resolve(results);
+          });
+        });
+      }
+    }
+
+    res.json({ 
+      success: true, 
+      affectedRows: updateResult.affectedRows,
+      message: "Report assignment updated successfully"
+    });
+  } catch (error) {
+    console.error("Error updating report assignment:", error);
+    res.status(500).json({ error: "Failed to update report assignment", details: error.message });
+  }
+});
+
+// Get upcoming deadline submissions for coordinators (individual submissions with is_given = 0)
+app.get("/reports/upcoming-deadlines/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    console.log('🔄 [DEBUG] Fetching upcoming deadline submissions for coordinator:', userId);
+
+    const query = `
+      SELECT
+        s.submission_id,
+        s.report_assignment_id,
+        s.category_id,
+        s.submitted_by,
+        s.status,
+        s.value AS submission_title,
+        DATE_FORMAT(s.date_submitted, '%m/%d/%Y') AS date_submitted,
+
+        ra.title AS assignment_title,
+        DATE_FORMAT(ra.from_date, '%m/%d/%Y') AS from_date,
+        DATE_FORMAT(ra.to_date, '%m/%d/%Y') AS to_date,
+        ra.instruction,
+        ra.allow_late,
+        ra.is_given,
+        ra.is_archived,
+        ra.quarter,
+        ra.year,
+        ra.number_of_submission,
+
+        c.category_name,
+        sc.sub_category_name,
+        sy.school_year,
+
+        ud.name AS submitted_by_name,
+        ud2.name AS given_by_name
+      FROM submission s
+      JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
+      JOIN category c ON ra.category_id = c.category_id
+      LEFT JOIN sub_category sc ON ra.sub_category_id = sc.sub_category_id
+      LEFT JOIN user_details ud ON s.submitted_by = ud.user_id
+      LEFT JOIN user_details ud2 ON ra.given_by = ud2.user_id
+      LEFT JOIN school_year sy ON sy.year_id = ra.year
+      WHERE s.submitted_by = ?
+      AND ra.is_given = 0
+      ORDER BY ra.to_date ASC, s.date_submitted ASC
+    `;
+    
+    const result = await new Promise((resolve, reject) => {
+      db.query(query, [userId], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+
+    console.log('🔄 [DEBUG] Upcoming deadline submissions:', result.length);
+    console.log('🔄 [DEBUG] Query results:', result);
+    res.json(result);
+  } catch (error) {
+    console.error("Error fetching upcoming deadline submissions:", error);
+    res.status(500).json({ error: "Failed to fetch upcoming deadline submissions", details: error.message });
   }
 });
 

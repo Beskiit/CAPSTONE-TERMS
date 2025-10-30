@@ -43,8 +43,7 @@ function UserManagement() {
   });
   const [showYearQuarterModal, setShowYearQuarterModal] = useState(false);
   const [yearQuarter, setYearQuarter] = useState({
-    startYear: '',
-    endYear: ''
+    startYear: ''
   });
   const [activeYearQuarter, setActiveYearQuarter] = useState(null);
   const [allYearQuarters, setAllYearQuarters] = useState([]);
@@ -208,20 +207,17 @@ function UserManagement() {
 
   const handleAddYearQuarter = async (e) => {
     e.preventDefault();
-    if (!yearQuarter.startYear || !yearQuarter.endYear) {
-      alert("Please fill in all fields");
+    if (!yearQuarter.startYear) {
+      alert("Please select a year");
       return;
     }
 
-    // Validate that end year is greater than start year
-    if (parseInt(yearQuarter.endYear) <= parseInt(yearQuarter.startYear)) {
-      alert("End year must be greater than start year");
-      return;
-    }
+    // Automatically calculate end year (start year + 1)
+    const endYear = parseInt(yearQuarter.startYear) + 1;
 
     try {
       // Create the year string in format "2024-2025"
-      const yearString = `${yearQuarter.startYear}-${yearQuarter.endYear}`;
+      const yearString = `${yearQuarter.startYear}-${endYear}`;
       
       const response = await fetch(`${API_BASE}/admin/school-year`, {
         method: 'POST',
@@ -230,7 +226,7 @@ function UserManagement() {
         },
         body: JSON.stringify({
           startYear: yearQuarter.startYear,
-          endYear: yearQuarter.endYear
+          endYear: endYear.toString()
         }),
         credentials: "include"
       });
@@ -241,7 +237,7 @@ function UserManagement() {
 
       const addedSchoolYear = await response.json();
       setShowYearQuarterModal(false);
-      setYearQuarter({ startYear: '', endYear: '' });
+      setYearQuarter({ startYear: '' });
       fetchActiveYearQuarter(); // Refresh the active year quarter
       fetchAllYearQuarters(); // Refresh the list of year quarters
       alert("School Year added successfully! All 4 quarters have been created automatically.");
@@ -522,7 +518,7 @@ function UserManagement() {
                 <span className="add-user-text">Add User</span>
               </button>
               <button className="add-user-btn year-quarter-btn" type="button" onClick={() => setShowYearQuarterModal(true)}>
-                <span className="add-user-text">Year & Quarter</span>
+                <span className="add-user-text">Add School Year</span>
               </button>
             </div>
 
@@ -935,82 +931,12 @@ function UserManagement() {
           </div>
           
           <div className="year-quarter-content">
-            {/* Current Active Year & Quarter */}
-            {activeYearQuarter && (
-              <div className="active-year-quarter">
-                <h3>Current Active:</h3>
-                <div className="active-info">
-                  <span className="active-year">
-                    {activeYearQuarter.school_year || 'Unknown School Year'}
-                  </span>
-                  <span className="active-quarter">
-                    {activeYearQuarter.quarter_name || 
-                     activeYearQuarter.quarter_short_name || 
-                     `Q${activeYearQuarter.quarter}`}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {/* Select Active Year & Quarter */}
-            {allYearQuarters.length > 0 && (
-              <div className="select-active-section">
-                <h3>Select Active Year & Quarter</h3>
-                <div className="year-quarter-assignment">
-                  <div className="assignment-controls">
-                    <div className="form-group">
-                      <label htmlFor="assignYear">Year:</label>
-                      <select
-                        id="assignYear"
-                        value={selectedYear || ''}
-                        onChange={(e) => {
-                          setSelectedYear(e.target.value);
-                          setSelectedQuarter(''); // Reset quarter when year changes
-                        }}
-                        className="dropdown-select"
-                      >
-                        <option value="">Select year...</option>
-                        {allYearQuarters.map((year) => (
-                          <option key={year.year_id} value={year.school_year}>
-                            {year.school_year}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    
-                    <div className="form-group">
-                      <label htmlFor="assignQuarter">Quarter:</label>
-                      <QuarterSelector
-                        id="assignQuarter"
-                        selectedQuarter={selectedQuarter ? parseInt(selectedQuarter) : null}
-                        onQuarterChange={(quarter) => setSelectedQuarter(quarter.toString())}
-                        disabled={!selectedYear}
-                        placeholder="Select quarter..."
-                      />
-                    </div>
-                    
-                    <div className="form-group">
-                      <button
-                        type="button"
-                        onClick={handleSetActiveYearQuarter}
-                        disabled={!selectedYear || !selectedQuarter}
-                        className="mark-button"
-                      >
-                        Mark as Active
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-
             {/* Add New School Year */}
             <div className="add-year-quarter-section">
               <h3>Add New School Year</h3>
               <form onSubmit={handleAddYearQuarter} className="year-quarter-form">
                 <div className="form-group">
-                  <label htmlFor="startYear">Start Year:</label>
+                  <label htmlFor="startYear">Year:</label>
                   <select
                     id="startYear"
                     name="startYear"
@@ -1019,24 +945,7 @@ function UserManagement() {
                     required
                     className="dropdown-select"
                   >
-                    <option value="">Select start year...</option>
-                    {Array.from({ length: 15 }, (_, i) => 2020 + i).map(year => (
-                      <option key={year} value={year}>{year}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor="endYear">End Year:</label>
-                  <select
-                    id="endYear"
-                    name="endYear"
-                    value={yearQuarter.endYear}
-                    onChange={handleYearQuarterChange}
-                    required
-                    className="dropdown-select"
-                  >
-                    <option value="">Select end year...</option>
+                    <option value="">Select year...</option>
                     {Array.from({ length: 15 }, (_, i) => 2020 + i).map(year => (
                       <option key={year} value={year}>{year}</option>
                     ))}

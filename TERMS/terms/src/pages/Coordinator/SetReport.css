@@ -456,3 +456,58 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Disabled field styling for coordinators */
+.schedule-form input:disabled,
+.schedule-form select:disabled,
+.schedule-form textarea:disabled,
+.schedule-form button:disabled {
+  background-color: #f5f5f5;
+  color: #999;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.schedule-form input:disabled::placeholder,
+.schedule-form textarea:disabled::placeholder {
+  color: #ccc;
+}
+
+/* Visual indicator for disabled fields */
+.schedule-form .form-row:has(input:disabled, select:disabled, textarea:disabled) label {
+  color: #999;
+  position: relative;
+}
+
+/* Permissions notice styling */
+.permissions-notice {
+  background-color: #e3f2fd;
+  border: 1px solid #2196f3;
+  border-radius: 4px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+
+.permissions-notice.principal {
+  background-color: #e8f5e8;
+  border-color: #4caf50;
+}
+
+.permissions-notice p {
+  margin: 0;
+  color: #333;
+}
+
+.permissions-notice strong {
+  color: #1976d2;
+}
+
+.permissions-notice.principal strong {
+  color: #388e3c;
+}
+
+/* Date input validation styling */
+.schedule-form input[type="date"]:focus {
+  box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
+}

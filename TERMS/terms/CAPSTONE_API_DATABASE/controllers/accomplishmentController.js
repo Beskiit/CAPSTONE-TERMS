@@ -31,6 +31,7 @@ export const giveAccomplishmentReport = (req, res) => {
     submitted_by,
     assignees,
     title, // e.g. "Activity Completion Report"
+    parent_report_assignment_id, // for parent-child linking
   } = req.body || {};
 
   if (category_id == null || quarter == null || year == null || !to_date) {
@@ -101,8 +102,8 @@ export const giveAccomplishmentReport = (req, res) => {
 
     const insertReportSql = `
       INSERT INTO report_assignment
-        (category_id, sub_category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (category_id, sub_category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title, parent_report_assignment_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     const reportVals = [
       category_id,
@@ -117,6 +118,7 @@ export const giveAccomplishmentReport = (req, res) => {
       _is_archived,
       _allow_late,
       title,
+      parent_report_assignment_id ?? null,
     ];
 
     db.query(insertReportSql, reportVals, (insErr, insRes) => {
@@ -136,36 +138,33 @@ export const giveAccomplishmentReport = (req, res) => {
           );
         }
 
-        // Create all submissions in parallel
-        const submissionPromises = recipients.map(teacherId => {
-          return new Promise((resolve, reject) => {
-            const insertSubmissionSql = `
-              INSERT INTO submission
-                (report_assignment_id, category_id, submitted_by, status, number_of_submission, value, date_submitted, fields)
-              VALUES
-                (?, ?, ?, 1, ?, ?, NOW(), ?)
-            `;
-            const subVals = [
-              report_assignment_id,
-              category_id,
-              teacherId,
-              nextNums[teacherId],
-              title,
-              initialFields,
-            ];
-
-            db.query(insertSubmissionSql, subVals, (subErr) => {
-              if (subErr) {
-                reject(subErr);
-              } else {
-                resolve();
-              }
+        // Sequentially insert all submissions (avoid lock wait timeout)
+        const insertAllSubmissionsSequentially = async () => {
+          for (const teacherId of recipients) {
+            await new Promise((resolve, reject) => {
+              const insertSubmissionSql = `
+                INSERT INTO submission
+                  (report_assignment_id, category_id, submitted_by, status, number_of_submission, value, date_submitted, fields)
+                VALUES
+                  (?, ?, ?, 1, ?, ?, NOW(), ?)
+              `;
+              const subVals = [
+                report_assignment_id,
+                category_id,
+                teacherId,
+                nextNums[teacherId],
+                title,
+                initialFields,
+              ];
+              db.query(insertSubmissionSql, subVals, (subErr) => {
+                if (subErr) reject(subErr);
+                else resolve();
+              });
             });
-          });
-        });
+          }
+        };
 
-        // Wait for all submissions to be created
-        Promise.all(submissionPromises)
+        insertAllSubmissionsSequentially()
           .then(() => {
             // Create notifications
             const nameSql = `SELECT name FROM user_details WHERE user_id = ? LIMIT 1`;
@@ -179,7 +178,7 @@ export const giveAccomplishmentReport = (req, res) => {
                 ref_type: 'report_assignment',
                 ref_id: report_assignment_id,
               }));
-              
+
               createNotificationsBulk(notifications, () => {
                 db.query("COMMIT", (cErr) => {
                   if (cErr) {
@@ -353,8 +352,9 @@ export const patchAccomplishmentSubmission = (req, res) => {
 export const getAccomplishmentPeers = (req, res) => {
   const { id } = req.params;
   const ra = req.query.ra; // optional report_assignment_id
+  const pra = req.query.pra; // optional parent_report_assignment_id for strict separation
 
-  console.log("getAccomplishmentPeers:", { id, ra });
+  console.log("getAccomplishmentPeers:", { id, ra, pra });
 
   const fetchSqlFromSubmission = `
     SELECT s2.submission_id, s2.report_assignment_id, s2.value AS title, s2.status, s2.fields
@@ -365,7 +365,7 @@ export const getAccomplishmentPeers = (req, res) => {
 
   // NOTE: exclude current submission when ra= is provided
   // Only get submissions from TEACHERS (role = 'teacher'), not coordinators
-  // Look for ALL teacher submissions with status >= 2, regardless of coordinator
+  // Look for teacher submissions with status >= 2 from the specific report_assignment_id
   const fetchSqlFromRA = `
     SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields
     FROM submission s
@@ -374,6 +374,19 @@ export const getAccomplishmentPeers = (req, res) => {
     WHERE s.submission_id <> ?
       AND s.status >= 2
       AND LOWER(ud.role) = 'teacher'
+      AND s.report_assignment_id = ?
+  `;
+
+  // Parent-child query: get teacher submissions from child assignments of the parent
+  const fetchSqlFromParent = `
+    SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields
+    FROM submission s
+    JOIN user_details ud ON s.submitted_by = ud.user_id
+    JOIN report_assignment ra_child ON s.report_assignment_id = ra_child.report_assignment_id
+    WHERE s.submission_id <> ?
+      AND s.status >= 2
+      AND LOWER(ud.role) = 'teacher'
+      AND ra_child.parent_report_assignment_id = ?
   `;
   
   console.log("=== DEBUGGING QUERY ===");
@@ -544,7 +557,7 @@ export const getAccomplishmentPeers = (req, res) => {
         }
         
         // Now run the actual query
-        db.query(sql, [ra, ra, id], (err, rows) => {
+        db.query(sql, [id, ra], (err, rows) => {
           console.log("Query result:", { err, rowCount: rows?.length, rows });
           if (err) return res.status(500).send("DB error: " + err);
           const groups = new Map();
@@ -627,7 +640,8 @@ export const getAccomplishmentPeers = (req, res) => {
     }
   };
 
-  if (ra) return run(fetchSqlFromRA, [id]);
+  if (pra) return run(fetchSqlFromParent, [id, pra]);
+  if (ra) return run(fetchSqlFromRA, [id, ra]);
   return run(fetchSqlFromSubmission, [id]);
 };
 
@@ -638,11 +652,20 @@ export const getAccomplishmentPeers = (req, res) => {
  */
 export const consolidateAccomplishmentByTitle = (req, res) => {
   const { id } = req.params;
-  const { title } = req.body || {};
+  const { title, parent_assignment_id } = req.body || {};
   if (!title) return res.status(400).json({ error: "title is required" });
 
-  // Use the same logic as the peers query - find ALL teacher submissions with status >= 2
-  const peersSql = `
+  // Use parent-child filtering if parent_assignment_id is provided
+  const peersSql = parent_assignment_id ? `
+    SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields
+    FROM submission s
+    JOIN user_details ud ON s.submitted_by = ud.user_id
+    JOIN report_assignment ra_child ON s.report_assignment_id = ra_child.report_assignment_id
+    WHERE s.submission_id <> ?
+      AND s.status >= 2
+      AND LOWER(ud.role) = 'teacher'
+      AND ra_child.parent_report_assignment_id = ?
+  ` : `
     SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields
     FROM submission s
     JOIN user_details ud ON s.submitted_by = ud.user_id
@@ -651,7 +674,8 @@ export const consolidateAccomplishmentByTitle = (req, res) => {
       AND s.status >= 2
       AND LOWER(ud.role) = 'teacher'
   `;
-  db.query(peersSql, [id], (err, rows) => {
+  const queryParams = parent_assignment_id ? [id, parent_assignment_id] : [id];
+  db.query(peersSql, queryParams, (err, rows) => {
     if (err) return res.status(500).send("DB error: " + err);
     const targetKey = String(title).trim().toLowerCase();
     const combined = new Set();
@@ -692,6 +716,36 @@ export const consolidateAccomplishmentByTitle = (req, res) => {
         if (updErr) return res.status(500).send("Update failed: " + updErr);
         res.json({ ok: true, images: next.images, count: next.images.length });
       });
+    });
+  });
+};
+
+/**
+ * POST /reports/accomplishment/link-parent
+ * Links a teacher assignment to a coordinator's parent assignment
+ */
+export const linkParentAssignment = (req, res) => {
+  const { teacher_assignment_id, coordinator_assignment_id } = req.body || {};
+  
+  if (!teacher_assignment_id || !coordinator_assignment_id) {
+    return res.status(400).json({ error: "teacher_assignment_id and coordinator_assignment_id are required" });
+  }
+
+  const updateSql = `
+    UPDATE report_assignment 
+    SET parent_report_assignment_id = ? 
+    WHERE report_assignment_id = ?
+  `;
+
+  db.query(updateSql, [coordinator_assignment_id, teacher_assignment_id], (err, result) => {
+    if (err) {
+      return res.status(500).json({ error: "Failed to link parent assignment: " + err.message });
+    }
+    
+    res.json({ 
+      success: true, 
+      message: "Parent assignment linked successfully",
+      affectedRows: result.affectedRows 
     });
   });
 };

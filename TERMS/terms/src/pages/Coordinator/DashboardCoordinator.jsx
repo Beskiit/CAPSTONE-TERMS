@@ -12,6 +12,8 @@ import Pending from '../../assets/pending.svg';
 import Approved from '../../assets/approved.svg';
 import Rejected from '../../assets/rejected.svg';
 import DeadlineComponent from "../Teacher/DeadlineComponent.jsx";
+import UpcomingDeadlineComponent from "./UpcomingDeadlineComponent.jsx";
+// React already imported above
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
 
@@ -27,6 +29,7 @@ function DashboardCoordinator() {
     rejected: 0,
   });
   const [deadlines, setDeadlines] = useState([]);
+  const [upcomingSubmissions, setUpcomingSubmissions] = useState([]);
   const [submittedReports, setSubmittedReports] = useState([]);
   const [approvedReports, setApprovedReports] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -142,6 +145,33 @@ function DashboardCoordinator() {
     };
 
     fetchDeadlines();
+  }, [user]);
+
+  // Fetch upcoming deadline submissions (is_given = 0)
+  useEffect(() => {
+    const fetchUpcomingSubmissions = async () => {
+      console.log('🔄 [DEBUG] Frontend: Starting fetchUpcomingSubmissions for user:', user.user_id);
+      try {
+        const res = await fetch(
+          `${API_BASE}/reports/upcoming-deadlines/${user.user_id}`,
+          { credentials: "include" }
+        );
+        if (!res.ok) {
+          const txt = await res.text();
+          console.warn("Upcoming submissions fetch failed:", res.status, txt);
+          return;
+        }
+        const data = await res.json();
+        console.log('🔄 [DEBUG] Fetched upcoming submissions:', data.length);
+        setUpcomingSubmissions(data);
+      } catch (err) {
+        console.error("Failed to fetch upcoming submissions:", err);
+      }
+    };
+
+    if (user?.user_id) {
+      fetchUpcomingSubmissions();
+    }
   }, [user]);
 
   // Fetch submitted and approved reports data
@@ -470,10 +500,11 @@ reportQuarter === selectedQuarterObj?.label;
           </div>
         </div>
 
-        {/* Sidebar with calendar + upcoming deadlines */}
+        {/* Sidebar with calendar + original separate components */}
         <div className="dashboard-sidebar">
           <CalendarComponent deadlines={deadlines} />
           <DeadlineComponent deadlines={deadlines} />
+          <UpcomingDeadlineComponent upcomingSubmissions={upcomingSubmissions} />
         </div>
       </div>
     </>
@@ -595,7 +626,8 @@ function CalendarComponent({ deadlines = [] }) {
     if (kind === "mps")            return navigate("/MPSInstruction", { state: commonState });
     if (kind === "accomplishment") return navigate("/AccomplishmentReportInstruction", { state: commonState });
     if (kind === "cog")            return navigate("/ClassificationOfGradesInstruction", { state: commonState });
-    return navigate("/SubmittedReport");
+    // Fallback to original grouped flow
+    return navigate("/AssignedReport");
   };
 
   // Function to handle tile click
@@ -650,3 +682,113 @@ function CalendarComponent({ deadlines = [] }) {
 }
 
 export default DashboardCoordinator;
+
+// CombinedDeadlines was used during the merge; reverting to original separate components.
+function CombinedDeadlines({ deadlines = [], needsScheduling = [] }) {
+  const navigate = useNavigate();
+
+  const fmtDateTime = (iso) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return String(iso);
+    return d.toLocaleString("en-PH", {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+  };
+
+  const detectType = (d) => {
+    const title   = (d?.title || d?.assignment_title || "").toLowerCase();
+    const catName = (d?.category_name || "").toLowerCase();
+    const subName = (d?.sub_category_name || "").toLowerCase();
+    const subId   = Number(d?.sub_category_id);
+    const catId   = Number(d?.category_id);
+
+    const hay = `${title} ${catName} ${subName}`;
+    if (hay.includes("laempl")) return "laempl";
+    if (hay.includes("mps")) return "mps";
+    if (hay.includes("accomplishment")) return "accomplishment";
+    if (hay.includes("classification of grades") || hay.includes("classification")) return "cog";
+
+    if (subId === 20) return "laempl";
+    if (subId === 30) return "mps";
+    if (catId === 1)  return "accomplishment";
+    if (catId === 2)  return "laempl";
+    return "generic";
+  };
+
+  const onClickRegular = (d) => {
+    const kind = detectType(d);
+    const commonState = {
+      submission_id: d?.submission_id ?? d?.id ?? d?.report_assignment_id ?? null,
+      title: d.title || d.assignment_title,
+      instruction: d.instruction,
+      from_date: d.from_date,
+      to_date: d.to_date,
+      number_of_submission: d.number_of_submission,
+      allow_late: d.allow_late,
+    };
+
+    if (kind === "laempl")         return navigate("/LAEMPLInstruction", { state: commonState });
+    if (kind === "mps")            return navigate("/MPSInstruction", { state: commonState });
+    if (kind === "accomplishment") return navigate("/AccomplishmentReportInstruction", { state: commonState });
+    if (kind === "cog")            return navigate("/ClassificationOfGradesInstruction", { state: commonState });
+    return navigate("/SubmittedReport");
+  };
+
+  const onClickNeedsScheduling = (d) => {
+    // Send coordinator to SetReport for editing principal's assignment
+    navigate(`/SetReport?reportId=${d.report_assignment_id}&isPrincipalReport=true`);
+  };
+
+  // Single unified list: needs scheduling first (marked), then regular deadlines
+  const unified = [
+    ...(needsScheduling || []).map(d => ({ ...d, __needs: true })),
+    ...(deadlines || []).map(d => ({ ...d, __needs: false })),
+  ];
+
+  return (
+    <div className="deadline-component">
+      <h4>Upcoming Deadlines</h4>
+      <hr />
+      <div className="deadline-box">
+        <div className="deadline-list">
+          {unified.length > 0 ? (
+            unified.slice(0, 10).map((d, idx) => {
+              const title = d.title || d.assignment_title || "Untitled Report";
+              const onClick = d.__needs ? () => onClickNeedsScheduling(d) : () => onClickRegular(d);
+              return (
+                <a key={d.submission_id || d.report_assignment_id || idx}
+                   className="deadline-item"
+                   role="button"
+                   tabIndex={0}
+                   onClick={onClick}
+                   onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}>
+                  <p className="deadline-title">{title}</p>
+                  <div className="deadline-details">
+                    {d.__needs && (
+                      <p><b>Teacher:</b> {d.submitted_by_name || 'N/A'}</p>
+                    )}
+                    <p><b>Category:</b> {d.category_name || 'N/A'} {d.sub_category_name && `(${d.sub_category_name})`}</p>
+                    <p><b>Due:</b> {fmtDateTime(d.to_date)}</p>
+                    {d.__needs ? (
+                      <span className="status-badge" style={{ background:'#ffcc80', color:'#7a4d00', padding:'2px 6px', borderRadius:4, marginTop:4 }}>Not Given</span>
+                    ) : (
+                      <span className="status-badge" style={{ background:'#c8e6c9', color:'#1b5e20', padding:'2px 6px', borderRadius:4, marginTop:4 }}>Given</span>
+                    )}
+                  </div>
+                </a>
+              );
+            })
+          ) : (
+            <p style={{ opacity: 0.8, margin: 0 }}>No upcoming deadlines 🎉</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

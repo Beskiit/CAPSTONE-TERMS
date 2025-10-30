@@ -19,15 +19,11 @@ function ForApproval() {
     const [error, setError] = useState("");
     
     // Dropdown states
-    const [selectedSchoolYear, setSelectedSchoolYear] = useState(2025);
-    const [selectedQuarter, setSelectedQuarter] = useState(1);
-    const [schoolYears, setSchoolYears] = useState([{ value: 2025, label: '2025-2026' }]);
-    const [quarters, setQuarters] = useState([
-        { value: 1, label: '1st Quarter' },
-        { value: 2, label: '2nd Quarter' },
-        { value: 3, label: '3rd Quarter' },
-        { value: 4, label: '4th Quarter' }
-    ]);
+    const [selectedSchoolYear, setSelectedSchoolYear] = useState('');
+    const [selectedQuarter, setSelectedQuarter] = useState('');
+    const [schoolYears, setSchoolYears] = useState([]);
+    const [assignmentYearsAndQuarters, setAssignmentYearsAndQuarters] = useState([]);
+    const [quarters, setQuarters] = useState([]);
 
     useEffect(() => {
     const fetchUser = async () => {
@@ -45,77 +41,97 @@ function ForApproval() {
     fetchUser();
   }, []);
 
-  // Fetch school years
+  // Fetch all school years and quarters from admin API
   useEffect(() => {
-    const fetchSchoolYears = async () => {
+    const fetchAllSchoolYearsAndQuarters = async () => {
       try {
-        const res = await fetch(`${API_BASE}/admin/school-years`, {
+        console.log('🔍 [DEBUG] Fetching all school years and quarters for ForApproval');
+        
+        // Fetch school years
+        const schoolYearsRes = await fetch(`${API_BASE}/admin/school-years`, {
           credentials: "include"
         });
-        if (res.ok) {
-          const data = await res.json();
-          // Format years properly
-          const formattedYears = data.map(year => ({
-            value: year.year_id,
-            label: year.school_year
-          }));
-          setSchoolYears(formattedYears);
+        
+        if (schoolYearsRes.ok) {
+          const schoolYearsData = await schoolYearsRes.json();
+          console.log('🔍 [DEBUG] School years data:', schoolYearsData);
           
-          // Set default to the first year if available
-          if (formattedYears.length > 0 && !selectedSchoolYear) {
-            setSelectedSchoolYear(formattedYears[0].value);
+          // Fetch quarters for each school year
+          const quartersRes = await fetch(`${API_BASE}/admin/quarters-comprehensive`, {
+            credentials: "include"
+          });
+          
+          if (quartersRes.ok) {
+            const quartersData = await quartersRes.json();
+            console.log('🔍 [DEBUG] Quarters data:', quartersData);
+            
+            // Combine school years with their quarters
+            const combinedData = schoolYearsData.map(year => {
+              const yearQuarters = quartersData.filter(q => q.year === year.year_id);
+              return {
+                ...year,
+                quarters: yearQuarters.map(q => ({
+                  quarter: q.quarter,
+                  quarter_name: q.quarter_name,
+                  quarter_short_name: q.quarter_short_name
+                }))
+              };
+            });
+            
+            console.log('🔍 [DEBUG] Combined data:', combinedData);
+            setAssignmentYearsAndQuarters(combinedData);
+            setSchoolYears(schoolYearsData); // Keep separate for filtering
+            
+            // Set default to the first year if available
+            if (combinedData.length > 0 && !selectedSchoolYear) {
+              setSelectedSchoolYear(combinedData[0].school_year);
+            }
+          } else {
+            console.error("Failed to fetch quarters");
+            setAssignmentYearsAndQuarters(schoolYearsData);
+            setSchoolYears(schoolYearsData);
           }
         } else {
-          // If API fails, set default school year
-          setSchoolYears([{ value: 1, label: '2025-2026' }]);
-          if (!selectedSchoolYear) {
-            setSelectedSchoolYear(1);
-          }
+          console.error("Failed to fetch school years");
+          setAssignmentYearsAndQuarters([]);
+          setSchoolYears([]);
         }
       } catch (err) {
-        console.error("Failed to fetch school years:", err);
-        // Set a default school year if API fails
-        setSchoolYears([{ value: 1, label: '2025-2026' }]);
-        if (!selectedSchoolYear) {
-          setSelectedSchoolYear(1);
-        }
+        console.error("Failed to fetch school years and quarters:", err);
+        setAssignmentYearsAndQuarters([]);
+        setSchoolYears([]);
       }
     };
-    fetchSchoolYears();
+    fetchAllSchoolYearsAndQuarters();
   }, []);
 
-  // Set quarters using quarter enum service when year changes
+  // Update quarters when school year changes
   useEffect(() => {
-    if (selectedSchoolYear) {
-      const fetchQuarters = async () => {
-        try {
-          const formattedQuarters = await QuarterEnumService.getFormattedQuarters();
-          setQuarters(formattedQuarters);
-          
-          // Set default to the first quarter if not already selected
-          if (!selectedQuarter) {
-            setSelectedQuarter(1);
-          }
-        } catch (error) {
-          console.error('Error fetching quarters:', error);
-          // Fallback to static quarters
-          const staticQuarters = [
-            { value: 1, label: 'Quarter 1', quarter: 1 },
-            { value: 2, label: 'Quarter 2', quarter: 2 },
-            { value: 3, label: 'Quarter 3', quarter: 3 },
-            { value: 4, label: 'Quarter 4', quarter: 4 }
-          ];
-          setQuarters(staticQuarters);
-          
-          if (!selectedQuarter) {
-            setSelectedQuarter(1);
-          }
+    if (selectedSchoolYear && assignmentYearsAndQuarters.length > 0) {
+      const selectedYear = assignmentYearsAndQuarters.find(year => year.school_year === selectedSchoolYear);
+      console.log('🔍 [DEBUG] Selected year for quarters:', selectedYear);
+      if (selectedYear && selectedYear.quarters) {
+        const quarterOptions = selectedYear.quarters.map(q => ({
+          value: q.quarter,
+          label: q.quarter_name
+        }));
+        console.log('🔍 [DEBUG] Quarter options:', quarterOptions);
+        setQuarters(quarterOptions);
+        
+        // Reset quarter selection if current selection is not available in new year
+        if (selectedQuarter && !selectedYear.quarters.some(q => q.quarter.toString() === selectedQuarter)) {
+          setSelectedQuarter('');
         }
-      };
-      
-      fetchQuarters();
+      } else {
+        console.log('🔍 [DEBUG] No quarters found for selected year');
+        setQuarters([]);
+        setSelectedQuarter('');
+      }
+    } else {
+      setQuarters([]);
+      setSelectedQuarter('');
     }
-  }, [selectedSchoolYear]);
+  }, [selectedSchoolYear, assignmentYearsAndQuarters]);
 
   // Fetch submissions for principal approval
   useEffect(() => {
@@ -157,16 +173,23 @@ function ForApproval() {
       const assignmentYear = submission.assignment_year || submission.year;
       const assignmentQuarter = submission.assignment_quarter || submission.quarter;
       
-      // Handle both year_id format (1) and actual year format (2025)
-      const selectedYear = parseInt(selectedSchoolYear);
-      const selectedQtr = parseInt(selectedQuarter);
+      // Find the selected year object from the admin API data
+      const selectedYearObj = schoolYears.find(year => year.school_year === selectedSchoolYear);
       
-      // If assignment year is 1, it means it's using year_id format
-      // If assignment year is 2025, it means it's using actual year format
-      const yearMatches = (assignmentYear === selectedYear) || 
-                        (assignmentYear === 1 && selectedYear === 2025);
+      let yearMatches = true;
+      let quarterMatches = true;
       
-      return yearMatches && assignmentQuarter === selectedQtr;
+      // Filter by school year if selected
+      if (selectedSchoolYear && selectedYearObj) {
+        yearMatches = assignmentYear === selectedYearObj.year_id;
+      }
+      
+      // Filter by quarter if selected
+      if (selectedQuarter) {
+        quarterMatches = assignmentQuarter === parseInt(selectedQuarter);
+      }
+      
+      return yearMatches && quarterMatches;
     });
 
     setFilteredSubmissions(filtered);
@@ -187,13 +210,13 @@ function ForApproval() {
                                 <select 
                                     id="school-year-select"
                                     value={selectedSchoolYear || ''} 
-                                    onChange={(e) => setSelectedSchoolYear(parseInt(e.target.value) || 2025)}
+                                    onChange={(e) => setSelectedSchoolYear(e.target.value)}
                                     className="dropdown-select"
                                 >
                                     <option value="">Select School Year</option>
-                                    {schoolYears.map(year => (
-                                        <option key={year.value} value={year.value}>
-                                            {year.label}
+                                    {assignmentYearsAndQuarters.map(year => (
+                                        <option key={year.year_id} value={year.school_year}>
+                                            {year.school_year}
                                         </option>
                                     ))}
                                 </select>
@@ -201,12 +224,19 @@ function ForApproval() {
                             
                             <div className="dropdown-group">
                                 <label htmlFor="quarter-select">Quarter:</label>
-                                <QuarterSelector
+                                <select
                                     id="quarter-select"
-                                    selectedQuarter={selectedQuarter}
-                                    onQuarterChange={setSelectedQuarter}
-                                    placeholder="Select Quarter"
-                                />
+                                    value={selectedQuarter || ''}
+                                    onChange={(e) => setSelectedQuarter(e.target.value)}
+                                    className="dropdown-select"
+                                >
+                                    <option value="">All Quarters</option>
+                                    {quarters.map(quarter => (
+                                        <option key={quarter.value} value={quarter.value}>
+                                            {quarter.label}
+                                        </option>
+                                    ))}
+                                </select>
                             </div>
                         </div>
                     </div>
