@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import Header from "../../components/shared/Header.jsx";
+import Breadcrumb from "../../components/Breadcrumb.jsx";
 import Sidebar from "../../components/shared/SidebarPrincipal.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import "../Teacher/LAEMPLReport.css";
@@ -326,6 +327,7 @@ function SubmissionData() {
           <SidebarCoordinator activeLink="LAEMPL" />
         )}
         <div className="dashboard-content">
+          <Breadcrumb />
           <div className="dashboard-main">
             <h2>LAEMPL</h2>
           </div>

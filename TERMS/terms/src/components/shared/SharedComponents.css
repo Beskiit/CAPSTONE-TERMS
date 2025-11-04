@@ -17,8 +17,10 @@ header {
   left: 0;
   z-index: 1000;
   width: 100%;
-  height: 2.5rem; /* 40px */
+  height: 3.5rem; /* 40px */
   padding: 0.75rem 1.5rem; /* Adds more height */
+  background-color: #ffffff; /* White background */
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1); /* Subtle shadow for depth */
 }
 
 header img {
@@ -52,9 +54,11 @@ header img {
   width: 200px;
   background-color: #1E56A0;
   display: flex;
-  margin-top: 1rem;
+  margin-top: 0; /* No margin-top needed since dashboard-container handles spacing */
   flex-direction: column;
   flex-shrink: 0;
+  position: relative;
+  z-index: 1001; /* Higher than breadcrumb (999) to ensure it's always visible */
 }
 
 .sidebar-menu {
@@ -74,6 +78,8 @@ header img {
 }
 
 .sidebar-item {
+  font-size: 16px;
+  font-weight: bold;
   width: 100%;
 }
 

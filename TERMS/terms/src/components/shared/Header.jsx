@@ -133,7 +133,7 @@ function Header({ userText }) {
 			const userRole = (user?.role || '').toLowerCase();
 			const openWithSubmission = async (submissionId) => {
 				const r = await fetch(`${API_BASE}/submissions/${submissionId}`, { credentials: 'include' });
-				if (!r.ok) return navigate(`/submission/${submissionId}`);
+                if (!r.ok) return navigate(`/submission/${submissionId}`, { state: { breadcrumbTitle: `Submission ${submissionId}` } });
 				const j = await r.json();
 				const fields = j?.fields || {};
 				const kind = detectType({ title: j?.value, fields });
@@ -156,13 +156,13 @@ function Header({ userText }) {
 				};
 
 				// Special handling: when a coordinator submits an ACCOMPLISHMENT, review in ForApprovalData
-				if ((n?.type || '').toLowerCase() === 'report_submitted' && kind === 'accomplishment') {
-					return navigate(`/ForApprovalData?id=${submissionId}`);
+                if ((n?.type || '').toLowerCase() === 'report_submitted' && kind === 'accomplishment') {
+                    return navigate(`/ForApprovalData?id=${submissionId}`, { state: { breadcrumbTitle: (j?.value || ra?.title) } });
 				}
 
 				// When for_approval type arrives to principal, also prefer ForApprovalData
-				if ((n?.type || '').toLowerCase() === 'for_approval' && userRole === 'principal' && kind === 'accomplishment') {
-					return navigate(`/ForApprovalData?id=${submissionId}`);
+                if ((n?.type || '').toLowerCase() === 'for_approval' && userRole === 'principal' && kind === 'accomplishment') {
+                    return navigate(`/ForApprovalData?id=${submissionId}`, { state: { breadcrumbTitle: (j?.value || ra?.title) } });
 				}
 
 				goToInstruction(kind, state);

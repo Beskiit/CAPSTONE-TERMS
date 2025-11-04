@@ -5,14 +5,14 @@ import { useNavigate } from 'react-router-dom';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import Header from '../../components/shared/Header.jsx';
+import Breadcrumb from '../../components/Breadcrumb.jsx';
 import Sidebar from '../../components/shared/SidebarCoordinator.jsx';
 import QuarterEnumService from '../../services/quarterEnumService';
 import Submitted from '../../assets/submitted.svg';
 import Pending from '../../assets/pending.svg';
 import Approved from '../../assets/approved.svg';
 import Rejected from '../../assets/rejected.svg';
-import DeadlineComponent from "../Teacher/DeadlineComponent.jsx";
-import UpcomingDeadlineComponent from "./UpcomingDeadlineComponent.jsx";
+import CoordinatorDeadlineComponent from "./CoordinatorDeadlineComponent.jsx";
 // React already imported above
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
@@ -29,7 +29,6 @@ function DashboardCoordinator() {
     rejected: 0,
   });
   const [deadlines, setDeadlines] = useState([]);
-  const [upcomingSubmissions, setUpcomingSubmissions] = useState([]);
   const [submittedReports, setSubmittedReports] = useState([]);
   const [approvedReports, setApprovedReports] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -122,56 +121,68 @@ function DashboardCoordinator() {
     fetchCounts();
   }, [user]);
 
-  // After user loads, fetch upcoming deadlines
+  // Fetch ALL upcoming deadlines for coordinator (combining is_given = 0 and is_given = 1)
+  // Since scheduling is now optional via modal, we show all upcoming deadlines together
   useEffect(() => {
     if (!user?.user_id) return;
 
-    const fetchDeadlines = async () => {
+    const fetchAllDeadlines = async () => {
       try {
-        const res = await fetch(
-          `${API_BASE}/reports/status/user/${user.user_id}/upcoming`,
-          { credentials: "include" }
-        );
-        if (!res.ok) {
-          const txt = await res.text();
-          console.warn("Deadlines fetch failed:", res.status, txt);
-          return;
-        }
-        const data = await res.json();
-        setDeadlines(Array.isArray(data) ? data : []);
+        // Fetch both types: is_given = 1 (already given) and is_given = 0 (not yet given)
+        const [givenDeadlinesRes, notGivenDeadlinesRes] = await Promise.all([
+          fetch(`${API_BASE}/reports/status/user/${user.user_id}/upcoming`, { credentials: "include" }),
+          fetch(`${API_BASE}/reports/upcoming-deadlines/${user.user_id}`, { credentials: "include" })
+        ]);
+
+        const givenDeadlines = givenDeadlinesRes.ok ? await givenDeadlinesRes.json() : [];
+        const notGivenDeadlines = notGivenDeadlinesRes.ok ? await notGivenDeadlinesRes.json() : [];
+
+        // Combine both lists, ensuring we have unique items by report_assignment_id
+        const combinedDeadlines = [];
+        const seenIds = new Set();
+
+        // First add not given deadlines (is_given = 0) - these come with submission data
+        notGivenDeadlines.forEach(d => {
+          const key = d.report_assignment_id || d.submission_id;
+          if (key && !seenIds.has(key)) {
+            seenIds.add(key);
+            combinedDeadlines.push({
+              ...d,
+              title: d.assignment_title || d.title,
+              is_given: 0 // Mark as not given for reference
+            });
+          }
+        });
+
+        // Then add given deadlines (is_given = 1)
+        givenDeadlines.forEach(d => {
+          const key = d.report_assignment_id || d.submission_id;
+          if (key && !seenIds.has(key)) {
+            seenIds.add(key);
+            combinedDeadlines.push({
+              ...d,
+              title: d.title || d.assignment_title,
+              is_given: 1 // Mark as given for reference
+            });
+          }
+        });
+
+        // Sort by due date
+        combinedDeadlines.sort((a, b) => {
+          const dateA = new Date(a.to_date || a.due_date || 0);
+          const dateB = new Date(b.to_date || b.due_date || 0);
+          return dateA - dateB;
+        });
+
+        setDeadlines(combinedDeadlines);
+        console.log('🔄 [DEBUG] Combined upcoming deadlines:', combinedDeadlines.length);
       } catch (e) {
         console.error("Failed to load deadlines:", e);
+        setDeadlines([]);
       }
     };
 
-    fetchDeadlines();
-  }, [user]);
-
-  // Fetch upcoming deadline submissions (is_given = 0)
-  useEffect(() => {
-    const fetchUpcomingSubmissions = async () => {
-      console.log('🔄 [DEBUG] Frontend: Starting fetchUpcomingSubmissions for user:', user.user_id);
-      try {
-        const res = await fetch(
-          `${API_BASE}/reports/upcoming-deadlines/${user.user_id}`,
-          { credentials: "include" }
-        );
-        if (!res.ok) {
-          const txt = await res.text();
-          console.warn("Upcoming submissions fetch failed:", res.status, txt);
-          return;
-        }
-        const data = await res.json();
-        console.log('🔄 [DEBUG] Fetched upcoming submissions:', data.length);
-        setUpcomingSubmissions(data);
-      } catch (err) {
-        console.error("Failed to fetch upcoming submissions:", err);
-      }
-    };
-
-    if (user?.user_id) {
-      fetchUpcomingSubmissions();
-    }
+    fetchAllDeadlines();
   }, [user]);
 
   // Fetch submitted and approved reports data
@@ -325,14 +336,14 @@ reportQuarter === selectedQuarterObj?.label;
   const handleSubmittedReportClick = (report) => {
     // Navigate directly to the submission details viewing page
     if (report.submission_id) {
-      navigate(`/submission/${report.submission_id}`);
+      navigate(`/submission/${report.submission_id}`, { state: { breadcrumbTitle: (report.assignment_title || report.title) } });
     }
   };
 
   const handleApprovedReportClick = (report) => {
     // Navigate directly to the submission details viewing page for approved reports
     if (report.submission_id) {
-      navigate(`/submission/${report.submission_id}`);
+      navigate(`/submission/${report.submission_id}`, { state: { breadcrumbTitle: (report.assignment_title || report.title) } });
     }
   };
 
@@ -342,8 +353,8 @@ reportQuarter === selectedQuarterObj?.label;
       <div className="dashboard-container">
         <Sidebar activeLink="Dashboard" />
         <div className="dashboard-content">
+          <Breadcrumb />
           <div className="dashboard-main">
-            <h2>Dashboard</h2>
 
             <div className="dashboard-cards">
               <div className="dashboard-card">
@@ -500,11 +511,11 @@ reportQuarter === selectedQuarterObj?.label;
           </div>
         </div>
 
-        {/* Sidebar with calendar + original separate components */}
+        {/* Sidebar with calendar + deadline components */}
         <div className="dashboard-sidebar">
           <CalendarComponent deadlines={deadlines} />
-          <DeadlineComponent deadlines={deadlines} />
-          <UpcomingDeadlineComponent upcomingSubmissions={upcomingSubmissions} />
+          <CoordinatorDeadlineComponent deadlines={deadlines} />
+          {/* UpcomingDeadlineComponent removed - all deadlines now show in CoordinatorDeadlineComponent with modal options */}
         </div>
       </div>
     </>
@@ -622,9 +633,9 @@ function CalendarComponent({ deadlines = [] }) {
       allow_late: deadline.allow_late,
     };
 
-    if (kind === "laempl")         return navigate("/LAEMPLInstruction", { state: commonState });
-    if (kind === "mps")            return navigate("/MPSInstruction", { state: commonState });
-    if (kind === "accomplishment") return navigate("/AccomplishmentReportInstruction", { state: commonState });
+    if (kind === "laempl")         return navigate("/LAEMPLInstruction", { state: { ...commonState, fromDeadline: true } });
+    if (kind === "mps")            return navigate("/MPSInstruction", { state: { ...commonState, fromDeadline: true } });
+    if (kind === "accomplishment") return navigate("/AccomplishmentReportInstruction", { state: { ...commonState, fromDeadline: true } });
     if (kind === "cog")            return navigate("/ClassificationOfGradesInstruction", { state: commonState });
     // Fallback to original grouped flow
     return navigate("/AssignedReport");
@@ -760,7 +771,10 @@ function CombinedDeadlines({ deadlines = [], needsScheduling = [] }) {
           {unified.length > 0 ? (
             unified.slice(0, 10).map((d, idx) => {
               const title = d.title || d.assignment_title || "Untitled Report";
-              const onClick = d.__needs ? () => onClickNeedsScheduling(d) : () => onClickRegular(d);
+              const recipientsCount = Number(d?.recipients_count || 0);
+              const onClick = d.__needs
+                ? (recipientsCount >= 2 ? () => onClickRegular(d) : () => onClickNeedsScheduling(d))
+                : () => onClickRegular(d);
               return (
                 <a key={d.submission_id || d.report_assignment_id || idx}
                    className="deadline-item"

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Header from "../../components/shared/Header.jsx";
+import Breadcrumb from "../../components/Breadcrumb.jsx";
 import Sidebar from "../../components/shared/SidebarCoordinator.jsx";
 import SidebarPrincipal from "../../components/shared/SidebarPrincipal.jsx";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
@@ -950,8 +951,8 @@ function SetReport() {
         )}
 
         <div className="dashboard-content">
+          <Breadcrumb />
           <div className="dashboard-main">
-            <h2>Set Report Schedule</h2>
 
             <form className="schedule-form" onSubmit={handleSubmit}>
               <div className="form-row allow-late-row">

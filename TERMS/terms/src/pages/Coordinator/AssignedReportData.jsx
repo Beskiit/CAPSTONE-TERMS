@@ -6,6 +6,7 @@ import SidebarPrincipal from "../../components/shared/SidebarPrincipal";
 import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Header from "../../components/shared/Header";
+import Breadcrumb from "../../components/Breadcrumb";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
 import toast from "react-hot-toast";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle, ImageRun } from "docx";
@@ -1357,6 +1358,7 @@ function AssignedReportData() {
                         <SidebarPrincipal activeLink="Assigned Report" />
                     )}
                     <div className="dashboard-content">
+                        <Breadcrumb />
                         <div className="dashboard-main">
                             <div className="loading-container">
                                 <div className="loading-spinner"></div>
@@ -1387,6 +1389,7 @@ function AssignedReportData() {
                         <SidebarPrincipal activeLink="Assigned Report" />
                     )}
                     <div className="dashboard-content">
+                        <Breadcrumb />
                         <div className="dashboard-main">
                             <div className="error-container">
                                 <h2>Error Loading Submission</h2>
@@ -1419,6 +1422,7 @@ function AssignedReportData() {
                     <SidebarPrincipal activeLink="Assigned Report" />
                 )}
                 <div className="dashboard-content">
+                    <Breadcrumb />
                     <div className="dashboard-main">
                         <div className="page-header">
                             <button 

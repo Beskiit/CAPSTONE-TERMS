@@ -5,6 +5,7 @@ import "../Coordinator/AssignedReport.css";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Header from "../../components/shared/Header";
+import Breadcrumb from "../../components/Breadcrumb";
 import QuarterEnumService from "../../services/quarterEnumService";
 import QuarterSelector from "../../components/QuarterSelector";
 
@@ -200,8 +201,8 @@ function ForApproval() {
             <div className="dashboard-container">
                 <Sidebar activeLink="For Approval" />
                 <div className="dashboard-content">
+                    <Breadcrumb />
                     <div className="dashboard-main">
-                        <h2>For Approval</h2>
                         
                         {/* School Year and Quarter Dropdowns */}
                         <div className="filter-dropdowns">
@@ -267,7 +268,7 @@ function ForApproval() {
                                 </thead>
                                 <tbody>
                                     {filteredSubmissions.map((submission) => (
-                                        <tr key={submission.submission_id} onClick={() => navigate(`/ForApprovalData?id=${submission.submission_id}`)}>
+                                        <tr key={submission.submission_id} onClick={() => navigate(`/ForApprovalData?id=${submission.submission_id}`, { state: { breadcrumbTitle: (submission.title || submission.assignment_title) } })}>
                                             <td className="file-cell">
                                                 <span className="file-name">{submission.title || submission.assignment_title || 'Report'}</span>
                                             </td>

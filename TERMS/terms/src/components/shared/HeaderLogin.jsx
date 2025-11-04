@@ -133,7 +133,7 @@ function Header({ userText }) {
 			const userRole = (user?.role || '').toLowerCase();
 			const openWithSubmission = async (submissionId) => {
 				const r = await fetch(`${API_BASE}/submissions/${submissionId}`, { credentials: 'include' });
-				if (!r.ok) return navigate(`/submission/${submissionId}`);
+                if (!r.ok) return navigate(`/submission/${submissionId}`, { state: { breadcrumbTitle: `Submission ${submissionId}` } });
 				const j = await r.json();
 				const fields = j?.fields || {};
 				const kind = detectType({ title: j?.value, fields });

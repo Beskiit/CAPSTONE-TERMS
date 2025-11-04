@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import Header from "../../components/shared/Header.jsx";
+import Breadcrumb from "../../components/Breadcrumb.jsx";
 import Sidebar from "../../components/shared/SidebarPrincipal.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import "../Teacher/LAEMPLReport.css";
@@ -856,6 +857,7 @@ function ViewSubmissionData() {
         <div className="dashboard-container">
           <Sidebar activeLink="View Report" />
           <div className="dashboard-content">
+            <Breadcrumb />
             <div className="dashboard-main">
               <div className="loading-container">
                 <div className="loading-spinner"></div>
@@ -876,6 +878,7 @@ function ViewSubmissionData() {
         <div className="dashboard-container">
           <Sidebar activeLink="View Report" />
           <div className="dashboard-content">
+            <Breadcrumb />
             <div className="dashboard-main">
               <div className="error-container">
                 <h2>Error Loading Submission</h2>
@@ -897,6 +900,7 @@ function ViewSubmissionData() {
       <div className="dashboard-container">
         <Sidebar activeLink="View Report" />
         <div className="dashboard-content">
+          <Breadcrumb />
           <div className="dashboard-main">
             <div className="page-header">
               <button 

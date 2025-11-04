@@ -19,6 +19,7 @@ import {
   getRejectedSubmissionsByPrincipal, // ⬅️ NEW
   patchSubmissionFormData,          // ⬅️ NEW
   patchSubmission,                 // ⬅️ NEW - Generic PATCH endpoint
+  getMySubmissionForAssignment,
 } from "../controllers/submissionController.js";
 import { requireAuth } from "../middleware/auth.js";
 
@@ -84,6 +85,8 @@ router.patch("/:id/formdata", upload.array('images', 10), patchSubmissionFormDat
 router.post("/", createSubmission);
 router.delete("/:id", deleteSubmission);
 router.get("/my/:id", getMySubmissions);
+// Mine by assignment (report_assignment_id)
+router.get("/by-assignment/:id/mine", requireAuth, getMySubmissionForAssignment);
 
 // Coordinator submit to principal
 router.post("/:id/submit-to-principal", submitToPrincipal);

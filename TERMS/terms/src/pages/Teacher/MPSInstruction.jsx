@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import "./Instruction.css";
 import Header from "../../components/shared/Header.jsx";
+import Breadcrumb from "../../components/Breadcrumb.jsx";
 import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 
@@ -52,6 +53,7 @@ function MPSInstruction() {
       <div className="dashboard-container">
         {isTeacher ? <Sidebar activeLink="MPS" /> : <SidebarCoordinator activeLink="MPS" />}
         <div className="dashboard-content">
+          <Breadcrumb />
           <div className="dashboard-main">
             <h2>MPS</h2>
           </div>

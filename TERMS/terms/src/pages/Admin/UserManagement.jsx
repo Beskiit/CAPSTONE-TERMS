@@ -3,6 +3,7 @@ import Sidebar from "../../components/shared/SidebarAdmin";
 import "./UserManagement.css";
 import { useNavigate } from "react-router-dom";
 import Header from "../../components/shared/Header";
+import Breadcrumb from "../../components/Breadcrumb";
 import Edit from "../../assets/edit.svg";
 import Delete from "../../assets/delete.svg";
 import Modal from "react-modal";
@@ -509,6 +510,7 @@ function UserManagement() {
       <div className="dashboard-container">
         <Sidebar activeLink="User Management" />
         <div className="dashboard-content">
+          <Breadcrumb />
           <div className="dashboard-main">
             <h2>User Management</h2>
           </div>

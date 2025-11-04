@@ -6,6 +6,7 @@ import SidebarPrincipal from "../../components/shared/SidebarPrincipal";
 import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Header from "../../components/shared/Header";
+import Breadcrumb from "../../components/Breadcrumb";
 import YearQuarterFileManager from "../../components/YearQuarterFileManager";
 import QuarterEnumService from "../../services/quarterEnumService";
 
@@ -297,10 +298,13 @@ function AssignedReport() {
                     // Add this report to the assignment
                     const assignment = assignmentMap.get(assignmentId);
                     assignment.reports.push(report);
-                    assignment.totalAssigned++;
+                    // Exclude current user from total count (e.g., principal's own submission)
+                    if (Number(report.submitted_by) !== Number(user?.user_id)) {
+                        assignment.totalAssigned++;
+                    }
                     
-                    // Count as submitted if status >= 2
-                    if (report.status >= 2) {
+                    // Count as submitted if status >= 2, excluding current user (coordinator) itself
+                    if (report.status >= 2 && Number(report.submitted_by) !== Number(user?.user_id)) {
                         assignment.submittedCount++;
                     }
                 });
@@ -454,8 +458,8 @@ function AssignedReport() {
                     <SidebarPrincipal activeLink="Assigned Report" />
                 )}
                 <div className="dashboard-content">
+                    <Breadcrumb />
                     <div className="dashboard-main">
-                        <h2>Assigned Report</h2>
                         
                         {/* School Year and Quarter Dropdowns */}
                         <div className="filter-dropdowns">
@@ -532,7 +536,7 @@ function AssignedReport() {
                                         </thead>
                                         <tbody>
                                             {filteredGroupedReports.map((report) => (
-                                                <tr key={report.report_assignment_id} onClick={() => navigate(`/AssignedReportData/${report.first_submission_id}`)}>
+                                                <tr key={report.report_assignment_id} onClick={() => navigate(`/AssignedReportData/${report.first_submission_id}`, { state: { assignmentTitle: report.assignment_title } })}>
                                                     <td className="file-cell">
                                                         <span className="file-name">{report.category_name || 'N/A'}</span>
                                                     </td>

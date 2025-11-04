@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import Sidebar from "../../components/shared/SidebarPrincipal.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import Header from "../../components/shared/Header.jsx";
+import Breadcrumb from "../../components/Breadcrumb.jsx";
 import "../Coordinator/AssignedReport.css";
 import QuarterEnumService from "../../services/quarterEnumService";
 
@@ -193,8 +194,8 @@ function ViewSubmission() {
   const role = (user?.role || "").toLowerCase();
   const isPrincipal = role === "principal";
 
-  const handleSubmissionClick = (submissionId) => {
-    navigate(`/ViewSubmissionData?id=${submissionId}`);
+  const handleSubmissionClick = (submission) => {
+    navigate(`/ViewSubmissionData?id=${submission.submission_id}`, { state: { breadcrumbTitle: (submission.title || submission.assignment_title) } });
   };
 
   return (
@@ -207,8 +208,8 @@ function ViewSubmission() {
           <SidebarCoordinator activeLink="View Report" />
         )}
         <div className="dashboard-content">
+          <Breadcrumb />
           <div className="dashboard-main">
-            <h2>Approved Reports</h2>
             
             {/* School Year and Quarter Dropdowns */}
             <div className="filter-dropdowns">
@@ -269,7 +270,7 @@ function ViewSubmission() {
                     </tr>
                   ) : (
                     filteredSubmissions.map((submission) => (
-                      <tr key={submission.submission_id} onClick={() => handleSubmissionClick(submission.submission_id)}>
+                      <tr key={submission.submission_id} onClick={() => handleSubmissionClick(submission)}>
                         <td className="file-cell">
                           <span className="file-name">{submission.title || submission.assignment_title}</span>
                         </td>

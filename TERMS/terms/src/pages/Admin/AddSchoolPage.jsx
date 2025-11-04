@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from '../../components/shared/SidebarAdmin';
 import Header from '../../components/shared/Header';
+import Breadcrumb from '../../components/Breadcrumb';
 import AddSchool from './AddSchool';
 import Modal from 'react-modal';
 import './AddSchool.css';
@@ -67,6 +68,7 @@ function AddSchoolPage() {
       <div className="dashboard-container">
         <Sidebar activeLink="Add School" />
         <div className="dashboard-content">
+          <Breadcrumb />
           <div className="dashboard-main">
             <h2>School Management</h2>
           </div>

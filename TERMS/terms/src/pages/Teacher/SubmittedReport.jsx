@@ -7,6 +7,7 @@ import SidebarCoordinator from "../../components/shared/SidebarCoordinator";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Header from "../../components/shared/Header";
+import Breadcrumb from "../../components/Breadcrumb";
 import YearQuarterFileManager from "../../components/YearQuarterFileManager";
 import QuarterEnumService from "../../services/quarterEnumService";
 
@@ -288,8 +289,8 @@ function SubmittedReport() {
                     <SidebarCoordinator activeLink="Submitted Report" />
                 )}
                 <div className="dashboard-content">
+                    <Breadcrumb />
                     <div className="dashboard-main">
-                        <h2>Submitted Report</h2>
                         
                         {/* School Year, Quarter, and Category Dropdowns */}
                         <div className="filter-dropdowns">
@@ -366,7 +367,7 @@ function SubmittedReport() {
                                         </thead>
                                         <tbody>
                                             {filteredSubmissions.map((submission) => (
-                                                <tr key={submission.submission_id} onClick={() => navigate(`/submission/${submission.submission_id}`)}>
+                                                <tr key={submission.submission_id} onClick={() => navigate(`/submission/${submission.submission_id}`, { state: { breadcrumbTitle: (submission.assignment_title || submission.title || submission.value) } })}>
                                                     <td className="file-cell">
                                                         <span className="file-name">{submission.value || submission.category_name || 'Report'}</span>
                                                     </td>

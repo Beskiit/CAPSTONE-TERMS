@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Header from "../../components/shared/Header.jsx";
+import Breadcrumb from "../../components/Breadcrumb.jsx";
 import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import "./Accomplishment.css";
@@ -50,6 +51,7 @@ function LAEMPL() {
           <SidebarCoordinator activeLink="LAEMPL" />
         )}
         <div className="dashboard-content">
+          <Breadcrumb />
           <div className="dashboard-main">
             <h2>LAEMPL</h2>
           </div>

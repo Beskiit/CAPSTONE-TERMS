@@ -34,6 +34,8 @@ export const getUpcomingDeadlinesByUser = (req, res) => {
       ra.sub_category_id,
       c.category_name,
       sc.sub_category_name,
+      ud2.name AS given_by_name,
+      COALESCE(adc.recipients_count, sdc.sub_recipients, 0) AS recipients_count,
       st.value AS status_value,
       s.status,
       s.fields
@@ -42,6 +44,17 @@ export const getUpcomingDeadlinesByUser = (req, res) => {
     JOIN status st ON st.status_id = s.status
     JOIN category c ON c.category_id = ra.category_id
     LEFT JOIN sub_category sc ON sc.sub_category_id = ra.sub_category_id
+    LEFT JOIN user_details ud2 ON ra.given_by = ud2.user_id
+    LEFT JOIN (
+      SELECT report_assignment_id, COUNT(DISTINCT user_id) AS recipients_count
+      FROM assignment_distribution
+      GROUP BY report_assignment_id
+    ) adc ON adc.report_assignment_id = ra.report_assignment_id
+    LEFT JOIN (
+      SELECT report_assignment_id, COUNT(DISTINCT submitted_by) AS sub_recipients
+      FROM submission
+      GROUP BY report_assignment_id
+    ) sdc ON sdc.report_assignment_id = ra.report_assignment_id
     WHERE s.submitted_by = ?
       AND ra.to_date >= NOW()
       AND ra.is_given = 1
@@ -99,5 +112,49 @@ export const getCompletedReportsByUser = (req, res) => {
     if (err) return res.status(500).send("DB error: " + err);
     if (!rows.length) return res.status(404).send("No approved/completed reports.");
     res.json(rows);
+  });
+};
+
+// Assignments created by a principal for Accomplishment Report (optionally filter by target user in future)
+export const getPrincipalAccomplishmentAssignments = (req, res) => {
+  const { id } = req.params; // principal user_id
+  const sql = `
+    SELECT 
+      ra.report_assignment_id,
+      ra.title,
+      ra.instruction,
+      ra.from_date,
+      ra.to_date,
+      ra.category_id,
+      ra.sub_category_id,
+      ra.is_given,
+      ra.is_archived,
+      ra.quarter,
+      ra.year,
+      c.category_name,
+      sc.sub_category_name,
+      ud2.name AS given_by_name,
+      COUNT(DISTINCT ad.user_id) AS recipients_count,
+      COUNT(DISTINCT s.submission_id) AS submission_count,
+      SUM(CASE WHEN s.status IN (1,4) THEN 1 ELSE 0 END) AS pending_rejected_count
+    FROM report_assignment ra
+    JOIN category c ON c.category_id = ra.category_id
+    LEFT JOIN sub_category sc ON sc.sub_category_id = ra.sub_category_id
+    LEFT JOIN user_details ud2 ON ra.given_by = ud2.user_id
+    LEFT JOIN submission s ON s.report_assignment_id = ra.report_assignment_id
+    LEFT JOIN assignment_distribution ad ON ad.report_assignment_id = ra.report_assignment_id
+    WHERE ra.given_by = ?
+      AND c.category_name = 'Accomplishment Report'
+      AND ra.to_date >= NOW()
+      AND (s.status IN (0,1,4) OR s.submission_id IS NULL)
+    GROUP BY 
+      ra.report_assignment_id
+    HAVING 
+      (COUNT(DISTINCT ad.user_id) >= 2 OR COUNT(DISTINCT s.submitted_by) >= 2)
+    ORDER BY ra.to_date ASC, ra.report_assignment_id ASC
+  `;
+  db.query(sql, [id], (err, rows) => {
+    if (err) return res.status(500).send("DB error: " + err);
+    return res.json(rows || []);
   });
 };

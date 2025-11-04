@@ -97,7 +97,27 @@ export const giveAccomplishmentReport = (req, res) => {
     });
   };
 
-  db.query("START TRANSACTION", (txErr) => {
+  // Determine auto is_given rules for principal-given assignments
+  const idsToCheck = [...new Set([...(recipients || []), given_by].filter(Boolean))];
+  const placeholders = idsToCheck.map(() => '?').join(',');
+  const rolesSql = `SELECT user_id, LOWER(role) AS role FROM user_details WHERE user_id IN (${placeholders})`;
+
+  db.query(rolesSql, idsToCheck, (rolesErr, rolesRows = []) => {
+    if (rolesErr) return res.status(500).send("Failed to read roles: " + rolesErr);
+
+    const idToRole = new Map();
+    for (const r of rolesRows) idToRole.set(Number(r.user_id), r.role);
+    const giverRoleDetected = idToRole.get(Number(given_by)) || '';
+    const hasTeacher = recipients.some(uid => (idToRole.get(Number(uid)) || '') === 'teacher');
+    const hasCoordinator = recipients.some(uid => (idToRole.get(Number(uid)) || '') === 'coordinator');
+
+    // Default respects inbound flag; override only for principal
+    let computedIsGiven = _is_given;
+    if (giverRoleDetected === 'principal') {
+      if (hasTeacher) computedIsGiven = 1;            // principal -> teacher(s) (with/without coordinator)
+      else if (hasCoordinator && !hasTeacher) computedIsGiven = 0; // principal -> coordinator only
+    }
+    db.query("START TRANSACTION", (txErr) => {
     if (txErr) return res.status(500).send("Failed to start transaction: " + txErr);
 
     const insertReportSql = `
@@ -114,13 +134,12 @@ export const giveAccomplishmentReport = (req, res) => {
       fromDateVal,
       to_date,
       instruction,
-      _is_given,
+        computedIsGiven,
       _is_archived,
       _allow_late,
       title,
       parent_report_assignment_id ?? null,
     ];
-
     db.query(insertReportSql, reportVals, (insErr, insRes) => {
       if (insErr) {
         return db.query("ROLLBACK", () =>
@@ -166,31 +185,99 @@ export const giveAccomplishmentReport = (req, res) => {
 
         insertAllSubmissionsSequentially()
           .then(() => {
-            // Create notifications
-            const nameSql = `SELECT name FROM user_details WHERE user_id = ? LIMIT 1`;
-            db.query(nameSql, [given_by], (_e, nRows) => {
-              const giverName = (nRows && nRows[0] && nRows[0].name) ? nRows[0].name : 'Coordinator';
-              const notifications = recipients.map((uid) => ({
-                user_id: uid,
-                title: `New report assigned: ${title}`,
-                message: `Assigned by ${giverName} — due on ${to_date}.`,
-                type: 'report_assigned',
-                ref_type: 'report_assignment',
-                ref_id: report_assignment_id,
-              }));
+            // If given_by is a principal and there are 2+ recipients, record distribution rows
+            const roleSql = `SELECT role FROM user_details WHERE user_id = ? LIMIT 1`;
+            db.query(roleSql, [given_by], (rErr, rRows) => {
+              if (rErr) {
+                return db.query("ROLLBACK", () =>
+                  res.status(500).send("Failed to check giver role: " + rErr)
+                );
+              }
+              const giverRole = (rRows && rRows[0] && rRows[0].role) ? rRows[0].role : null;
 
-              createNotificationsBulk(notifications, () => {
-                db.query("COMMIT", (cErr) => {
-                  if (cErr) {
+              const proceedNotifications = () => {
+                // Create notifications
+                const nameSql = `SELECT name FROM user_details WHERE user_id = ? LIMIT 1`;
+                db.query(nameSql, [given_by], (_e, nRows) => {
+                  const giverName = (nRows && nRows[0] && nRows[0].name) ? nRows[0].name : 'Coordinator';
+                  const notifications = recipients.map((uid) => ({
+                    user_id: uid,
+                    title: `New report assigned: ${title}`,
+                    message: `Assigned by ${giverName} — due on ${to_date}.`,
+                    type: 'report_assigned',
+                    ref_type: 'report_assignment',
+                    ref_id: report_assignment_id,
+                  }));
+
+                  createNotificationsBulk(notifications, () => {
+                    db.query("COMMIT", (cErr) => {
+                      if (cErr) {
+                        return db.query("ROLLBACK", () =>
+                          res.status(500).send("Commit failed: " + cErr)
+                        );
+                      }
+                      return res
+                        .status(201)
+                        .json({ report_assignment_id, submissions_created: recipients.length });
+                    });
+                  });
+                });
+              };
+
+              if (giverRole === 'principal' && recipients.length >= 2) {
+                const values = recipients.map(() => '(?, ?)').join(',');
+                const params = [];
+                recipients.forEach(uid => { params.push(report_assignment_id, uid); });
+                const distSql = `INSERT INTO assignment_distribution (report_assignment_id, user_id) VALUES ${values}`;
+                db.query(distSql, params, (dErr) => {
+                  if (dErr) {
                     return db.query("ROLLBACK", () =>
-                      res.status(500).send("Commit failed: " + cErr)
+                      res.status(500).send("Failed to write assignment distribution: " + dErr)
                     );
                   }
-                  return res
-                    .status(201)
-                    .json({ report_assignment_id, submissions_created: recipients.length });
+
+                  // Auto-create principal's own submission if not exists
+                  const checkPrincipalSql = `SELECT submission_id, COALESCE(MAX(number_of_submission),0)+1 AS next_num
+                                             FROM submission 
+                                             WHERE report_assignment_id = ? AND submitted_by = ?`;
+                  db.query(checkPrincipalSql, [report_assignment_id, given_by], (cErr, cRows) => {
+                    if (cErr) {
+                      return db.query("ROLLBACK", () =>
+                        res.status(500).send("Failed to check principal submission: " + cErr)
+                      );
+                    }
+                    const alreadyExists = Array.isArray(cRows) && cRows.length && cRows[0].submission_id;
+                    const nextNum = (Array.isArray(cRows) && cRows[0] && cRows[0].next_num) ? cRows[0].next_num : 1;
+                    if (alreadyExists) {
+                      return proceedNotifications();
+                    }
+                    const insertPrincipalSql = `
+                      INSERT INTO submission
+                        (report_assignment_id, category_id, submitted_by, status, number_of_submission, value, date_submitted, fields)
+                      VALUES
+                        (?, ?, ?, 1, ?, ?, NOW(), ?)
+                    `;
+                    const pVals = [
+                      report_assignment_id,
+                      category_id,
+                      given_by,
+                      nextNum,
+                      title,
+                      initialFields,
+                    ];
+                    db.query(insertPrincipalSql, pVals, (pErr) => {
+                      if (pErr) {
+                        return db.query("ROLLBACK", () =>
+                          res.status(500).send("Failed to create principal submission: " + pErr)
+                        );
+                      }
+                      proceedNotifications();
+                    });
+                  });
                 });
-              });
+              } else {
+                proceedNotifications();
+              }
             });
           })
           .catch((err) => {
@@ -200,6 +287,7 @@ export const giveAccomplishmentReport = (req, res) => {
           });
       });
     });
+  });
   });
 };
 
@@ -311,6 +399,51 @@ export const patchAccomplishmentSubmission = (req, res) => {
     
     db.query(updateSql, updateParams, (updErr) => {
       if (updErr) return res.status(500).send("Update failed: " + updErr);
+      // If newly submitted (status 2), notify principal appropriately
+      if (newStatus === 2) {
+        const metaSql = `
+          SELECT 
+            ra.report_assignment_id,
+            ra.given_by,
+            ra.title,
+            (
+              SELECT COUNT(*) 
+              FROM assignment_distribution ad 
+              JOIN user_details udt ON udt.user_id = ad.user_id
+              WHERE ad.report_assignment_id = ra.report_assignment_id
+                AND LOWER(udt.role) = 'teacher'
+            ) AS teacher_recipients
+          FROM submission s
+          JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
+          WHERE s.submission_id = ?
+        `;
+        db.query(metaSql, [id], (mErr, mRows) => {
+          if (!mErr && mRows?.length) {
+            const meta = mRows[0];
+            const hasTeacherRecipients = Number(meta.teacher_recipients || 0) >= 1;
+            const payload = hasTeacherRecipients
+              ? {
+                  title: `Report submitted: ${meta.title}`,
+                  message: `A report was submitted and is ready to view.`,
+                  type: 'report_submitted',
+                  ref_type: 'submission',
+                  ref_id: Number(id),
+                }
+              : {
+                  title: `For approval: ${meta.title}`,
+                  message: `A coordinator/teacher submitted a report for your approval.`,
+                  type: 'for_approval',
+                  ref_type: 'submission',
+                  ref_id: Number(id),
+                };
+
+            createNotification(meta.given_by, payload, (err) => {
+              if (err) console.error('Failed to create principal notification:', err);
+            });
+          }
+        });
+      }
+
       // If approved or rejected, notify submitter
       if (newStatus === 3 || newStatus === 4) {
         const metaSql = `
@@ -363,9 +496,12 @@ export const getAccomplishmentPeers = (req, res) => {
     WHERE s.submission_id = ? AND s2.status >= 2
   `;
 
+  // Build role filter: principal can see coordinator+teacher; others only teacher
+  const requesterRole = (req.user?.role || '').toLowerCase();
+  const roleClause = requesterRole === 'principal' ? "LOWER(ud.role) IN ('teacher','coordinator')" : "LOWER(ud.role) = 'teacher'";
+
   // NOTE: exclude current submission when ra= is provided
-  // Only get submissions from TEACHERS (role = 'teacher'), not coordinators
-  // Look for teacher submissions with status >= 2 from the specific report_assignment_id
+  // Look for submitted peers from the specific report_assignment_id
   const fetchSqlFromRA = `
     SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields
     FROM submission s
@@ -373,7 +509,7 @@ export const getAccomplishmentPeers = (req, res) => {
     JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
     WHERE s.submission_id <> ?
       AND s.status >= 2
-      AND LOWER(ud.role) = 'teacher'
+      AND ${roleClause}
       AND s.report_assignment_id = ?
   `;
 
@@ -385,7 +521,7 @@ export const getAccomplishmentPeers = (req, res) => {
     JOIN report_assignment ra_child ON s.report_assignment_id = ra_child.report_assignment_id
     WHERE s.submission_id <> ?
       AND s.status >= 2
-      AND LOWER(ud.role) = 'teacher'
+      AND ${roleClause}
       AND ra_child.parent_report_assignment_id = ?
   `;
   
@@ -652,18 +788,33 @@ export const getAccomplishmentPeers = (req, res) => {
  */
 export const consolidateAccomplishmentByTitle = (req, res) => {
   const { id } = req.params;
-  const { title, parent_assignment_id } = req.body || {};
+  const { title, parent_assignment_id, report_assignment_id } = req.body || {};
   if (!title) return res.status(400).json({ error: "title is required" });
 
-  // Use parent-child filtering if parent_assignment_id is provided
-  const peersSql = parent_assignment_id ? `
+  const requesterRole = (req.user?.role || '').toLowerCase();
+  const roleClause = requesterRole === 'principal'
+    ? "LOWER(ud.role) IN ('teacher','coordinator')"
+    : "LOWER(ud.role) = 'teacher'";
+
+  // Prefer exact same assignment when provided (principal single-assignment flow)
+  // Fallback to parent-child filtering when parent_assignment_id is provided
+  const peersSql = report_assignment_id ? `
+    SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields
+    FROM submission s
+    JOIN user_details ud ON s.submitted_by = ud.user_id
+    JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
+    WHERE s.submission_id <> ?
+      AND s.status >= 2
+      AND ${roleClause}
+      AND s.report_assignment_id = ?
+  ` : parent_assignment_id ? `
     SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields
     FROM submission s
     JOIN user_details ud ON s.submitted_by = ud.user_id
     JOIN report_assignment ra_child ON s.report_assignment_id = ra_child.report_assignment_id
     WHERE s.submission_id <> ?
       AND s.status >= 2
-      AND LOWER(ud.role) = 'teacher'
+      AND ${roleClause}
       AND ra_child.parent_report_assignment_id = ?
   ` : `
     SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields
@@ -672,23 +823,72 @@ export const consolidateAccomplishmentByTitle = (req, res) => {
     JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
     WHERE s.submission_id <> ?
       AND s.status >= 2
-      AND LOWER(ud.role) = 'teacher'
+      AND ${roleClause}
   `;
-  const queryParams = parent_assignment_id ? [id, parent_assignment_id] : [id];
+  const queryParams = report_assignment_id
+    ? [id, report_assignment_id]
+    : parent_assignment_id
+    ? [id, parent_assignment_id]
+    : [id];
   db.query(peersSql, queryParams, (err, rows) => {
     if (err) return res.status(500).send("DB error: " + err);
-    const targetKey = String(title).trim().toLowerCase();
-    const combined = new Set();
+    const targetKey = String(title).replace(/\s+/g, ' ').trim().toLowerCase();
+    const combinedMap = new Map();
+    const addImage = (img) => {
+      if (img == null) return;
+      const key = typeof img === 'string' ? img : (img.filename || img.url || JSON.stringify(img));
+      if (!combinedMap.has(key)) combinedMap.set(key, img);
+    };
     for (const r of rows || []) {
       let fieldsObj = {};
       try {
-        fieldsObj =
-          typeof r.fields === "string" ? JSON.parse(r.fields) : r.fields || {};
+        fieldsObj = typeof r.fields === "string" ? JSON.parse(r.fields) : r.fields || {};
       } catch {}
-      const imgs = Array.isArray(fieldsObj._answers?.images) ? fieldsObj._answers.images : [];
-      const t = (r.title || fieldsObj.title || "").trim().toLowerCase();
-      if (t === targetKey) imgs.forEach((nm) => combined.add(nm));
+
+      // Prefer images in _answers.images, but also support legacy fields.images/photos
+      const imgsArr = Array.isArray(fieldsObj?._answers?.images)
+        ? fieldsObj._answers.images
+        : Array.isArray(fieldsObj?.images)
+        ? fieldsObj.images
+        : Array.isArray(fieldsObj?.photos)
+        ? fieldsObj.photos
+        : [];
+
+      const t = (r.title || fieldsObj.title || fieldsObj?._answers?.title || "")
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+      console.log('[Consolidate] Row:', {
+        submission_id: r.submission_id,
+        report_assignment_id: r.report_assignment_id,
+        rowTitle: r.title,
+        parsedTitle: fieldsObj.title,
+        normalizedTitle: t,
+        matchesTarget: t === targetKey,
+        imgsCandidates: imgsArr,
+      });
+      if (t === targetKey) imgsArr.forEach((nm) => addImage(nm));
     }
+
+  // Fallback: if no images matched by exact title (due to formatting/whitespace differences),
+  // include all discovered images from the rows. This mirrors the coordinator experience where
+  // a single peer row is typically the intended target.
+  if (combinedMap.size === 0 && Array.isArray(rows) && rows.length > 0) {
+    for (const r of rows) {
+      let fieldsObj = {};
+      try {
+        fieldsObj = typeof r.fields === "string" ? JSON.parse(r.fields) : r.fields || {};
+      } catch {}
+      const imgsArr = Array.isArray(fieldsObj?._answers?.images)
+        ? fieldsObj._answers.images
+        : Array.isArray(fieldsObj?.images)
+        ? fieldsObj.images
+        : Array.isArray(fieldsObj?.photos)
+        ? fieldsObj.photos
+        : [];
+      imgsArr.forEach((nm) => addImage(nm));
+    }
+  }
 
     // Load current fields
     const selectSelf = `SELECT fields FROM submission WHERE submission_id = ?`;
@@ -700,18 +900,20 @@ export const consolidateAccomplishmentByTitle = (req, res) => {
         current = JSON.parse(selRows[0].fields || "{}");
       } catch {}
       const currImgs = Array.isArray(current.images) ? current.images : [];
-      currImgs.forEach((nm) => combined.add(nm));
+      console.log('[Consolidate] Current submission images before merge:', currImgs);
+      currImgs.forEach((nm) => addImage(nm));
 
       const next = {
         ...(current || {}),
         type: "ACCOMPLISHMENT",
-        images: Array.from(combined),
+        images: Array.from(combinedMap.values()),
         meta: {
           ...(current?.meta || {}),
           consolidatedAt: new Date().toISOString(),
         },
       };
       const updSql = `UPDATE submission SET fields = ? WHERE submission_id = ?`;
+      console.log('[Consolidate] Final combined images list:', Array.from(combinedMap.values()));
       db.query(updSql, [JSON.stringify(next), id], (updErr) => {
         if (updErr) return res.status(500).send("Update failed: " + updErr);
         res.json({ ok: true, images: next.images, count: next.images.length });

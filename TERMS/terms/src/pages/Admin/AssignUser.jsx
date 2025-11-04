@@ -3,6 +3,7 @@ import Sidebar from "../../components/shared/SidebarAdmin";
 import "./AssignUser.css";
 import { useNavigate } from "react-router-dom";
 import Header from "../../components/shared/Header";
+import Breadcrumb from "../../components/Breadcrumb";
 import Edit from "../../assets/edit.svg";
 import Delete from "../../assets/delete.svg";
 import Modal from "react-modal";
@@ -69,6 +70,7 @@ function AssignUser() {
       <div className="dashboard-container">
         <Sidebar activeLink="Assign User/Principal" />
         <div className="dashboard-content">
+          <Breadcrumb />
           <div className="dashboard-main">
             <h2>Assign User</h2>
           </div>

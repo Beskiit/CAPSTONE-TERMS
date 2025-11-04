@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import Header from "../../components/shared/Header.jsx";
+import Breadcrumb from "../../components/Breadcrumb.jsx";
 import Sidebar from "../../components/shared/SidebarPrincipal.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import "../Teacher/LAEMPLReport.css";
@@ -1349,6 +1350,7 @@ function ForApprovalData() {
         <div className="dashboard-container">
           <Sidebar activeLink="For Approval" />
           <div className="dashboard-content">
+            <Breadcrumb />
             <div className="dashboard-main">
               <div className="loading-container">
                 <div className="loading-spinner"></div>
@@ -1369,6 +1371,7 @@ function ForApprovalData() {
         <div className="dashboard-container">
           <Sidebar activeLink="For Approval" />
           <div className="dashboard-content">
+            <Breadcrumb />
             <div className="dashboard-main">
               <div className="error-container">
                 <h2>Error Loading Submission</h2>
@@ -1390,6 +1393,7 @@ function ForApprovalData() {
       <div className="dashboard-container">
         <Sidebar activeLink="For Approval" />
         <div className="dashboard-content">
+          <Breadcrumb />
           <div className="dashboard-main">
             <div className="page-header">
               <button 

@@ -1,6 +1,7 @@
 import React from "react";
 import { BrowserRouter, Routes, Route, useNavigate, Link } from 'react-router-dom';
 import Header from '../../components/shared/Header.jsx';
+import Breadcrumb from '../../components/Breadcrumb.jsx';
 import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import './ClassificationOfGrades.css';
 import { useEffect, useState } from 'react';
@@ -33,6 +34,7 @@ function ClassificationOfGrades() {
         <div className="dashboard-container">
             <Sidebar activeLink="Classification of Grades"/>
             <div className="dashboard-content">
+                <Breadcrumb />
                 <div className="dashboard-main">
                     <h2>Classification Of Grades</h2>
                 </div>

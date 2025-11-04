@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import Header from '../../components/shared/Header.jsx';
+import Breadcrumb from '../../components/Breadcrumb.jsx';
 import Sidebar from '../../components/shared/SidebarTeacher.jsx';
 import Submitted from '../../assets/submitted.svg';
 import Pending from '../../assets/pending.svg';
@@ -132,7 +133,7 @@ function Dashboard() {
   const handleSubmittedReportClick = (report) => {
     // Navigate to ViewSubmission for submitted reports
     if (report.submission_id) {
-      navigate(`/submission/${report.submission_id}`);
+      navigate(`/submission/${report.submission_id}`, { state: { breadcrumbTitle: (report.assignment_title || report.title) } });
     }
   };
 
@@ -142,8 +143,8 @@ function Dashboard() {
       <div className="dashboard-container">
         <Sidebar activeLink="Dashboard" />
         <div className="dashboard-content">
+          <Breadcrumb />
           <div className="dashboard-main">
-            <h2>Dashboard</h2>
             <div className="dashboard-cards">
               <div className="dashboard-card">
                 <div className="title-container">
@@ -324,9 +325,9 @@ function CalendarComponent({ deadlines = [] }) {
       allow_late: deadline.allow_late,
     };
 
-    if (kind === "laempl")         return navigate("/LAEMPLInstruction", { state: commonState });
-    if (kind === "mps")            return navigate("/MPSInstruction", { state: commonState });
-    if (kind === "accomplishment") return navigate("/AccomplishmentReportInstruction", { state: commonState });
+    if (kind === "laempl")         return navigate("/LAEMPLInstruction", { state: { ...commonState, fromDeadline: true } });
+    if (kind === "mps")            return navigate("/MPSInstruction", { state: { ...commonState, fromDeadline: true } });
+    if (kind === "accomplishment") return navigate("/AccomplishmentReportInstruction", { state: { ...commonState, fromDeadline: true } });
     if (kind === "cog")            return navigate("/ClassificationOfGradesInstruction", { state: commonState });
     return navigate("/SubmittedReport");
   };

@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams, useLocation } from "react-router-dom";
 import Header from "../../components/shared/Header.jsx";
+import Breadcrumb from "../../components/Breadcrumb.jsx";
 import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
+import SidebarPrincipal from "../../components/shared/SidebarPrincipal.jsx";
 import { ConfirmationModal, SubmissionConfirmation } from "../../components/ConfirmationModal";
 import { normalizeImages, getImageUrl, debugImageUrl } from "../../utils/imageUtils.js";
 import toast from "react-hot-toast";
@@ -18,11 +20,13 @@ const BASE = `${API_BASE}/submissions`; // <-- Updated to use submissions endpoi
 function AccomplishmentReport() {
   const [openPopup, setOpenPopup] = useState(false);
   const navigate = useNavigate();
+  const { state: navState } = useLocation();
 
   // --- Determine submission id from route or query (fallback to 18) ---
   const { id: idFromRoute } = useParams();
   const [sp] = useSearchParams();
   const idFromQuery = sp.get("id");
+  const forceTeacherParam = sp.get("forceTeacher");
   const submissionId = useMemo(
     () => idFromRoute || idFromQuery || "18",
     [idFromRoute, idFromQuery]
@@ -31,7 +35,12 @@ function AccomplishmentReport() {
   // --- Auth / role ---
   const [user, setUser] = useState(null);
   const role = (user?.role || "").toLowerCase();
-  const isTeacher = role === "teacher";
+  const isTeacherSidebar = role === "teacher"; // Sidebar should reflect real role
+  const isCoordinatorSidebar = role === "coordinator";
+  const isPrincipalSidebar = role === "principal";
+  const isTeacher = ((forceTeacherParam === '1') && role !== 'principal') || role === "teacher"; // Behavior/UI override (never force for principal)
+  const recipientsCount = Number(navState?.recipients_count || 0);
+  const isCoordinatorActingAsTeacher = isCoordinatorSidebar && recipientsCount >= 2;
   const [loadingUser, setLoadingUser] = useState(true);
 
   // --- Form state (shared) ---
@@ -109,6 +118,13 @@ function AccomplishmentReport() {
       }
     })();
   }, []);
+
+  // Accept report_assignment_id when arriving from Instruction/Reports (principal flow)
+  useEffect(() => {
+    if (navState && navState.report_assignment_id) {
+      setReportAssignmentId(navState.report_assignment_id);
+    }
+  }, [navState]);
 
   // --- Load submission data ---
   useEffect(() => {
@@ -429,10 +445,10 @@ function AccomplishmentReport() {
         console.error('Failed to reload submission data after coordinator submit:', reloadError);
       }
 
-      setSuccess("Report submitted to coordinator successfully!");
+      setSuccess("Report submitted successfuly!");
       setSubmissionStatus(2);
       setShowSubmitToast(true);
-      toast.success("Report submitted to coordinator successfully!");
+      toast.success("Report submitted successfuly!");
 
       // Show an alert summarizing what was passed to the coordinator
       try {
@@ -548,10 +564,10 @@ function AccomplishmentReport() {
         console.error('Failed to reload submission data after principal submit:', reloadError);
       }
 
-      setSuccess("Report submitted to principal successfully!");
+      setSuccess("Report submitted successfuly!");
       setSubmissionStatus(2);
       setShowSubmitToast(true);
-      toast.success("Report submitted to principal successfully!");
+      toast.success("Report submitted successfuly!");
     } catch (e2) {
       setError(e2.message || "Submit to principal failed");
       toast.error(e2.message || "Submit to principal failed");
@@ -571,28 +587,141 @@ function AccomplishmentReport() {
 
   const onSubmitFinal = () => onSubmit(); // reuse for now
 
+  // Submit for coordinator acting like teacher: send to principal (status = 2), no coordinator-only fields
+  const onSubmitToPrincipalAsTeacher = async () => {
+    if (submissionStatus >= 2 && submissionStatus !== 4) {
+      setError("This report is already submitted.");
+      return;
+    }
+    const validationErrors = validateForm();
+    if (validationErrors.length > 0) {
+      setError(validationErrors.join(". "));
+      toast.error(validationErrors.join(". "));
+      return;
+    }
+    setSaving(true);
+    setError("");
+    setSuccess("");
+    try {
+      const fd = new FormData();
+      fd.append("narrative", narrative);
+      fd.append("title", title);
+      fd.append("status", "2");
+      if (existingImages.length > 0) {
+        fd.append("existingImages", JSON.stringify(existingImages));
+      }
+      for (const f of newFiles) fd.append("images", f);
+      const res = await fetch(`${BASE}/${submissionId}/formdata`, {
+        method: "PATCH",
+        body: fd,
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Submit failed: ${res.status} ${text}`);
+      }
+      setSuccess("Submitted to principal successfully!");
+      setSubmissionStatus(2);
+      toast.success("Submitted to principal successfully!");
+    } catch (e) {
+      setError(e.message || "Submit failed");
+      toast.error(e.message || "Submit failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Principal: Save and auto-approve (status = 3)
+  const onPrincipalSave = async () => {
+    setSaving(true);
+    setError("");
+    setSuccess("");
+    try {
+      const fd = new FormData();
+      fd.append("narrative", narrative);
+      fd.append("title", title);
+      fd.append("status", "3");
+
+      // Include coordinator-like fields
+      fd.append("activityName", activity.activityName);
+      fd.append("facilitators", activity.facilitators);
+      fd.append("objectives", activity.objectives);
+      fd.append("date", activity.date);
+      fd.append("time", activity.time);
+      fd.append("venue", activity.venue);
+      fd.append("keyResult", activity.keyResult);
+      fd.append("personsInvolved", activity.personsInvolved);
+      fd.append("expenses", activity.expenses);
+      fd.append("lessonLearned", activity.lessonLearned);
+
+      if (existingImages.length > 0) {
+        fd.append("existingImages", JSON.stringify(existingImages));
+      }
+      for (const f of newFiles) fd.append("images", f);
+
+      const res = await fetch(`${BASE}/${submissionId}/formdata`, {
+        method: "PATCH",
+        body: fd,
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Save failed: ${res.status} ${text}`);
+      }
+
+      // Optional reload to normalize image URLs
+      try {
+        const reloadRes = await fetch(`${BASE}/${submissionId}`, { credentials: "include" });
+        if (reloadRes.ok) {
+          const reloadData = await reloadRes.json();
+          const imgs = reloadData?.images ?? reloadData?.fields?._answers?.images ?? reloadData?.fields?.images ?? reloadData?.fields?.photos ?? [];
+          if (imgs.length > 0) setExistingImages(normalizeImages(imgs));
+        }
+      } catch {}
+
+      setSuccess("Saved (auto-approved)");
+      setSubmissionStatus(3);
+      toast.success("Report saved and auto-approved (principal)");
+    } catch (e) {
+      setError(e.message || "Save failed");
+      toast.error(e.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const openConsolidate = async () => {
     setError("");
     setSuccess("");
     try {
       // Use report_assignment_id so we fetch peers from the correct assignment
-      const paramKey = isTeacher ? 'ra' : 'pra'; // teachers use ra (same assignment); coordinators use pra (parent)
-      const url = reportAssignmentId
-        ? `${API_BASE}/reports/accomplishment/${submissionId}/peers?${paramKey}=${encodeURIComponent(reportAssignmentId)}`
+      // PRINCIPAL: use 'ra' (same assignment) because single-assignment flow has all peers under the same report_assignment_id
+      // COORDINATOR (parent/child flow): use 'pra' (parent assignment)
+      const isPrincipal = isPrincipalSidebar === true;
+      const buildUrl = (key) => reportAssignmentId
+        ? `${API_BASE}/reports/accomplishment/${submissionId}/peers?${key}=${encodeURIComponent(reportAssignmentId)}`
         : `${API_BASE}/reports/accomplishment/${submissionId}/peers`;
-      
-      console.log("[Consolidate] DEBUG - Request details:");
-      console.log("- submissionId:", submissionId);
-      console.log("- reportAssignmentId:", reportAssignmentId);
-      console.log("- paramKey:", paramKey);
-      console.log("- URL:", url);
-      
-      const res = await fetch(url, { credentials: "include" });
+
+      // Try RA first for principal/teacher; if empty, retry PRA (child linking)
+      let firstKey = (isTeacher || isPrincipal) ? 'ra' : 'pra';
+      let url = buildUrl(firstKey);
+      console.log("[Consolidate] DEBUG - Request details (first):", { submissionId, reportAssignmentId, key: firstKey, url });
+      let res = await fetch(url, { credentials: "include" });
       if (!res.ok) {
         const txt = await res.text().catch(() => "");
         throw new Error(`Failed to load peers: ${res.status} ${txt}`);
       }
-      const data = await res.json();
+      let data = await res.json();
+      // If nothing and principal, try the alternate key
+      if (isPrincipal && Array.isArray(data) && data.length === 0) {
+        const altKey = firstKey === 'ra' ? 'pra' : 'ra';
+        url = buildUrl(altKey);
+        console.log("[Consolidate] DEBUG - Retrying with alternate key:", { altKey, url });
+        res = await fetch(url, { credentials: "include" });
+        if (res.ok) {
+          data = await res.json();
+        }
+      }
       try {
         console.log("[Consolidate] peers response:", data);
         console.log("[Consolidate] peers response (pretty):\n" + JSON.stringify(data, null, 2));
@@ -686,7 +815,11 @@ function AccomplishmentReport() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ title }),
+        body: JSON.stringify({
+          title,
+          // Prefer exact same assignment for principal/teacher flow
+          report_assignment_id: reportAssignmentId || undefined,
+        }),
       });
       if (!res.ok) {
         const txt = await res.text().catch(() => "");
@@ -780,30 +913,38 @@ function AccomplishmentReport() {
     <>
       <Header userText={user ? user.name : "Guest"} />
       <div className="dashboard-container">
-        {isTeacher ? (
-          <Sidebar activeLink="Accomplishment Report" />
-        ) : (
-          <SidebarCoordinator activeLink="Accomplishment Report" />
-        )}
+        {isTeacherSidebar && <Sidebar activeLink="Accomplishment Report" />}
+        {isCoordinatorSidebar && <SidebarCoordinator activeLink="Accomplishment Report" />}
+        {isPrincipalSidebar && <SidebarPrincipal activeLink="Accomplishment Report" />}
 
         <div className="dashboard-content">
+          <Breadcrumb />
           <div className="dashboard-main">
             <h2>Accomplishment Report</h2>
           </div>
 
           <div className="content">
-            {isTeacher ? (
+            {(isTeacher || isCoordinatorActingAsTeacher) ? (
               <>
                 <div className="buttons">
                   <button className="btn primary" disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}>
                       {saving ? "Saving…" : "Save Changes"}
                   </button>
                   <button
-                    onClick={handleCoordinatorConfirmation}
+                    onClick={isCoordinatorActingAsTeacher ? onSubmitToPrincipalAsTeacher : handleCoordinatorConfirmation}
                     disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}
                     className="submit-button"
                   >
-                    {saving ? "Submitting…" : "Submit to Coordinator"}
+                    {saving ? "Submitting…" : (isCoordinatorActingAsTeacher ? "Submit" : "Submit")}
+                  </button>
+                </div>
+              </>
+            ) : isCoordinatorSidebar ? (
+              <>
+                <div className="buttons">
+                  <button onClick={openConsolidate}>Consolidate</button>
+                  <button onClick={handlePrincipalConfirmation} disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}>
+                    {saving ? "Submitting…" : "Submit"}
                   </button>
                 </div>
               </>
@@ -811,8 +952,8 @@ function AccomplishmentReport() {
               <>
                 <div className="buttons">
                   <button onClick={openConsolidate}>Consolidate</button>
-                  <button onClick={handlePrincipalConfirmation} disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}>
-                    {saving ? "Submitting…" : "Submit to Principal"}
+                  <button className="btn primary" onClick={onPrincipalSave} disabled={saving}>
+                    {saving ? "Saving…" : "Save"}
                   </button>
                 </div>
               </>
@@ -820,44 +961,6 @@ function AccomplishmentReport() {
 
             <div className="accomplishment-report-container">
               <h3>Activity Completion Report</h3>
-
-              {isTeacher && submissionStatus >= 2 && submissionStatus !== 4 && showSubmittedAlert && (
-                <div
-                  className="alert info"
-                  style={{
-                    marginBottom: 12,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "10px 12px",
-                    border: "1px solid #93c5fd",
-                    background: "#dbeafe",
-                    color: "#1e40af",
-                    borderRadius: 8,
-                    fontSize: 14
-                  }}
-                >
-                  <span>
-                    ✅ This submission has been <strong>sent to the Coordinator</strong>. Further edits are disabled.
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowSubmittedAlert(false)}
-                    style={{
-                      marginLeft: 12,
-                      border: "none",
-                      background: "transparent",
-                      cursor: "pointer",
-                      fontSize: 16,
-                      color: "#1e40af"
-                    }}
-                    aria-label="Dismiss"
-                    title="Dismiss"
-                  >
-                    ×
-                  </button>
-                </div>
-              )}
 
               {isTeacher && submissionStatus === 4 && showSubmittedAlert && (
                 <div

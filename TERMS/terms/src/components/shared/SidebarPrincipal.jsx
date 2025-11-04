@@ -36,6 +36,19 @@ function SidebarCoordinator({ activeLink, style }) {
                                            Dashboard
                                        </Link>
                                    </li>
+                                   <li className={`sidebar-item ${activeLink === 'Reports' ? 'active' : ''}`}>
+                                            <a className={`dropdown-btn ${openMenu === "reports" ? "open" : ""}`} 
+                                            onClick={() => toggleMenu('reports')}>
+                                                <img src={ReportsViewReports} alt="Reports" style={{ width: '20px', height: '20px', marginRight: '8px' }} />
+                                                Reports <span className="arrow">{openMenu === "reports" ? "▲" : "▼"}</span>
+                                            </a>
+                                            {openMenu === "reports" && (
+                                                <ul className="dropdown-menu">
+                                                    <li><a href="/Accomplishment">Accomplishment Report</a></li>
+                                                    <li className={`${activeLink === 'LAEMPL & MPS' ? 'active' : ''}`}><a href="/LAEMPL">LAEMPL & MPS</a></li>
+                                                </ul>
+                                            )}
+                                    </li>
                             <li className={`sidebar-item ${activeLink === 'View Report' ? 'active' : ''}`}>
                                 <Link to="/ViewSubmission">
                                     <img src={ReportsViewReports} alt="View Report" style={{ width: '20px', height: '20px', marginRight: '8px' }} />

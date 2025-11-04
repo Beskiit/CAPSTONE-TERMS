@@ -27,7 +27,9 @@ export function normalizeImageUrl(img) {
     // Handle relative paths
     const hasSlash = img.includes("/");
     const rel = hasSlash ? img : `uploads/accomplishments/${img}`;
-    const url = `${API_BASE}${rel.startsWith('/') ? rel : `/${rel}`}`;
+    let url = `${API_BASE}${rel.startsWith('/') ? rel : `/${rel}`}`;
+    // Avoid double-encoding: if already percent-encoded, leave it; otherwise encode spaces
+    if (!url.includes('%')) url = url.replace(/\s/g, '%20');
     console.log('🔍 [DEBUG] Constructed URL from string:', url);
     return { url, filename: img.split("/").pop() || img };
   }
@@ -43,7 +45,8 @@ export function normalizeImageUrl(img) {
     }
     
     const isAbsolute = /^https?:\/\//i.test(raw);
-    const url = isAbsolute ? raw : (raw ? `${API_BASE}${raw.startsWith('/') ? raw : `/${raw}`}` : "");
+    let url = isAbsolute ? raw : (raw ? `${API_BASE}${raw.startsWith('/') ? raw : `/${raw}`}` : "");
+    if (url && !url.includes('%')) url = url.replace(/\s/g, '%20');
     const filename = img.filename || (raw ? raw.split("/").pop() : "");
     console.log('🔍 [DEBUG] Final object URL:', url);
     return { url, filename };

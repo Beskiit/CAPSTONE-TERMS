@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import Header from "../../components/shared/Header";
+import Breadcrumb from "../../components/Breadcrumb";
 import Sidebar from "../../components/shared/SidebarTeacher";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator";
 import "../../components/shared/StatusBadges.css";
@@ -546,6 +547,7 @@ function ViewSubmission() {
         <Header userText={user ? user.name : "Guest"} />
         <div className="dashboard-container">
           <div className="dashboard-content">
+            <Breadcrumb />
             <div className="dashboard-main">
               <h2>Loading Submission...</h2>
             </div>
@@ -561,6 +563,7 @@ function ViewSubmission() {
         <Header userText={user ? user.name : "Guest"} />
         <div className="dashboard-container">
           <div className="dashboard-content">
+            <Breadcrumb />
             <div className="dashboard-main">
               <h2>Error</h2>
               <p>{error || "Submission not found"}</p>
@@ -582,6 +585,7 @@ function ViewSubmission() {
           <SidebarCoordinator activeLink="Submitted Report" />
         )}
         <div className="dashboard-content">
+          <Breadcrumb />
           <div className="dashboard-main">
             <div className="page-header">
               <button 

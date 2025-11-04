@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import Header from '../../components/shared/Header.jsx';
+import Breadcrumb from '../../components/Breadcrumb.jsx';
 import Sidebar from '../../components/shared/SidebarPrincipal.jsx';
 import Submitted from '../../assets/submitted.svg';
 import Pending from '../../assets/pending.svg';
@@ -109,15 +110,15 @@ function DashboardPrincipal(){
     // Navigation handlers
     const handleApprovedReportClick = (report) => {
         // Navigate to ViewSubmissionData for approved reports
-        if (report.submission_id) {
-            navigate(`/ViewSubmissionData?id=${report.submission_id}`);
+    if (report.submission_id) {
+            navigate(`/ViewSubmissionData?id=${report.submission_id}`, { state: { breadcrumbTitle: (report.title || report.assignment_title) } });
         }
     };
 
     const handlePendingReportClick = (report) => {
         // Navigate to ForApprovalData for pending reports
-        if (report.submission_id) {
-            navigate(`/ForApprovalData?id=${report.submission_id}`);
+    if (report.submission_id) {
+            navigate(`/ForApprovalData?id=${report.submission_id}`, { state: { breadcrumbTitle: (report.title || report.assignment_title) } });
         }
     };
 
@@ -134,8 +135,8 @@ function DashboardPrincipal(){
         <div className="dashboard-container">
             <Sidebar activeLink="Dashboard" />
             <div className="dashboard-content">
+                <Breadcrumb />
                 <div className="dashboard-main">
-                    <h2>Dashboard</h2>
                 <div className="dashboard-cards">
                     <div className="dashboard-card">
                         <div className="title-container">

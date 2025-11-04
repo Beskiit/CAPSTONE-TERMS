@@ -1,6 +1,7 @@
 import "./ViewReports.css";
 import React, { useState, useEffect } from "react";
 import Header from "../../components/shared/Header.jsx";
+import Breadcrumb from "../../components/Breadcrumb.jsx";
 import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import axios from "axios";
 
@@ -113,6 +114,7 @@ function ViewReports() {
       <div className="dashboard-container">
         <Sidebar activeLink="View Reports" />
         <div className="dashboard-content">
+          <Breadcrumb />
           <div className="dashboard-main">
             <h2>View Reports</h2>
 

@@ -3099,7 +3099,8 @@ app.get("/reports/upcoming-deadlines/:userId", async (req, res) => {
         sy.school_year,
 
         ud.name AS submitted_by_name,
-        ud2.name AS given_by_name
+        ud2.name AS given_by_name,
+        COALESCE(adc.recipients_count, sdc.sub_recipients, 0) AS recipients_count
       FROM submission s
       JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
       JOIN category c ON ra.category_id = c.category_id
@@ -3107,8 +3108,19 @@ app.get("/reports/upcoming-deadlines/:userId", async (req, res) => {
       LEFT JOIN user_details ud ON s.submitted_by = ud.user_id
       LEFT JOIN user_details ud2 ON ra.given_by = ud2.user_id
       LEFT JOIN school_year sy ON sy.year_id = ra.year
+      LEFT JOIN (
+        SELECT report_assignment_id, COUNT(DISTINCT user_id) AS recipients_count
+        FROM assignment_distribution
+        GROUP BY report_assignment_id
+      ) adc ON adc.report_assignment_id = ra.report_assignment_id
+      LEFT JOIN (
+        SELECT report_assignment_id, COUNT(DISTINCT submitted_by) AS sub_recipients
+        FROM submission
+        GROUP BY report_assignment_id
+      ) sdc ON sdc.report_assignment_id = ra.report_assignment_id
       WHERE s.submitted_by = ?
       AND ra.is_given = 0
+      AND (s.status = 1 OR s.status = 4)
       ORDER BY ra.to_date ASC, s.date_submitted ASC
     `;
 
@@ -3119,7 +3131,7 @@ app.get("/reports/upcoming-deadlines/:userId", async (req, res) => {
       });
     });
 
-    console.log('🔄 [DEBUG] Upcoming deadline submissions:', result.length);
+    console.log('🔄 [DEBUG] Upcoming deadline submissions (pending/rejected only):', result.length);
     res.json(result);
   } catch (error) {
     console.error("Error fetching upcoming deadline submissions:", error);
@@ -3808,6 +3820,8 @@ app.put("/reports/assignment/:reportId", async (req, res) => {
 });
 
 // Get upcoming deadline submissions for coordinators (individual submissions with is_given = 0)
+// NOTE: This is a duplicate endpoint - the one above (line 3072) takes precedence since it's registered first
+// Both are updated to filter by status = 1 (pending) or status = 4 (rejected) only
 app.get("/reports/upcoming-deadlines/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
@@ -3850,6 +3864,7 @@ app.get("/reports/upcoming-deadlines/:userId", async (req, res) => {
       LEFT JOIN school_year sy ON sy.year_id = ra.year
       WHERE s.submitted_by = ?
       AND ra.is_given = 0
+      AND (s.status = 1 OR s.status = 4)
       ORDER BY ra.to_date ASC, s.date_submitted ASC
     `;
     
@@ -3860,7 +3875,7 @@ app.get("/reports/upcoming-deadlines/:userId", async (req, res) => {
       });
     });
 
-    console.log('🔄 [DEBUG] Upcoming deadline submissions:', result.length);
+    console.log('🔄 [DEBUG] Upcoming deadline submissions (pending/rejected only):', result.length);
     console.log('🔄 [DEBUG] Query results:', result);
     res.json(result);
   } catch (error) {

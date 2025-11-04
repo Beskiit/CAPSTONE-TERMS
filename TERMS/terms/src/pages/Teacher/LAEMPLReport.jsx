@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import Header from "../../components/shared/Header.jsx";
+import Breadcrumb from "../../components/Breadcrumb.jsx";
 import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import "./LAEMPLReport.css";
@@ -577,7 +578,7 @@ function LAEMPLReport() {
         throw new Error(t || `HTTP ${res.status}`);
       }
       const json = await res.json();
-      toast.success("LAEMPL report submitted successfully!");
+      toast.success("Report submitted successfuly!");
 
       if (typeof json?.status !== "undefined") setStatus(json.status);
 
@@ -1460,6 +1461,7 @@ function LAEMPLReport() {
           <SidebarCoordinator activeLink="LAEMPL & MPS" />
         )}
         <div className="dashboard-content">
+          <Breadcrumb />
           <div className="dashboard-main">
             <h2>LAEMPL</h2>
           </div>

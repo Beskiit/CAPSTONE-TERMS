@@ -1,0 +1,66 @@
+/* Coordinator Deadline Action Modal Specific Styles */
+.coordinator-action-modal {
+  max-width: 500px;
+}
+
+.coordinator-action-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.coordinator-action-buttons .btn-secondary {
+  order: 3;
+  margin-top: 8px;
+}
+
+.coordinator-action-buttons .btn-primary {
+  width: 100%;
+  padding: 12px 20px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.btn-set-report {
+  background: #3b82f6;
+  color: white;
+  border: none;
+  order: 1;
+}
+
+.btn-set-report:hover {
+  background: #2563eb;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.btn-access-direct {
+  background: #10b981;
+  color: white;
+  border: none;
+  order: 2;
+}
+
+.btn-access-direct:hover {
+  background: #059669;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.btn-secondary {
+  background: #6b7280;
+  color: white;
+  border: none;
+}
+
+.btn-secondary:hover {
+  background: #4b5563;
+}
+
+.modal-description {
+  color: #6b7280;
+  font-size: 13px;
+  margin-top: 8px;
+  line-height: 1.5;
+}
+

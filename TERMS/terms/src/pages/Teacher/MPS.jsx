@@ -1,6 +1,7 @@
 import React, {useEffect, useState} from "react";
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import Header from '../../components/shared/Header.jsx';
+import Breadcrumb from '../../components/Breadcrumb.jsx';
 import Sidebar from '../../components/shared/SidebarTeacher.jsx';
 import SidebarCoordinator from '../../components/shared/SidebarCoordinator.jsx';
 import './Accomplishment.css';
@@ -43,6 +44,7 @@ function LAEMPL() {
                     <SidebarCoordinator activeLink="MPS" />
                 )}
                 <div className="dashboard-content">
+                    <Breadcrumb />
                     <div className="dashboard-main">
                         <h2>MPS</h2>
                     </div>

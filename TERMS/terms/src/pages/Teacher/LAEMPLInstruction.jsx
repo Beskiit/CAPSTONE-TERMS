@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import './Instruction.css';
 import Header from "../../components/shared/Header.jsx";
+import Breadcrumb from "../../components/Breadcrumb.jsx";
 import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 
@@ -53,6 +54,7 @@ function LAEMPLInstruction() {
                     <SidebarCoordinator activeLink="LAEMPL" />
                 )}
                 <div className="dashboard-content">
+                    <Breadcrumb />
                     <div className="dashboard-main">
                         <h2>LAEMPL</h2>
                     </div>
