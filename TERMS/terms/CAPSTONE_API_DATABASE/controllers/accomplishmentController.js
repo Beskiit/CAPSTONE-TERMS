@@ -221,12 +221,13 @@ export const giveAccomplishmentReport = (req, res) => {
                     if (rErr) return conn.rollback(() => { conn.release(); res.status(500).send("Failed to read giver role: " + rErr); });
                     const giverRole = (rRows && rRows[0] && rRows[0].role) ? rRows[0].role : '';
                     if (giverRole === 'principal' && recipients.length >= 2) {
-                      const checkPrincipalSql = `SELECT submission_id, COALESCE(MAX(number_of_submission),0)+1 AS next_num
-                                                FROM submission 
+                      // Compatible with ONLY_FULL_GROUP_BY: do not select non-aggregated columns
+                      const checkPrincipalSql = `SELECT COUNT(*) AS cnt, COALESCE(MAX(number_of_submission),0)+1 AS next_num
+                                                FROM submission
                                                 WHERE report_assignment_id = ? AND submitted_by = ?`;
                       conn.query(checkPrincipalSql, [report_assignment_id, given_by], (cErr, cRows) => {
                         if (cErr) return conn.rollback(() => { conn.release(); res.status(500).send("Failed to check principal submission: " + cErr); });
-                        const alreadyExists = Array.isArray(cRows) && cRows.length && cRows[0].submission_id;
+                        const alreadyExists = Array.isArray(cRows) && cRows.length && Number(cRows[0].cnt) > 0;
                         const nextNum = (Array.isArray(cRows) && cRows[0] && cRows[0].next_num) ? cRows[0].next_num : 1;
                         if (alreadyExists) return finalize();
                         const insertPrincipalSql = `
