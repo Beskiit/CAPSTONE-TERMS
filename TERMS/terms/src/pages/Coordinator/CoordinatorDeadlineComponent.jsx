@@ -1,11 +1,9 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CoordinatorDeadlineActionModal } from "../../components/CoordinatorDeadlineActionModal";
 
 export default function CoordinatorDeadlineComponent({ deadlines = [] }) {
   const navigate = useNavigate();
   const [selectedDeadline, setSelectedDeadline] = useState(null);
-  const [showModal, setShowModal] = useState(false);
 
   // The API already filters for upcoming deadlines, so we don't need to filter again
   const filteredDeadlines = deadlines;
@@ -48,38 +46,17 @@ export default function CoordinatorDeadlineComponent({ deadlines = [] }) {
     d?.submission_id ?? d?.id ?? d?.report_assignment_id ?? null;
 
   // Handle clicking on a deadline
-  // If is_given = 1: go directly to template (already assigned, no modal needed)
-  // If is_given = 0: show modal with options (from principal, needs scheduling decision)
+  // Always route to the instruction page; the Set-as-Report action now lives there.
   const handleDeadlineClick = (deadline) => {
-    // New rule: If this assignment has 2+ recipients and coordinator is one of them (this list item is theirs),
-    // behave like teacher (go straight to template), regardless of is_given.
     const recipientsCount = Number(deadline?.recipients_count || 0);
     if (recipientsCount >= 2) {
-      // Force teacher-like view in the template
       handleAccessDirectly({ ...deadline, __forceTeacherView: true });
       return;
     }
-
-    // Check if is_given = 1, then go directly without modal
-    if (deadline.is_given === 1 || deadline.is_given === '1') {
-      handleAccessDirectly(deadline);
-      return;
-    }
-    
-    // For is_given = 0, show modal with options
-    setSelectedDeadline(deadline);
-    setShowModal(true);
+    handleAccessDirectly(deadline);
   };
 
-  // Option 1: Set as Report to Teachers - redirect to SetReport with principal's data
-  const handleSetAsReport = () => {
-    if (!selectedDeadline) return;
-    
-    // Navigate to SetReport with the report assignment ID and flag
-    navigate(`/SetReport?reportId=${selectedDeadline.report_assignment_id}&isPrincipalReport=true`);
-  };
-
-  // Option 2: Access Directly - go straight to the template
+  // Go straight to the template/instruction
   // Can be called with or without selectedDeadline (for direct navigation)
   const handleAccessDirectly = (deadline = null) => {
     const targetDeadline = deadline || selectedDeadline;
@@ -99,6 +76,8 @@ export default function CoordinatorDeadlineComponent({ deadlines = [] }) {
       allow_late: targetDeadline.allow_late,
       category_id: targetDeadline.category_id,
       sub_category_id: targetDeadline.sub_category_id,
+      is_given: targetDeadline.is_given,
+      recipients_count: targetDeadline.recipients_count,
       forceTeacherView: Boolean(targetDeadline.__forceTeacherView),
     };
 
@@ -171,17 +150,7 @@ export default function CoordinatorDeadlineComponent({ deadlines = [] }) {
         </div>
       </div>
 
-      {/* Modal for action selection */}
-      <CoordinatorDeadlineActionModal
-        isOpen={showModal}
-        onClose={() => {
-          setShowModal(false);
-          setSelectedDeadline(null);
-        }}
-        onSetAsReport={handleSetAsReport}
-        onAccessDirectly={handleAccessDirectly}
-        deadlineTitle={selectedDeadline?.title || "Untitled Report"}
-      />
+      {/* Modal removed: action now handled in instruction screen */}
     </>
   );
 }

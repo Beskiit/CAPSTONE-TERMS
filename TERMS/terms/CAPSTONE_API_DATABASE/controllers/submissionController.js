@@ -1,6 +1,7 @@
 import db from '../db.js';
 import pool from '../db.js';
 import { createNotification } from './notificationsController.js';
+import { sendEmail } from "../services/emailService.js";
 // --- helpers ---
 const safeParseJSON = (val, fallback = null) => {
   try {
@@ -445,10 +446,38 @@ export const patchLAEMPLBySubmissionId = (req, res) => {
         FROM submission
         WHERE submission_id = ?
       `;
-      db.query(fetchSql, [id], (fErr, fRes) => {
+      db.query(fetchSql, [id], async (fErr, fRes) => {
         if (fErr) return res.status(500).send('Database error: ' + fErr);
         const out = { ...fRes[0] };
         try { out.fields = typeof out.fields === 'string' ? JSON.parse(out.fields) : out.fields; } catch {}
+        // If explicitly approved (status === 3), email the submitter
+        try {
+          if (status === 3) {
+            const metaSql = `
+              SELECT s.submitted_by, ra.title
+              FROM submission s
+              JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
+              WHERE s.submission_id = ?
+            `;
+            db.query(metaSql, [id], async (mErr, mRows) => {
+              if (!mErr && mRows?.length) {
+                const meta = mRows[0];
+                const uSql = `SELECT email FROM user_details WHERE user_id = ? LIMIT 1`;
+                db.query(uSql, [meta.submitted_by], async (_ue, uRows) => {
+                  const to = uRows?.[0]?.email;
+                  if (to) {
+                    const approver = (req.user?.name || req.user?.email || 'Principal').toString();
+                    const subj = `Submission approved: ${meta.title}`;
+                    const msg  = `${approver} approved your report ${meta.title}`;
+                    try { await sendEmail({ to, subject: subj, html: `<p>${msg}</p>`, text: msg }); } catch (e) { console.error('Email send failed:', e?.message || e); }
+                  }
+                });
+              }
+            });
+          }
+        } catch (e) {
+          console.error('Approval email failed:', e?.message || e);
+        }
         return res.json(out);
       });
     });
@@ -960,8 +989,8 @@ export const patchSubmission = (req, res) => {
     }
 
     // If status is 4 (rejected), implement rejection workflow
-    if (status === 4) {
-      handleRejectionWorkflow(id, rejection_reason, res);
+  if (status === 4) {
+      handleRejectionWorkflow(req, res, id, rejection_reason);
     } else {
       // Return updated submission
       const fetchSql = `
@@ -973,10 +1002,40 @@ export const patchSubmission = (req, res) => {
         WHERE s.submission_id = ?
       `;
 
-      db.query(fetchSql, [id], (fErr, fRes) => {
+      db.query(fetchSql, [id], async (fErr, fRes) => {
         if (fErr) return res.status(500).send('Failed to fetch updated submission: ' + fErr);
         
         const submission = normalizeFields(fRes[0]);
+
+        // If this update explicitly approved the submission, email the submitter (best-effort)
+        if (status === 3) {
+          try {
+            const metaSql = `
+              SELECT s.submitted_by, ra.title
+              FROM submission s
+              JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
+              WHERE s.submission_id = ?
+            `;
+            db.query(metaSql, [id], (mErr, mRows) => {
+              if (!mErr && mRows?.length) {
+                const meta = mRows[0];
+                const uSql = `SELECT email FROM user_details WHERE user_id = ? LIMIT 1`;
+                db.query(uSql, [meta.submitted_by], async (_ue, uRows) => {
+                  const to = uRows?.[0]?.email;
+                  if (to) {
+                    const approver = (req.user?.name || req.user?.email || 'Principal').toString();
+                    const subj = `Submission approved: ${meta.title}`;
+                    const msg  = `${approver} approved your report ${meta.title}`;
+                    try { await sendEmail({ to, subject: subj, html: `<p>${msg}</p>`, text: msg }); } catch (e) { console.error('Email send failed:', e?.message || e); }
+                  }
+                });
+              }
+            });
+          } catch (e) {
+            console.error('Approval email failed:', e?.message || e);
+          }
+        }
+
         res.json({
           message: 'Submission updated successfully',
           submission: submission
@@ -1114,11 +1173,42 @@ export const patchSubmissionFormData = (req, res) => {
     db.query(updateSql, params, (updErr) => {
       if (updErr) return res.status(500).send('Update failed: ' + updErr);
 
+      // Determine final status after update
+      const finalStatus = Number(status) || (currentStatus < 2 ? 2 : currentStatus);
+
+      // Best-effort: on first submit (status becomes 2), email the assigner (principal)
+      if (finalStatus === 2) {
+        const metaSql = `
+          SELECT ra.given_by, ra.title, ud.name AS submitter_name
+          FROM submission s
+          JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
+          LEFT JOIN user_details ud ON ud.user_id = s.submitted_by
+          WHERE s.submission_id = ?
+        `;
+        db.query(metaSql, [id], (mErr, mRows) => {
+          if (!mErr && mRows?.length) {
+            const meta = mRows[0];
+            const userSql = `SELECT email, name FROM user_details WHERE user_id = ? LIMIT 1`;
+            db.query(userSql, [meta.given_by], async (_ue, uRows) => {
+              const to = uRows?.[0]?.email;
+              if (to) {
+                const subj = `Report submitted: ${meta.title}`;
+                const submitter = meta.submitter_name || 'a user';
+                const msg  = `A report was submitted by ${submitter}.`;
+                try { await sendEmail({ to, subject: subj, html: `<p>${msg}</p>`, text: msg }); } catch (e) {
+                  console.error('Email send failed:', e?.message || e);
+                }
+              }
+            });
+          }
+        });
+      }
+
       // Return success response with updated images
       res.json({
         message: 'Submission updated successfully',
         submission_id: id,
-        status: Number(status) || (currentStatus < 2 ? 2 : currentStatus),
+        status: finalStatus,
         images: finalImages // Include the updated images array
       });
     });
@@ -1128,7 +1218,7 @@ export const patchSubmissionFormData = (req, res) => {
 /**
  * Handle rejection workflow: set status to 1 (draft), extend deadline, and notify
  */
-const handleRejectionWorkflow = (submissionId, rejectionReason, res) => {
+const handleRejectionWorkflow = (req, res, submissionId, rejectionReason) => {
   console.log('Handling rejection workflow:', {
     submissionId,
     rejectionReason,
@@ -1138,7 +1228,7 @@ const handleRejectionWorkflow = (submissionId, rejectionReason, res) => {
   // Get submission details and assignment info
   const getDetailsSql = `
     SELECT s.submission_id, s.submitted_by, s.report_assignment_id, s.fields,
-           ra.title as assignment_title, ra.to_date as original_due_date,
+           ra.title as assignment_title,
            ud.name as submitted_by_name, ud.email as submitted_by_email
     FROM submission s
     JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
@@ -1154,87 +1244,55 @@ const handleRejectionWorkflow = (submissionId, rejectionReason, res) => {
     }
 
     const submission = results[0];
-    const originalDueDate = new Date(submission.original_due_date);
-    
-    // Extend deadline by 7 days from original due date
-    const extendedDueDate = new Date(originalDueDate);
-    extendedDueDate.setDate(extendedDueDate.getDate() + 7);
-    
-    // Update submission status to 1 (draft) and extend deadline
+    const rejectedAt = new Date().toISOString();
+
+    // Ensure status is 4 and set rejection metadata (do not extend deadlines)
     const updateSql = `
       UPDATE submission 
-      SET status = 1,
+      SET status = 4,
           fields = JSON_SET(
-            COALESCE(fields, '{}'),
+            COALESCE(fields, '{}'), 
             '$.rejection_reason', ?,
-            '$.rejected_at', ?,
-            '$.extended_due_date', ?,
-            '$.original_due_date', ?
+            '$.rejected_at', ?
           )
       WHERE submission_id = ?
     `;
 
-    const rejectedAt = new Date().toISOString();
     const updateValues = [
       rejectionReason,
       rejectedAt,
-      extendedDueDate.toISOString(),
-      originalDueDate.toISOString(),
       submissionId
     ];
 
-    console.log('Updating submission with rejection data:', {
-      submissionId,
-      rejectionReason,
-      rejectedAt,
-      extendedDueDate: extendedDueDate.toISOString(),
-      originalDueDate: originalDueDate.toISOString(),
-      updateValues
-    });
-
-    db.query(updateSql, updateValues, (updateErr, updateResult) => {
+    db.query(updateSql, updateValues, (updateErr) => {
       if (updateErr) return res.status(500).send('Failed to update submission: ' + updateErr);
 
-      // Update the report assignment deadline
-      const updateAssignmentSql = `
-        UPDATE report_assignment 
-        SET to_date = ?
-        WHERE report_assignment_id = ?
-      `;
+      // Notify the submitter
+      const notificationPayload = {
+        title: `Report Rejected: ${submission.assignment_title}`,
+        message: `Your report has been rejected. Reason: ${rejectionReason}.`,
+        type: 'submission_rejected',
+        ref_type: 'submission',
+        ref_id: Number(submissionId)
+      };
 
-      db.query(updateAssignmentSql, [extendedDueDate, submission.report_assignment_id], (assignErr) => {
-        if (assignErr) {
-          console.error('Failed to update assignment deadline:', assignErr);
-          // Continue with notification even if assignment update fails
-        }
+      const rejectorName = (req.user?.name || req.user?.email || 'Principal').toString();
 
-        // Notify the teacher/coordinator about the rejection
-        const notificationPayload = {
-          title: `Report Rejected: ${submission.assignment_title}`,
-          message: `Your report has been rejected. Reason: ${rejectionReason}. New deadline: ${extendedDueDate.toLocaleDateString()}`,
-          type: 'rejection',
-          ref_type: 'submission',
-          ref_id: Number(submissionId)
-        };
-
-        createNotification(submission.submitted_by, notificationPayload)
-          .then(() => {
-            console.log('Rejection notification sent successfully');
-            res.json({ 
-              success: true, 
-              message: 'Report rejected successfully',
-              extendedDueDate: extendedDueDate.toISOString()
-            });
-          })
-          .catch((notifErr) => {
-            console.error('Failed to send rejection notification:', notifErr);
-            res.json({ 
-              success: true, 
-              message: 'Report rejected successfully (notification failed)',
-              extendedDueDate: extendedDueDate.toISOString()
-            });
-          });
-      });
+      createNotification(submission.submitted_by, notificationPayload)
+        .then(async () => {
+          // Best-effort email to submitter
+          const to = submission.submitted_by_email;
+          if (to) {
+            const subj = `Report rejected: ${submission.assignment_title}`;
+            const msg  = `Report was rejected by ${rejectorName}. The feedback: ${rejectionReason}`;
+            try { await sendEmail({ to, subject: subj, html: `<p>${msg}</p>`, text: msg }); } catch (e) { console.error('Email send failed:', e?.message || e); }
+          }
+          res.json({ success: true, message: 'Report rejected successfully' });
+        })
+        .catch((notifErr) => {
+          console.error('Failed to send rejection notification:', notifErr);
+          res.json({ success: true, message: 'Report rejected successfully (notification failed)' });
+        });
     });
   });
 };

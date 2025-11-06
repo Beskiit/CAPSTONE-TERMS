@@ -206,12 +206,11 @@ body{
 
 /* Rejected deadline items */
 .deadline-item.rejected {
-  border-left: 4px solid #dc2626;
-  background-color: #fef2f2;
+  background-color: #FF8686 !important; /* force same color as normal card */
 }
 
 .deadline-item.rejected:hover {
-  background-color: #fee2e2;
+  background-color: #FF8686 !important; /* no change on hover */
 }
 
 .rejected-badge {

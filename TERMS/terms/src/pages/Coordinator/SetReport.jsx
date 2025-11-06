@@ -430,6 +430,13 @@ function SetReport() {
       
       const reportData = await res.json();
       console.log('🔄 [DEBUG] Loaded report data:', reportData);
+
+      // Guard: coordinators cannot edit when already given
+      if (isCoordinator && (reportData?.is_given === 1 || reportData?.is_given === '1')) {
+        toast.error('This report has already been given to teachers.');
+        navigate(-1);
+        return;
+      }
       
       // Store original data
       setOriginalReportData(reportData);

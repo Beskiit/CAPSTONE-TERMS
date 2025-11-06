@@ -1,5 +1,6 @@
 import db from "../db.js";
 import { createNotificationsBulk, createNotification } from './notificationsController.js';
+import { sendEmail } from "../services/emailService.js";
 
 /** Build initial blank JSON for the accomplishment submission */
 function buildInitialAccFields() {
@@ -97,6 +98,23 @@ export const giveAccomplishmentReport = (req, res) => {
     });
   };
 
+  // Helper: send emails to a list of user IDs (best-effort, non-blocking)
+  const emailUsers = (userIds, subject, messageHtml, messageText) => {
+    if (!Array.isArray(userIds) || userIds.length === 0) return;
+    const placeholders = userIds.map(() => '?').join(',');
+    const sql = `SELECT email FROM user_details WHERE user_id IN (${placeholders}) AND email IS NOT NULL AND email <> ''`;
+    db.query(sql, userIds, async (_e, rows) => {
+      if (!rows || !rows.length) return;
+      for (const r of rows) {
+        try {
+          await sendEmail({ to: r.email, subject, html: messageHtml, text: messageText || undefined });
+        } catch (err) {
+          console.error('Email send failed:', err?.message || err);
+        }
+      }
+    });
+  };
+
   // Determine auto is_given rules for principal-given assignments
   const idsToCheck = [...new Set([...(recipients || []), given_by].filter(Boolean))];
   const placeholders = idsToCheck.map(() => '?').join(',');
@@ -117,50 +135,46 @@ export const giveAccomplishmentReport = (req, res) => {
       if (hasTeacher) computedIsGiven = 1;            // principal -> teacher(s) (with/without coordinator)
       else if (hasCoordinator && !hasTeacher) computedIsGiven = 0; // principal -> coordinator only
     }
-    db.query("START TRANSACTION", (txErr) => {
-    if (txErr) return res.status(500).send("Failed to start transaction: " + txErr);
+    db.getConnection((connErr, conn) => {
+      if (connErr) return res.status(500).send("DB connect error: " + connErr.message);
 
-    const insertReportSql = `
-      INSERT INTO report_assignment
-        (category_id, sub_category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title, parent_report_assignment_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-    const reportVals = [
-      category_id,
-      sub_category_id ?? null,
-      given_by,
-      quarter,
-      year,
-      fromDateVal,
-      to_date,
-      instruction,
-        computedIsGiven,
-      _is_archived,
-      _allow_late,
-      title,
-      parent_report_assignment_id ?? null,
-    ];
-    db.query(insertReportSql, reportVals, (insErr, insRes) => {
-      if (insErr) {
-        return db.query("ROLLBACK", () =>
-          res.status(500).send("Failed to insert report: " + insErr)
-        );
-      }
+      conn.beginTransaction((txErr) => {
+        if (txErr) { conn.release(); return res.status(500).send("Failed to start transaction: " + txErr.message); }
 
-      const report_assignment_id = insRes.insertId;
+        const insertReportSql = `
+          INSERT INTO report_assignment
+            (category_id, sub_category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title, parent_report_assignment_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `;
+        const reportVals = [
+          category_id,
+          sub_category_id ?? null,
+          given_by,
+          quarter,
+          year,
+          fromDateVal,
+          to_date,
+          instruction,
+          computedIsGiven,
+          _is_archived,
+          _allow_late,
+          title,
+          parent_report_assignment_id ?? null,
+        ];
+        conn.query(insertReportSql, reportVals, (insErr, insRes) => {
+          if (insErr) {
+            return conn.rollback(() => { conn.release(); res.status(500).send("Failed to insert report: " + insErr); });
+          }
 
-      // Get next submission numbers for all recipients at once
-      computeNextNums(recipients, report_assignment_id, (nErr, nextNums) => {
-        if (nErr) {
-          return db.query("ROLLBACK", () =>
-            res.status(500).send("Failed to compute next submission numbers: " + nErr)
-          );
-        }
+          const report_assignment_id = insRes.insertId;
 
-        // Sequentially insert all submissions (avoid lock wait timeout)
-        const insertAllSubmissionsSequentially = async () => {
-          for (const teacherId of recipients) {
-            await new Promise((resolve, reject) => {
+          computeNextNums(recipients, report_assignment_id, (nErr, nextNums) => {
+            if (nErr) {
+              return conn.rollback(() => { conn.release(); res.status(500).send("Failed to compute next submission numbers: " + nErr); });
+            }
+
+            const createdSubmissionIds = [];
+            const insertOne = (userId, cb) => {
               const insertSubmissionSql = `
                 INSERT INTO submission
                   (report_assignment_id, category_id, submitted_by, status, number_of_submission, value, date_submitted, fields)
@@ -170,33 +184,87 @@ export const giveAccomplishmentReport = (req, res) => {
               const subVals = [
                 report_assignment_id,
                 category_id,
-                teacherId,
-                nextNums[teacherId],
+                userId,
+                nextNums[userId],
                 title,
                 initialFields,
               ];
-              db.query(insertSubmissionSql, subVals, (subErr) => {
-                if (subErr) reject(subErr);
-                else resolve();
+              conn.query(insertSubmissionSql, subVals, (subErr, subRes) => {
+                if (subErr) return cb(subErr);
+                if (subRes?.insertId) createdSubmissionIds.push(subRes.insertId);
+                cb();
               });
-            });
-          }
-        };
+            };
 
-        insertAllSubmissionsSequentially()
-          .then(() => {
-            // If given_by is a principal and there are 2+ recipients, record distribution rows
-            const roleSql = `SELECT role FROM user_details WHERE user_id = ? LIMIT 1`;
-            db.query(roleSql, [given_by], (rErr, rRows) => {
-              if (rErr) {
-                return db.query("ROLLBACK", () =>
-                  res.status(500).send("Failed to check giver role: " + rErr)
-                );
+            // Insert submissions sequentially
+            const runSeq = (i = 0) => {
+              if (i >= recipients.length) return afterSubmissions();
+              insertOne(recipients[i], (e) => {
+                if (e) return conn.rollback(() => { conn.release(); res.status(500).send("Failed to create submissions: " + e); });
+                runSeq(i + 1);
+              });
+            };
+
+            const afterSubmissions = () => {
+              // Always record distribution rows for recipients
+              if (recipients.length > 0) {
+                const values = recipients.map(() => '(?, ?)').join(',');
+                const params = [];
+                recipients.forEach(uid => { params.push(report_assignment_id, uid); });
+                const distSql = `INSERT IGNORE INTO assignment_distribution (report_assignment_id, user_id) VALUES ${values}`;
+                conn.query(distSql, params, (dErr) => {
+                  if (dErr) return conn.rollback(() => { conn.release(); res.status(500).send("Failed to write assignment distribution: " + dErr); });
+                  // If the giver is a principal and assigning to 2+ recipients,
+                  // ensure the principal also gets their own submission so they can act on it.
+                  const roleSql = `SELECT LOWER(role) AS role FROM user_details WHERE user_id = ? LIMIT 1`;
+                  conn.query(roleSql, [given_by], (rErr, rRows) => {
+                    if (rErr) return conn.rollback(() => { conn.release(); res.status(500).send("Failed to read giver role: " + rErr); });
+                    const giverRole = (rRows && rRows[0] && rRows[0].role) ? rRows[0].role : '';
+                    if (giverRole === 'principal' && recipients.length >= 2) {
+                      const checkPrincipalSql = `SELECT submission_id, COALESCE(MAX(number_of_submission),0)+1 AS next_num
+                                                FROM submission 
+                                                WHERE report_assignment_id = ? AND submitted_by = ?`;
+                      conn.query(checkPrincipalSql, [report_assignment_id, given_by], (cErr, cRows) => {
+                        if (cErr) return conn.rollback(() => { conn.release(); res.status(500).send("Failed to check principal submission: " + cErr); });
+                        const alreadyExists = Array.isArray(cRows) && cRows.length && cRows[0].submission_id;
+                        const nextNum = (Array.isArray(cRows) && cRows[0] && cRows[0].next_num) ? cRows[0].next_num : 1;
+                        if (alreadyExists) return finalize();
+                        const insertPrincipalSql = `
+                          INSERT INTO submission
+                            (report_assignment_id, category_id, submitted_by, status, number_of_submission, value, date_submitted, fields)
+                          VALUES
+                            (?, ?, ?, 1, ?, ?, NOW(), ?)
+                        `;
+                        const pVals = [
+                          report_assignment_id,
+                          category_id,
+                          given_by,
+                          nextNum,
+                          title,
+                          initialFields,
+                        ];
+                        conn.query(insertPrincipalSql, pVals, (pErr, pRes) => {
+                          if (pErr) return conn.rollback(() => { conn.release(); res.status(500).send("Failed to create principal submission: " + pErr); });
+                          if (pRes?.insertId) createdSubmissionIds.push(pRes.insertId);
+                          finalize();
+                        });
+                      });
+                    } else {
+                      finalize();
+                    }
+                  });
+                });
+              } else {
+                finalize();
               }
-              const giverRole = (rRows && rRows[0] && rRows[0].role) ? rRows[0].role : null;
+            };
 
-              const proceedNotifications = () => {
-                // Create notifications
+            const finalize = () => {
+              // Notifications + emails (best-effort outside of transaction)
+              conn.commit((cErr) => {
+                if (cErr) return conn.rollback(() => { conn.release(); res.status(500).send("Commit failed: " + cErr); });
+                conn.release();
+
                 const nameSql = `SELECT name FROM user_details WHERE user_id = ? LIMIT 1`;
                 db.query(nameSql, [given_by], (_e, nRows) => {
                   const giverName = (nRows && nRows[0] && nRows[0].name) ? nRows[0].name : 'Coordinator';
@@ -208,86 +276,23 @@ export const giveAccomplishmentReport = (req, res) => {
                     ref_type: 'report_assignment',
                     ref_id: report_assignment_id,
                   }));
-
                   createNotificationsBulk(notifications, () => {
-                    db.query("COMMIT", (cErr) => {
-                      if (cErr) {
-                        return db.query("ROLLBACK", () =>
-                          res.status(500).send("Commit failed: " + cErr)
-                        );
-                      }
-                      return res
-                        .status(201)
-                        .json({ report_assignment_id, submissions_created: recipients.length });
-                    });
+                    const subject = `New report assigned: ${title}`;
+                    const html = `<p>Assigned by ${giverName} — due on ${to_date}.</p>`;
+                    const text = `Assigned by ${giverName} — due on ${to_date}.`;
+                    emailUsers(recipients, subject, html, text);
                   });
                 });
-              };
 
-              if (giverRole === 'principal' && recipients.length >= 2) {
-                const values = recipients.map(() => '(?, ?)').join(',');
-                const params = [];
-                recipients.forEach(uid => { params.push(report_assignment_id, uid); });
-                const distSql = `INSERT INTO assignment_distribution (report_assignment_id, user_id) VALUES ${values}`;
-                db.query(distSql, params, (dErr) => {
-                  if (dErr) {
-                    return db.query("ROLLBACK", () =>
-                      res.status(500).send("Failed to write assignment distribution: " + dErr)
-                    );
-                  }
+                return res.status(201).json({ report_assignment_id, submissions_created: recipients.length, submission_ids: createdSubmissionIds });
+              });
+            };
 
-                  // Auto-create principal's own submission if not exists
-                  const checkPrincipalSql = `SELECT submission_id, COALESCE(MAX(number_of_submission),0)+1 AS next_num
-                                             FROM submission 
-                                             WHERE report_assignment_id = ? AND submitted_by = ?`;
-                  db.query(checkPrincipalSql, [report_assignment_id, given_by], (cErr, cRows) => {
-                    if (cErr) {
-                      return db.query("ROLLBACK", () =>
-                        res.status(500).send("Failed to check principal submission: " + cErr)
-                      );
-                    }
-                    const alreadyExists = Array.isArray(cRows) && cRows.length && cRows[0].submission_id;
-                    const nextNum = (Array.isArray(cRows) && cRows[0] && cRows[0].next_num) ? cRows[0].next_num : 1;
-                    if (alreadyExists) {
-                      return proceedNotifications();
-                    }
-                    const insertPrincipalSql = `
-                      INSERT INTO submission
-                        (report_assignment_id, category_id, submitted_by, status, number_of_submission, value, date_submitted, fields)
-                      VALUES
-                        (?, ?, ?, 1, ?, ?, NOW(), ?)
-                    `;
-                    const pVals = [
-                      report_assignment_id,
-                      category_id,
-                      given_by,
-                      nextNum,
-                      title,
-                      initialFields,
-                    ];
-                    db.query(insertPrincipalSql, pVals, (pErr) => {
-                      if (pErr) {
-                        return db.query("ROLLBACK", () =>
-                          res.status(500).send("Failed to create principal submission: " + pErr)
-                        );
-                      }
-                      proceedNotifications();
-                    });
-                  });
-                });
-              } else {
-                proceedNotifications();
-              }
-            });
-          })
-          .catch((err) => {
-            db.query("ROLLBACK", () =>
-              res.status(500).send("Failed to create submissions: " + err)
-            );
+            runSeq(0);
           });
+        });
       });
     });
-  });
   });
 };
 
@@ -440,6 +445,16 @@ export const patchAccomplishmentSubmission = (req, res) => {
             createNotification(meta.given_by, payload, (err) => {
               if (err) console.error('Failed to create principal notification:', err);
             });
+            // Email principal (best-effort)
+            const subj = hasTeacherRecipients ? `Report submitted: ${meta.title}` : `For approval: ${meta.title}`;
+            const msg = hasTeacherRecipients ? 'A report was submitted and is ready to view.' : 'A coordinator/teacher submitted a report for your approval.';
+            const userSql = `SELECT email FROM user_details WHERE user_id = ? LIMIT 1`;
+            db.query(userSql, [meta.given_by], async (_ue, uRows) => {
+              const to = uRows?.[0]?.email;
+              if (to) {
+                try { await sendEmail({ to, subject: subj, html: `<p>${msg}</p>`, text: msg }); } catch(e) { console.error('Email send failed:', e?.message || e); }
+              }
+            });
           }
         });
       }
@@ -465,6 +480,14 @@ export const patchAccomplishmentSubmission = (req, res) => {
               ref_id: Number(id),
             }, (err, result) => {
               if (err) console.error('Failed to create notification:', err);
+            });
+            // Email submitter (best-effort)
+            const userSql = `SELECT email FROM user_details WHERE user_id = ? LIMIT 1`;
+            db.query(userSql, [meta.submitted_by], async (_ue, uRows) => {
+              const to = uRows?.[0]?.email;
+              if (to) {
+                try { await sendEmail({ to, subject: title, html: `<p>${message}</p>`, text: message }); } catch(e) { console.error('Email send failed:', e?.message || e); }
+              }
             });
           }
         });

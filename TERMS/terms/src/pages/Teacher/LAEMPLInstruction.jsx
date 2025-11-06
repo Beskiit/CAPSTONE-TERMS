@@ -6,6 +6,7 @@ import Header from "../../components/shared/Header.jsx";
 import Breadcrumb from "../../components/Breadcrumb.jsx";
 import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
+import toast from "react-hot-toast";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
 
@@ -14,6 +15,7 @@ function LAEMPLInstruction() {
     const { state } = useLocation();
     const assignmentId = state?.id;
     const submissionId = state?.submission_id;
+    const reportAssignmentId = state?.report_assignment_id || assignmentId;
     const title = state?.title;
     const instruction = state?.instruction;
     const fromDate = state?.from_date;
@@ -27,6 +29,26 @@ function LAEMPLInstruction() {
 
     const role = (user?.role || "").toLowerCase();
     const isTeacher = role === "teacher";
+    const isCoordinator = role === "coordinator";
+    const forceTeacherView = state?.forceTeacherView === true;
+    const recipientsCount = Number(state?.recipients_count || 0);
+    const isGivenFlag = state?.is_given === 1 || state?.is_given === '1';
+    const onPrepare = () => {
+        navigate(`/LAEMPLReport?id=${submissionId || ''}`);
+    };
+
+    const onSetAsReport = () => {
+        const isGiven = state?.is_given === 1 || state?.is_given === '1';
+        if (isCoordinator && isGiven) {
+            toast.error("This report has already been given to teachers.");
+            return;
+        }
+        if (!reportAssignmentId) {
+            toast.error("Missing report assignment ID.");
+            return;
+        }
+        navigate(`/SetReport?reportId=${reportAssignmentId}&isPrincipalReport=true`);
+    };
 
     useEffect(() => {
     const fetchUser = async () => {
@@ -61,7 +83,12 @@ function LAEMPLInstruction() {
                     <div className="content">
                         <h3 className="header">Instructions</h3>
                         <p className="instruction">{instruction || "No instruction provided."}</p>
-                        <button className="instruction-btn" onClick={() => navigate(`/LAEMPLReport?id=${submissionId || ''}`)}>+ Prepare Report</button>
+                        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                            <button className="instruction-btn" onClick={onPrepare}>+ Prepare Report</button>
+                            {isCoordinator && !forceTeacherView && recipientsCount < 2 && (
+                                <button className="instruction-btn" onClick={onSetAsReport}>Set as Report to Teachers</button>
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>

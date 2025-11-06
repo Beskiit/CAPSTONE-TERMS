@@ -218,12 +218,11 @@ body{
 
 /* Rejected deadline items */
 .deadline-item.rejected {
-  border-left: 4px solid #dc2626;
-  background-color: #fef2f2;
+  background-color: #FF8686 !important; /* keep same base color */
 }
 
 .deadline-item.rejected:hover {
-  background-color: #fee2e2;
+  background-color: #FF8686 !important; /* no hover change */
 }
 
 .rejected-badge {

@@ -728,7 +728,12 @@ function AccomplishmentReport() {
         console.log("[Consolidate] response length:", Array.isArray(data) ? data.length : "not an array");
       } catch (_) { /* noop */ }
       
-      setPeerGroups(Array.isArray(data) ? data : []);
+      // Prefer groups that match the current submission title
+      const groups = Array.isArray(data) ? data : [];
+      const norm = (s) => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
+      const myTitle = norm(title);
+      const matching = groups.filter(g => norm(g.title) === myTitle);
+      setPeerGroups(matching.length ? matching : groups);
       setShowConsolidate(true);
     } catch (e) {
       setError(e.message || "Failed to load peers");
@@ -817,8 +822,10 @@ function AccomplishmentReport() {
         credentials: "include",
         body: JSON.stringify({
           title,
-          // Prefer exact same assignment for principal/teacher flow
-          report_assignment_id: reportAssignmentId || undefined,
+          // Principal/Teacher: consolidate within the same assignment
+          report_assignment_id: (isTeacherSidebar || isPrincipalSidebar) ? (reportAssignmentId || undefined) : undefined,
+          // Coordinator: consolidate across child teacher assignments under the coordinator's parent
+          parent_assignment_id: isCoordinatorSidebar ? (reportAssignmentId || undefined) : undefined,
         }),
       });
       if (!res.ok) {

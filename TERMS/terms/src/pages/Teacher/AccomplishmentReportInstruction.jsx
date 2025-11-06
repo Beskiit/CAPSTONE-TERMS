@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import './Instruction.css';
 import Header from "../../components/shared/Header.jsx";
+import toast from "react-hot-toast";
 import Breadcrumb from "../../components/Breadcrumb.jsx";
 import Sidebar from "../../components/shared/SidebarTeacher.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
@@ -34,6 +35,8 @@ function AccomplishmentReportInstruction() {
     const isTeacherSidebar = role === "teacher"; // Sidebar should reflect real role
     const isCoordinatorSidebar = role === "coordinator";
     const isPrincipalSidebar = role === "principal";
+    const recipientsCount = Number(state?.recipients_count || 0);
+    const isGivenFlag = state?.is_given === 1 || state?.is_given === '1';
 
 
     useEffect(() => {
@@ -90,6 +93,20 @@ function AccomplishmentReportInstruction() {
         }
     };
 
+    const handleSetAsReport = () => {
+        const isGiven = state?.is_given === 1 || state?.is_given === '1';
+        if (isCoordinatorSidebar && isGiven) {
+            toast.error("This report has already been given to teachers.");
+            return;
+        }
+        if (!reportAssignmentId) {
+            toast.error("Missing report assignment ID.");
+            return;
+        }
+        // Only meaningful for coordinators, but harmless otherwise
+        navigate(`/SetReport?reportId=${reportAssignmentId}&isPrincipalReport=true`);
+    };
+
     return (
         <>
         <Header userText={user ? user.name : "Guest"} />
@@ -105,8 +122,12 @@ function AccomplishmentReportInstruction() {
                     <div className="content">
                         <h3 className="header">Instructions</h3>
                         <p className="instruction">{instruction || "No instruction provided."}</p>
-                        <button className="instruction-btn" onClick={ensureAndOpenTemplate}>
-                            + Prepare Report</button>
+                        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                            <button className="instruction-btn" onClick={ensureAndOpenTemplate}>+ Prepare Report</button>
+                            {isCoordinatorSidebar && !forceTeacherView && recipientsCount < 2 && (
+                                <button className="instruction-btn" onClick={handleSetAsReport}>Set as Report to Teachers</button>
+                            )}
+                        </div>
                     </div>
                 </div>
             </div> 
