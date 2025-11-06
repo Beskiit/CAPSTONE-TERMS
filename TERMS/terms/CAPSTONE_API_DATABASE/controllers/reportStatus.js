@@ -56,7 +56,7 @@ export const getUpcomingDeadlinesByUser = (req, res) => {
       GROUP BY report_assignment_id
     ) sdc ON sdc.report_assignment_id = ra.report_assignment_id
     WHERE s.submitted_by = ?
-      AND ra.to_date >= NOW()
+      AND DATE(ra.to_date) >= CURDATE()
       AND ra.is_given = 1
       AND (LOWER(st.value) = 'pending' OR s.status = 1 OR s.status = 4)
     ORDER BY ra.to_date ASC, ra.report_assignment_id ASC
@@ -145,7 +145,8 @@ export const getPrincipalAccomplishmentAssignments = (req, res) => {
     LEFT JOIN assignment_distribution ad ON ad.report_assignment_id = ra.report_assignment_id
     WHERE ra.given_by = ?
       AND c.category_name = 'Accomplishment Report'
-      AND ra.to_date >= NOW()
+      AND DATE(ra.to_date) >= CURDATE()
+      AND DATE(ra.to_date) >= CURDATE()
       AND (s.status IN (0,1,4) OR s.submission_id IS NULL)
     GROUP BY 
       ra.report_assignment_id
