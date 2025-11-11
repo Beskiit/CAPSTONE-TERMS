@@ -535,8 +535,117 @@ function AssignedReport() {
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {filteredGroupedReports.map((report) => (
-                                                <tr key={report.report_assignment_id} onClick={() => navigate(`/AssignedReportData/${report.first_submission_id}`, { state: { assignmentTitle: report.assignment_title } })}>
+                                            {filteredGroupedReports.map((report) => {
+                                                // Helper function to detect report type
+                                                const detectReportType = (categoryName, subCategoryName, title, categoryId, subCategoryId) => {
+                                                    const cat = (categoryName || "").toLowerCase();
+                                                    const subCat = (subCategoryName || "").toLowerCase();
+                                                    const t = (title || "").toLowerCase();
+                                                    
+                                                    // Check by category_id first (more reliable)
+                                                    // category_id 0 = Accomplishment Report
+                                                    if (categoryId === 0) {
+                                                        return "accomplishment";
+                                                    }
+                                                    
+                                                    // category_id 1 = Quarterly Achievement Test
+                                                    if (categoryId === 1) {
+                                                        // Check sub_category_id for LAEMPL & MPS
+                                                        if (subCategoryId === 3) {
+                                                            return "laempl"; // LAEMPL & MPS
+                                                        }
+                                                        // Other subcategories under Quarterly Achievement Test
+                                                        if (subCat.includes("laempl") || subCat.includes("mps")) {
+                                                            return "laempl";
+                                                        }
+                                                    }
+                                                    
+                                                    // Fallback to name-based detection
+                                                    if (cat.includes("accomplishment")) return "accomplishment";
+                                                    if (subCat.includes("laempl") || subCat.includes("mps")) return "laempl";
+                                                    if (t.includes("laempl")) return "laempl";
+                                                    if (t.includes("mps")) return "mps";
+                                                    if (t.includes("classification")) return "cog";
+                                                    return "generic";
+                                                };
+                                                
+                                                const handleRowClick = async () => {
+                                                    try {
+                                                        console.log("[AssignedReport] Row clicked, report:", report);
+                                                        console.log("[AssignedReport] Fetching assignment:", report.report_assignment_id);
+                                                        
+                                                        // Fetch report assignment details to get instruction
+                                                        const res = await fetch(`${API_BASE}/reports/assignment/${report.report_assignment_id}`, {
+                                                            credentials: "include"
+                                                        });
+                                                        
+                                                        console.log("[AssignedReport] Fetch response status:", res.status);
+                                                        
+                                                        if (res.ok) {
+                                                            const assignmentData = await res.json();
+                                                            console.log("[AssignedReport] Assignment data:", assignmentData);
+                                                            
+                                                            const reportType = detectReportType(
+                                                                report.category_name,
+                                                                report.sub_category_name,
+                                                                report.assignment_title,
+                                                                assignmentData.category_id,
+                                                                assignmentData.sub_category_id
+                                                            );
+                                                            
+                                                            console.log("[AssignedReport] Detected report type:", reportType);
+                                                            
+                                                            const commonState = {
+                                                                submission_id: report.first_submission_id,
+                                                                report_assignment_id: report.report_assignment_id,
+                                                                title: assignmentData.title || report.assignment_title,
+                                                                instruction: assignmentData.instruction || "",
+                                                                from_date: assignmentData.from_date || report.from_date,
+                                                                to_date: assignmentData.to_date || report.to_date,
+                                                                number_of_submission: assignmentData.number_of_submission,
+                                                                allow_late: assignmentData.allow_late,
+                                                                is_given: assignmentData.is_given,
+                                                                recipients_count: report.total,
+                                                                category_name: report.category_name,
+                                                                sub_category_name: report.sub_category_name,
+                                                                fromAssignedReport: true // Flag to indicate navigation from AssignedReport
+                                                            };
+                                                            
+                                                            console.log("[AssignedReport] Navigating with state:", commonState);
+                                                            
+                                                            // Navigate to appropriate instruction page
+                                                            if (reportType === "laempl") {
+                                                                console.log("[AssignedReport] Navigating to LAEMPLInstruction");
+                                                                navigate("/LAEMPLInstruction", { state: commonState });
+                                                            } else if (reportType === "mps") {
+                                                                console.log("[AssignedReport] Navigating to MPSInstruction");
+                                                                navigate("/MPSInstruction", { state: commonState });
+                                                            } else if (reportType === "accomplishment") {
+                                                                console.log("[AssignedReport] Navigating to AccomplishmentReportInstruction");
+                                                                navigate("/AccomplishmentReportInstruction", { state: commonState });
+                                                            } else if (reportType === "cog") {
+                                                                console.log("[AssignedReport] Navigating to ClassificationOfGradesInstruction");
+                                                                navigate("/ClassificationOfGradesInstruction", { state: commonState });
+                                                            } else {
+                                                                console.log("[AssignedReport] Generic report type, using fallback");
+                                                                // Fallback to AssignedReportData for generic reports
+                                                                navigate(`/AssignedReportData/${report.first_submission_id}`, { state: { assignmentTitle: report.assignment_title } });
+                                                            }
+                                                        } else {
+                                                            const errorText = await res.text().catch(() => 'Unknown error');
+                                                            console.error("[AssignedReport] Fetch failed:", res.status, errorText);
+                                                            // If fetch fails, fallback to original navigation
+                                                            navigate(`/AssignedReportData/${report.first_submission_id}`, { state: { assignmentTitle: report.assignment_title } });
+                                                        }
+                                                    } catch (error) {
+                                                        console.error("[AssignedReport] Error fetching assignment details:", error);
+                                                        // Fallback to original navigation
+                                                        navigate(`/AssignedReportData/${report.first_submission_id}`, { state: { assignmentTitle: report.assignment_title } });
+                                                    }
+                                                };
+                                                
+                                                return (
+                                                <tr key={report.report_assignment_id} onClick={handleRowClick}>
                                                     <td className="file-cell">
                                                         <span className="file-name">{report.category_name || 'N/A'}</span>
                                                     </td>
@@ -563,7 +672,8 @@ function AssignedReport() {
                                                     </td>
                                                     <td>{report.to_date || report.due_date || 'No due date'}</td>
                                                 </tr>
-                                            ))}
+                                                );
+                                            })}
                                         </tbody>
                                     </table>
                                 )}

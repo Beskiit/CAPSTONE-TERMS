@@ -370,7 +370,8 @@ export const giveLAEMPLMPSReport = (req, res) => {
     grade_level_id,
     subject_ids = [], // Array of subject IDs
     number_of_submission,
-    number_of_submissions
+    number_of_submissions,
+    parent_report_assignment_id = null // Parent assignment ID for linking child assignments
   } = req.body || {};
 
   // Validation
@@ -430,13 +431,20 @@ export const giveLAEMPLMPSReport = (req, res) => {
           });
 
           const subjectName = subjectResult[0]?.subject_name || 'Unknown Subject';
-          const assignmentTitle = `${title} - ${subjectName}`;
+          
+          // Check if title already contains the subject name (to avoid duplication when editing)
+          // If title already ends with " - SubjectName", use it as-is, otherwise append the subject
+          const titleEndsWithSubject = title.trim().endsWith(` - ${subjectName}`) || 
+                                       title.trim().endsWith(`- ${subjectName}`) ||
+                                       title.trim() === subjectName;
+          
+          const assignmentTitle = titleEndsWithSubject ? title : `${title} - ${subjectName}`;
 
           // Insert assignment for this subject
           const insertReportSql = `
             INSERT INTO report_assignment
-              (category_id, sub_category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              (category_id, sub_category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title, parent_report_assignment_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `;
           const raVals = [
             category_id,
@@ -450,7 +458,8 @@ export const giveLAEMPLMPSReport = (req, res) => {
             _is_given,
             _is_archived,
             _allow_late,
-            assignmentTitle
+            assignmentTitle,
+            parent_report_assignment_id // Link to parent assignment if provided
           ];
 
           const assignmentResult = await new Promise((resolve, reject) => {
@@ -937,6 +946,561 @@ export const giveLAEMPLMPSCoordinatorReport = (req, res) => {
         console.error('Error creating coordinator report:', error);
         res.status(500).json({ error: 'Failed to create coordinator report', details: error.message });
       }
+    });
+  });
+};
+
+// GET /reports/laempl-mps/assignments
+export const getLAEMPLMPSAssignments = (req, res) => {
+  const sql = `
+    SELECT
+      ra.report_assignment_id,
+      ra.title,
+      ra.quarter,
+      ra.year,
+      ra.grade_level_id,
+      gl.grade_level,
+      ra.coordinator_user_id,
+      coord.name AS coordinator_name,
+      ra.advisory_user_id,
+      adv.name AS advisory_name,
+      ra.from_date,
+      ra.to_date
+    FROM report_assignment ra
+    LEFT JOIN grade_level gl ON ra.grade_level_id = gl.grade_level_id
+    LEFT JOIN user_details coord ON ra.coordinator_user_id = coord.user_id
+    LEFT JOIN user_details adv ON ra.advisory_user_id = adv.user_id
+    WHERE ra.category_id = 1 AND ra.sub_category_id = 3
+    ORDER BY ra.year DESC, ra.quarter DESC, gl.grade_level, ra.report_assignment_id DESC
+  `;
+
+  console.log('[API] Fetching LAEMPL & MPS assignments with query:', sql);
+
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error('[API] Failed to fetch LAEMPL & MPS assignments:', err);
+      return res.status(500).json({ error: 'Database error', details: err.message });
+    }
+    console.log('[API] LAEMPL & MPS assignments query returned', results?.length || 0, 'results:', results);
+    res.json(results || []);
+  });
+};
+
+// PATCH /reports/laempl-mps/assignments/:id
+export const updateLAEMPLMPSAssignment = (req, res) => {
+  const { id } = req.params;
+  const {
+    grade_level_id: rawGradeLevelId,
+    coordinator_user_id: rawCoordinatorId,
+    advisory_user_id: rawAdvisoryId
+  } = req.body || {};
+
+  const normalize = (value) => {
+    if (value === undefined || value === null || value === '') return null;
+    const num = Number(value);
+    if (!Number.isInteger(num)) {
+      return NaN;
+    }
+    return num;
+  };
+
+  const grade_level_id = normalize(rawGradeLevelId);
+  const coordinator_user_id = normalize(rawCoordinatorId);
+  const advisory_user_id = normalize(rawAdvisoryId);
+
+  const isClearing = [rawGradeLevelId, rawCoordinatorId, rawAdvisoryId].every((v) => v === null || v === undefined || v === '');
+
+  if (!isClearing) {
+    if ([grade_level_id, coordinator_user_id, advisory_user_id].some((v) => v === null || Number.isNaN(v))) {
+      return res.status(400).json({ error: 'grade_level_id, coordinator_user_id, and advisory_user_id are required and must be integers.' });
+    }
+  } else {
+    if ([grade_level_id, coordinator_user_id, advisory_user_id].some((v) => Number.isNaN(v))) {
+      return res.status(400).json({ error: 'Invalid numeric value provided.' });
+    }
+  }
+
+  const checkSql = `
+    SELECT report_assignment_id, grade_level_id, coordinator_user_id, advisory_user_id, quarter, year
+    FROM report_assignment
+    WHERE report_assignment_id = ? AND category_id = 1 AND sub_category_id = 3
+  `;
+
+  db.query(checkSql, [id], (checkErr, rows) => {
+    if (checkErr) {
+      console.error('Failed to verify report assignment:', checkErr);
+      return res.status(500).json({ error: 'Database error', details: checkErr.message });
+    }
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'LAEMPL & MPS report assignment not found.' });
+    }
+
+    const updateSql = `
+      UPDATE report_assignment
+      SET grade_level_id = ?, coordinator_user_id = ?, advisory_user_id = ?
+      WHERE report_assignment_id = ?
+    `;
+
+    const values = [
+      isClearing ? null : grade_level_id,
+      isClearing ? null : coordinator_user_id,
+      isClearing ? null : advisory_user_id,
+      id
+    ];
+
+    db.query(updateSql, values, (updateErr) => {
+      if (updateErr) {
+        if (updateErr.code === 'ER_DUP_ENTRY') {
+          return res.status(409).json({
+            error: 'This grade already has a LAEMPL & MPS assignment for the selected quarter and year.'
+          });
+        }
+        console.error('Failed to update LAEMPL & MPS assignment:', updateErr);
+        return res.status(500).json({ error: 'Failed to update assignment', details: updateErr.message });
+      }
+
+      db.query(checkSql, [id], (reloadErr, updatedRows) => {
+        if (reloadErr) {
+          console.error('Failed to reload updated assignment:', reloadErr);
+          return res.status(500).json({ error: 'Database error', details: reloadErr.message });
+        }
+
+        const updated = updatedRows?.[0] || null;
+        res.json({
+          message: isClearing
+            ? 'LAEMPL & MPS assignment cleared.'
+            : 'LAEMPL & MPS assignment updated successfully.',
+          assignment: updated
+        });
+      });
+    });
+  });
+};
+
+// POST /reports/laempl-mps/assignments/create-or-update
+// Creates or updates a LAEMPL & MPS assignment for a grade level
+export const createOrUpdateLAEMPLMPSAssignment = (req, res) => {
+  const authenticatedUserId = req.user?.user_id;
+  if (!authenticatedUserId) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  const {
+    grade_level_id: rawGradeLevelId,
+    coordinator_user_id: rawCoordinatorId,
+    quarter: rawQuarter,
+    year: rawYear
+  } = req.body || {};
+
+  const normalize = (value) => {
+    if (value === undefined || value === null || value === '') return null;
+    const num = Number(value);
+    if (!Number.isInteger(num)) return NaN;
+    return num;
+  };
+
+  const grade_level_id = normalize(rawGradeLevelId);
+  const coordinator_user_id = normalize(rawCoordinatorId);
+  const quarter = normalize(rawQuarter);
+  const year = normalize(rawYear);
+
+  if (Number.isNaN(grade_level_id) || grade_level_id == null) {
+    return res.status(400).json({ error: 'grade_level_id is required and must be an integer.' });
+  }
+  if (Number.isNaN(coordinator_user_id) || coordinator_user_id == null) {
+    return res.status(400).json({ error: 'coordinator_user_id is required and must be an integer.' });
+  }
+  if (Number.isNaN(quarter) || quarter == null) {
+    return res.status(400).json({ error: 'quarter is required and must be an integer.' });
+  }
+  if (Number.isNaN(year) || year == null) {
+    return res.status(400).json({ error: 'year is required and must be an integer.' });
+  }
+
+  // Check if assignment already exists for this grade, quarter, and year
+  const checkSql = `
+    SELECT report_assignment_id, coordinator_user_id, grade_level_id
+    FROM report_assignment
+    WHERE category_id = 1 AND sub_category_id = 3 
+      AND grade_level_id = ? AND quarter = ? AND year = ?
+  `;
+
+  db.query(checkSql, [grade_level_id, quarter, year], (checkErr, rows) => {
+    if (checkErr) {
+      console.error('Failed to check for existing assignment:', checkErr);
+      return res.status(500).json({ error: 'Database error', details: checkErr.message });
+    }
+
+    if (rows && rows.length > 0) {
+      // Assignment exists, update it
+      const assignmentId = rows[0].report_assignment_id;
+      const updateSql = `
+        UPDATE report_assignment
+        SET coordinator_user_id = ?, advisory_user_id = NULL
+        WHERE report_assignment_id = ?
+      `;
+
+      db.query(updateSql, [coordinator_user_id, assignmentId], (updateErr) => {
+        if (updateErr) {
+          console.error('Failed to update assignment:', updateErr);
+          return res.status(500).json({ error: 'Failed to update assignment', details: updateErr.message });
+        }
+
+        // Return the updated assignment
+        db.query(checkSql, [grade_level_id, quarter, year], (reloadErr, updatedRows) => {
+          if (reloadErr) {
+            console.error('Failed to reload updated assignment:', reloadErr);
+            return res.status(500).json({ error: 'Database error', details: reloadErr.message });
+          }
+
+          const updated = updatedRows?.[0] || null;
+          res.json({
+            message: 'LAEMPL & MPS assignment updated successfully.',
+            assignment: updated
+          });
+        });
+      });
+    } else {
+      // Assignment doesn't exist, create it
+      const insertSql = `
+        INSERT INTO report_assignment 
+        (category_id, sub_category_id, grade_level_id, coordinator_user_id, advisory_user_id, 
+         given_by, quarter, year, title, instruction, is_given, is_archived, allow_late, from_date, to_date)
+        VALUES (1, 3, ?, ?, NULL, ?, ?, ?, 'LAEMPL & MPS', '', 0, 0, 0, NOW(), DATE_ADD(NOW(), INTERVAL 30 DAY))
+      `;
+
+      db.query(insertSql, [grade_level_id, coordinator_user_id, authenticatedUserId, quarter, year], (insertErr, insertResult) => {
+        if (insertErr) {
+          if (insertErr.code === 'ER_DUP_ENTRY') {
+            return res.status(409).json({
+              error: 'This grade already has a LAEMPL & MPS assignment for the selected quarter and year.'
+            });
+          }
+          console.error('Failed to create assignment:', insertErr);
+          return res.status(500).json({ error: 'Failed to create assignment', details: insertErr.message });
+        }
+
+        const newAssignmentId = insertResult.insertId;
+        db.query(checkSql, [grade_level_id, quarter, year], (reloadErr, newRows) => {
+          if (reloadErr) {
+            console.error('Failed to reload new assignment:', reloadErr);
+            return res.status(500).json({ error: 'Database error', details: reloadErr.message });
+          }
+
+          const newAssignment = newRows?.[0] || null;
+          res.json({
+            message: 'LAEMPL & MPS assignment created successfully.',
+            assignment: newAssignment
+          });
+        });
+      });
+    }
+  });
+};
+
+// GET /reports/laempl-mps/coordinator-grade
+// Get the coordinator's assigned grade level and subjects for LAEMPL & MPS (category_id=1, sub_category_id=3)
+export const getCoordinatorLAEMPLMPSGrade = (req, res) => {
+  const authenticatedUserId = req.user?.user_id;
+  if (!authenticatedUserId) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  // First, get the grade level from report_assignment
+  const gradeSql = `
+    SELECT 
+      ra.grade_level_id,
+      gl.grade_level
+    FROM report_assignment ra
+    LEFT JOIN grade_level gl ON ra.grade_level_id = gl.grade_level_id
+    WHERE ra.category_id = 1 
+      AND ra.sub_category_id = 3
+      AND ra.coordinator_user_id = ?
+    ORDER BY ra.year DESC, ra.quarter DESC, ra.report_assignment_id DESC
+    LIMIT 1
+  `;
+
+  db.query(gradeSql, [authenticatedUserId], (err, gradeResults) => {
+    if (err) {
+      console.error('[API] Failed to fetch coordinator LAEMPL & MPS grade:', err);
+      return res.status(500).json({ error: 'Database error', details: err.message });
+    }
+    
+    const gradeData = gradeResults && gradeResults.length > 0 ? gradeResults[0] : null;
+    const gradeLevelId = gradeData?.grade_level_id;
+
+    if (!gradeLevelId) {
+      return res.json({ 
+        grade_level_id: null, 
+        grade_level: null,
+        subject_ids: []
+      });
+    }
+
+    // Get subjects from assignments where coordinator is assigned OR from submissions where coordinator is the submitter
+    // These assignments have titles like "Title - SubjectName" (e.g., "mpl testing - GMRC")
+    // First try: assignments where coordinator is directly assigned
+    // Second try: submissions where coordinator submitted (they might have subject_id in fields)
+    const subjectsSql = `
+      SELECT DISTINCT s.subject_id, s.subject_name, ra.title as assignment_title, 'assignment' as source
+      FROM report_assignment ra
+      LEFT JOIN assignment_distribution ad ON ra.report_assignment_id = ad.report_assignment_id
+      LEFT JOIN submission sub ON ra.report_assignment_id = sub.report_assignment_id
+      JOIN subject s ON (
+        -- Try exact match from title first
+        s.subject_name = TRIM(SUBSTRING_INDEX(ra.title, ' - ', -1))
+        -- Or try matching the beginning of subject name (handles cases like "GMRC (15 - 25 points)")
+        OR s.subject_name LIKE CONCAT(TRIM(SUBSTRING_INDEX(ra.title, ' - ', -1)), '%')
+        -- Or try matching if subject name is at the start of the extracted part
+        OR TRIM(SUBSTRING_INDEX(ra.title, ' - ', -1)) LIKE CONCAT(s.subject_name, '%')
+        -- Or match from submission fields JSON
+        OR CAST(JSON_EXTRACT(sub.fields, '$.subject_id') AS UNSIGNED) = s.subject_id
+      )
+      WHERE ra.category_id = 1 
+        AND ra.sub_category_id = 3
+        AND ra.grade_level_id = ?
+        AND (
+          ra.coordinator_user_id = ?
+          OR ad.user_id = ?
+        )
+        AND (
+          ra.title LIKE '% - %'
+          OR JSON_EXTRACT(sub.fields, '$.subject_id') IS NOT NULL
+        )
+        AND s.grade_level_id = ?
+        AND s.is_active = 1
+      
+      UNION
+      
+      -- Also check submissions where coordinator submitted (they have subject_id in fields)
+      SELECT DISTINCT s2.subject_id, s2.subject_name, ra2.title as assignment_title, 'submission' as source
+      FROM submission sub2
+      JOIN report_assignment ra2 ON sub2.report_assignment_id = ra2.report_assignment_id
+      JOIN subject s2 ON CAST(JSON_EXTRACT(sub2.fields, '$.subject_id') AS UNSIGNED) = s2.subject_id
+      WHERE ra2.category_id = 1
+        AND ra2.sub_category_id = 3
+        AND ra2.grade_level_id = ?
+        AND sub2.submitted_by = ?
+        AND JSON_EXTRACT(sub2.fields, '$.subject_id') IS NOT NULL
+        AND s2.grade_level_id = ?
+        AND s2.is_active = 1
+      
+      ORDER BY subject_name
+    `;
+
+    console.log('[API] Finding subjects for coordinator:', authenticatedUserId, 'grade:', gradeLevelId);
+    
+    db.query(subjectsSql, [gradeLevelId, authenticatedUserId, authenticatedUserId, gradeLevelId, gradeLevelId, authenticatedUserId, gradeLevelId], (subjErr, subjectResults) => {
+      if (subjErr) {
+        console.error('[API] Failed to fetch subjects:', subjErr);
+        return res.json({
+          grade_level_id: gradeLevelId,
+          grade_level: gradeData.grade_level,
+          subject_ids: []
+        });
+      }
+
+      console.log('[API] Subject query returned', subjectResults?.length || 0, 'results');
+      
+      // Helper function to return response
+      const returnResponse = (subjectIds) => {
+        console.log('[API] Returning subject_ids:', subjectIds);
+        res.json({
+          grade_level_id: gradeLevelId,
+          grade_level: gradeData.grade_level,
+          subject_ids: subjectIds
+        });
+      };
+      
+      if (subjectResults && subjectResults.length > 0) {
+        console.log('[API] Found subjects:', subjectResults.map(r => ({ 
+          id: r.subject_id, 
+          name: r.subject_name, 
+          from_title: r.assignment_title,
+          source: r.source
+        })));
+        
+        const subjectIds = subjectResults.map(r => Number(r.subject_id)).filter(id => !isNaN(id));
+        return returnResponse(subjectIds);
+      }
+      
+      // Fallback: If no subjects found via assignments/submissions, 
+      // check ALL assignments for this grade level and extract subjects from titles
+      // This handles cases where assignments exist but aren't properly linked
+      console.log('[API] No subjects found via assignments/submissions, trying fallback...');
+      
+      // First, let's check what assignments exist with the subject pattern, regardless of grade_level_id
+      const checkAssignmentsSql = `
+        SELECT ra.report_assignment_id, ra.title, ra.grade_level_id, ra.category_id, ra.sub_category_id
+        FROM report_assignment ra
+        WHERE ra.category_id = 1 
+          AND ra.sub_category_id = 3
+          AND ra.title LIKE '% - %'
+        ORDER BY ra.report_assignment_id DESC
+        LIMIT 20
+      `;
+      
+      db.query(checkAssignmentsSql, [], (checkErr, checkRows) => {
+        if (!checkErr && checkRows) {
+          console.log('[API] Fallback debug - All assignments with subject pattern:', checkRows.map(r => ({
+            id: r.report_assignment_id,
+            title: r.title,
+            grade_level_id: r.grade_level_id,
+            category_id: r.category_id,
+            sub_category_id: r.sub_category_id
+          })));
+        }
+        
+        // Now try the fallback query - first with grade_level_id filter
+        const fallbackSql = `
+          SELECT DISTINCT s.subject_id, s.subject_name, ra.title as assignment_title, ra.grade_level_id
+          FROM report_assignment ra
+          JOIN subject s ON (
+            s.subject_name = TRIM(SUBSTRING_INDEX(ra.title, ' - ', -1))
+            OR s.subject_name LIKE CONCAT(TRIM(SUBSTRING_INDEX(ra.title, ' - ', -1)), '%')
+            OR TRIM(SUBSTRING_INDEX(ra.title, ' - ', -1)) LIKE CONCAT(s.subject_name, '%')
+          )
+          WHERE ra.category_id = 1 
+            AND ra.sub_category_id = 3
+            AND ra.grade_level_id = ?
+            AND ra.title LIKE '% - %'
+            AND s.grade_level_id = ?
+            AND s.is_active = 1
+          ORDER BY s.subject_name
+          LIMIT 20
+        `;
+      
+        db.query(fallbackSql, [gradeLevelId, gradeLevelId], (fallbackErr, fallbackResults) => {
+          if (!fallbackErr && fallbackResults && fallbackResults.length > 0) {
+            console.log('[API] Fallback found', fallbackResults.length, 'subjects from all assignments');
+            console.log('[API] Fallback subjects:', fallbackResults.map(r => ({
+              id: r.subject_id,
+              name: r.subject_name,
+              from_title: r.assignment_title,
+              grade_level_id: r.grade_level_id
+            })));
+            
+            // Use fallback results
+            const fallbackSubjectIds = fallbackResults.map(r => Number(r.subject_id)).filter(id => !isNaN(id));
+            return returnResponse(fallbackSubjectIds);
+          }
+          
+          // If fallback with grade_level_id filter fails, try without grade_level_id filter
+          // (in case assignments don't have grade_level_id set correctly)
+          console.log('[API] Fallback with grade_level_id filter returned no results, trying without grade filter...');
+          const fallbackNoGradeSql = `
+            SELECT DISTINCT s.subject_id, s.subject_name, ra.title as assignment_title, ra.grade_level_id
+            FROM report_assignment ra
+            JOIN subject s ON (
+              s.subject_name = TRIM(SUBSTRING_INDEX(ra.title, ' - ', -1))
+              OR s.subject_name LIKE CONCAT(TRIM(SUBSTRING_INDEX(ra.title, ' - ', -1)), '%')
+              OR TRIM(SUBSTRING_INDEX(ra.title, ' - ', -1)) LIKE CONCAT(s.subject_name, '%')
+            )
+            WHERE ra.category_id = 1 
+              AND ra.sub_category_id = 3
+              AND ra.title LIKE '% - %'
+              AND s.grade_level_id = ?
+              AND s.is_active = 1
+            ORDER BY s.subject_name
+            LIMIT 20
+          `;
+          
+          db.query(fallbackNoGradeSql, [gradeLevelId], (fallbackNoGradeErr, fallbackNoGradeResults) => {
+            if (!fallbackNoGradeErr && fallbackNoGradeResults && fallbackNoGradeResults.length > 0) {
+              console.log('[API] Fallback (no grade filter) found', fallbackNoGradeResults.length, 'subjects');
+              console.log('[API] Fallback (no grade filter) subjects:', fallbackNoGradeResults.map(r => ({
+                id: r.subject_id,
+                name: r.subject_name,
+                from_title: r.assignment_title,
+                grade_level_id: r.grade_level_id
+              })));
+              
+              const fallbackSubjectIds = fallbackNoGradeResults.map(r => Number(r.subject_id)).filter(id => !isNaN(id));
+              return returnResponse(fallbackSubjectIds);
+            }
+            
+            // If fallback also fails, return empty and show debug info
+            console.log('[API] All fallback queries returned no results');
+            
+            // Debug: Let's check what assignments exist for this coordinator
+            const debugSql = `
+              SELECT ra.report_assignment_id, ra.title, ra.coordinator_user_id, ra.parent_report_assignment_id, ra.given_by
+              FROM report_assignment ra
+              LEFT JOIN assignment_distribution ad ON ra.report_assignment_id = ad.report_assignment_id
+              WHERE ra.category_id = 1 
+                AND ra.sub_category_id = 3
+                AND ra.grade_level_id = ?
+                AND (
+                  ra.coordinator_user_id = ?
+                  OR ad.user_id = ?
+                )
+              ORDER BY ra.report_assignment_id DESC
+              LIMIT 10
+            `;
+            
+            db.query(debugSql, [gradeLevelId, authenticatedUserId, authenticatedUserId], (debugErr, debugRows) => {
+              if (!debugErr && debugRows) {
+                console.log('[API] Debug - All assignments for coordinator:', debugRows.map(r => ({
+                  id: r.report_assignment_id,
+                  title: r.title,
+                  coordinator_id: r.coordinator_user_id,
+                  parent_id: r.parent_report_assignment_id,
+                  given_by: r.given_by
+                })));
+              }
+            });
+            
+            // Also check ALL assignments for this grade level to see what exists
+            const allAssignmentsSql = `
+              SELECT ra.report_assignment_id, ra.title, ra.coordinator_user_id, ra.parent_report_assignment_id, ra.given_by
+              FROM report_assignment ra
+              WHERE ra.category_id = 1 
+                AND ra.sub_category_id = 3
+                AND ra.grade_level_id = ?
+              ORDER BY ra.report_assignment_id DESC
+              LIMIT 20
+            `;
+            
+            db.query(allAssignmentsSql, [gradeLevelId], (allErr, allRows) => {
+              if (!allErr && allRows) {
+                console.log('[API] Debug - ALL assignments for grade level', gradeLevelId, ':', allRows.map(r => ({
+                  id: r.report_assignment_id,
+                  title: r.title,
+                  coordinator_id: r.coordinator_user_id,
+                  parent_id: r.parent_report_assignment_id,
+                  given_by: r.given_by
+                })));
+                
+                // Check assignment_distribution for these assignments
+                if (allRows.length > 0) {
+                  const assignmentIds = allRows.map(r => r.report_assignment_id);
+                  const distCheckSql = `
+                    SELECT ad.report_assignment_id, ad.user_id, ra.title
+                    FROM assignment_distribution ad
+                    JOIN report_assignment ra ON ad.report_assignment_id = ra.report_assignment_id
+                    WHERE ad.report_assignment_id IN (${assignmentIds.join(',')})
+                      AND ad.user_id = ?
+                  `;
+                  
+                  db.query(distCheckSql, [authenticatedUserId], (distErr, distRows) => {
+                    if (!distErr && distRows) {
+                      console.log('[API] Debug - Assignments in assignment_distribution for coordinator:', distRows.map(r => ({
+                        assignment_id: r.report_assignment_id,
+                        title: r.title,
+                        user_id: r.user_id
+                      })));
+                    }
+                  });
+                }
+              }
+              
+              // Return empty if all queries failed
+              return returnResponse([]);
+            });
+          });
+        });
+      });
     });
   });
 };

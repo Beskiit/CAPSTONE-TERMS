@@ -299,7 +299,7 @@ function AssignedReportData() {
                 
                 // Set up sections based on grade level
                 const gradeLevel = submission?.fields?.grade || 2;
-                const sections = getSectionsForGrade(gradeLevel);
+                const sections = await getSectionsForGrade(gradeLevel);
                 setAllSections(sections);
                 
                 // Process consolidated data
@@ -313,23 +313,29 @@ function AssignedReportData() {
         }
     };
 
-    // Get sections for a specific grade level
-    const getSectionsForGrade = (gradeLevel) => {
-        // This should match the sections in the database for the grade level
-        // For now, using hardcoded sections for Grade 2
-        if (gradeLevel === 2) {
-            return [
-                { section_name: "Gumamela", section_id: 9 },
-                { section_name: "Rosal", section_id: 10 },
-                { section_name: "Rose", section_id: 8 },
-                { section_name: "Sampaguita", section_id: 7 }
-            ];
+    // Get sections for a specific grade level - fetch from database
+    const getSectionsForGrade = async (gradeLevel) => {
+        try {
+            const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
+            const sectionsRes = await fetch(`${API_BASE}/sections/grade/${gradeLevel}`, {
+                credentials: "include"
+            });
+            
+            if (sectionsRes.ok) {
+                const sectionsData = await sectionsRes.json();
+                if (sectionsData && sectionsData.length > 0) {
+                    return sectionsData.map(s => ({
+                        section_name: s.section_name || s.section,
+                        section_id: s.section_id
+                    }));
+                }
+            }
+        } catch (err) {
+            console.error("Error fetching sections for grade", gradeLevel, ":", err);
         }
-        // Add more grade levels as needed
-        return [
-            { section_name: "Section A", section_id: 1 },
-            { section_name: "Section B", section_id: 2 }
-        ];
+        
+        // Fallback: return empty array if fetch fails
+        return [];
     };
 
     // Process consolidated data from peer submissions
@@ -1449,7 +1455,9 @@ function AssignedReportData() {
                             <div className="assignment-navigation">
                                 <div className="assignment-info">
                                     <h3>{submission.title || submission.value || assignmentInfo.assignment_title}</h3>
-                                    <p>{assignmentInfo.category_name} - {assignmentInfo.sub_category_name}</p>
+                                    <p style={{ color: '#2a3b5c', fontSize: '16px', marginTop: '2px' }}>
+                                        Submitted by: <span style={{ fontWeight: '700' }}>{submission.submitted_by_name || submission.submitted_by || 'Unknown'}</span>
+                                    </p>
                                 </div>
                                 <div className="submission-navigation">
                                     <button 
@@ -1473,46 +1481,87 @@ function AssignedReportData() {
                             </div>
                         )}
                         
-                        <div className="submission-details">
-                            <div className="detail-row">
-                                <label>Title:</label>
-                                <span>{(() => {
-                                    const title = assignmentInfo?.assignment_title || submission.title || submission.value || 'Report';
-                                    console.log('Title display debug:', {
-                                        assignmentInfo: assignmentInfo,
-                                        assignmentInfo_title: assignmentInfo?.assignment_title,
-                                        submission_title: submission.title,
-                                        submission_value: submission.value,
-                                        submission_id: submission.submission_id,
-                                        report_assignment_id: submission.report_assignment_id,
-                                        final_title: title
-                                    });
-                                    return title;
-                                })()}</span>
+                        {/* Two-column layout: main content (left) + details panel (right) */}
+                        <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
+                            {/* LEFT: Main content (unchanged) */}
+                            <div style={{ flex: 1 }}>
+                                {submission.fields && (
+                                    <div className="submission-content">
+                                        <div className="content-section">
+                                            {renderSubmissionContent(submission)}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
-                            <div className="detail-row">
-                                <label>Status:</label>
-                                <span className={`status-badge status-${submission.status}`}>
-                                    {getStatusText(submission.status)}
-                                </span>
-                            </div>
-                            <div className="detail-row">
-                                <label>Date Submitted:</label>
-                                <span>{submission.date_submitted || 'Not submitted'}</span>
-                            </div>
-                            <div className="detail-row">
-                                <label>Submitted By:</label>
-                                <span>{submission.submitted_by_name || submission.submitted_by || 'Unknown'}</span>
-                            </div>
-                        </div>
-                        
-                        {submission.fields && (
-                            <div className="submission-content">
-                                <div className="content-section">
-                                    {renderSubmissionContent(submission)}
+
+                            {/* RIGHT: Details panel */}
+                            <div style={{ width: '300px', backgroundColor: '#fff', borderRadius: '8px', padding: '16px', border: '1px solid #ccc' }}>
+                                <div style={{ marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid #ccc' }}>
+                                    <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', fontWeight: 'bold' }}>Details</h3>
+                                    <div style={{ marginBottom: '8px' }}>
+                                        <span style={{ fontWeight: '500' }}>Title:</span>{" "}
+                                        <span>{assignmentInfo?.assignment_title || submission.title || submission.value || 'Report'}</span>
+                                    </div>
+                                    <div style={{ marginBottom: '8px' }}>
+                                        <span style={{ fontWeight: '500' }}>Status:</span>{" "}
+                                        <span className={`status-badge status-${submission.status}`}>
+                                            {getStatusText(submission.status)}
+                                        </span>
+                                    </div>
+                                    <div style={{ marginBottom: '8px' }}>
+                                        <span style={{ fontWeight: '500' }}>Start Date:</span>{" "}
+                                        <span>{(() => {
+                                            const val = assignmentInfo?.from_date || submission.from_date || assignmentInfo?.due_date;
+                                            if (!val) return 'N/A';
+                                            try {
+                                                const d = new Date(val);
+                                                if (Number.isNaN(d.getTime())) return String(val).split('T')[0] || String(val);
+                                                const yyyy = d.getFullYear();
+                                                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                                                const dd = String(d.getDate()).padStart(2, '0');
+                                                return `${mm}/${dd}/${yyyy}`;
+                                            } catch { return String(val).split('T')[0] || String(val); }
+                                        })()}</span>
+                                    </div>
+                                    <div style={{ marginBottom: '8px' }}>
+                                        <span style={{ fontWeight: '500' }}>Due Date:</span>{" "}
+                                        <span>{(() => {
+                                            const val = assignmentInfo?.to_date || submission.to_date;
+                                            if (!val) return 'N/A';
+                                            try {
+                                                const d = new Date(val);
+                                                if (Number.isNaN(d.getTime())) return String(val).split('T')[0] || String(val);
+                                                const yyyy = d.getFullYear();
+                                                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                                                const dd = String(d.getDate()).padStart(2, '0');
+                                                return `${mm}/${dd}/${yyyy}`;
+                                            } catch { return String(val).split('T')[0] || String(val); }
+                                        })()}</span>
+                                    </div>
+                                    <div style={{ marginBottom: '8px' }}>
+                                        <span style={{ fontWeight: '500' }}>Report Type:</span>{" "}
+                                        <span>{assignmentInfo?.sub_category_name || assignmentInfo?.category_name || submission.sub_category_name || submission.category_name || 'N/A'}</span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div style={{ marginBottom: '8px' }}>
+                                        <span style={{ fontWeight: '500' }}>Date Submitted:</span>{" "}
+                                        <span>{(() => {
+                                            const val = submission.date_submitted;
+                                            if (!val) return 'Not submitted';
+                                            try {
+                                                const d = new Date(val);
+                                                if (Number.isNaN(d.getTime())) return String(val).split('T')[0] || String(val);
+                                                const yyyy = d.getFullYear();
+                                                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                                                const dd = String(d.getDate()).padStart(2, '0');
+                                                return `${mm}/${dd}/${yyyy}`;
+                                            } catch { return String(val).split('T')[0] || String(val); }
+                                        })()}</span>
+                                    </div>
                                 </div>
                             </div>
-                        )}
+                        </div>
                         
                         
                         {/* Show status if already completed and ready for principal review */}

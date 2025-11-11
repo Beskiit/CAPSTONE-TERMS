@@ -20,6 +20,7 @@ import {
   patchSubmissionFormData,          // ⬅️ NEW
   patchSubmission,                 // ⬅️ NEW - Generic PATCH endpoint
   getMySubmissionForAssignment,
+  getSubmissionsByAssignment,
 } from "../controllers/submissionController.js";
 import { requireAuth } from "../middleware/auth.js";
 
@@ -85,6 +86,8 @@ router.patch("/:id/formdata", upload.array('images', 10), patchSubmissionFormDat
 router.post("/", createSubmission);
 router.delete("/:id", deleteSubmission);
 router.get("/my/:id", getMySubmissions);
+// All submissions by assignment (report_assignment_id) - for getting assignees
+router.get("/by-assignment/:id", requireAuth, getSubmissionsByAssignment);
 // Mine by assignment (report_assignment_id)
 router.get("/by-assignment/:id/mine", requireAuth, getMySubmissionForAssignment);
 

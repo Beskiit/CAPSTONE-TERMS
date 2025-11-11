@@ -51,6 +51,45 @@ router.get(
   getCoordinators
 );
 
+/** GET /users/coordinator-grade/:userId  (any authenticated)
+ *  Returns the latest coordinator grade assignment (grade_level_id, grade_level) for the user.
+ */
+router.get("/coordinator-grade/:userId", requireAuth, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    console.log("[API] Fetching coordinator grade for user ID:", userId);
+    
+    const query = `
+      SELECT cg.grade_level_id, gl.grade_level
+      FROM coordinator_grade cg
+      LEFT JOIN grade_level gl ON gl.grade_level_id = cg.grade_level_id
+      WHERE cg.user_id = ?
+      ORDER BY cg.yr_and_qtr_id DESC
+      LIMIT 1
+    `;
+
+    const rows = await new Promise((resolve, reject) => {
+      db.query(query, [userId], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+
+    console.log("[API] Coordinator grade query results for user", userId, ":", rows);
+
+    if (!rows || rows.length === 0) {
+      console.log("[API] No coordinator grade found for user", userId);
+      return res.status(404).json({ error: "Coordinator grade not found" });
+    }
+
+    console.log("[API] Returning coordinator grade:", rows[0]);
+    res.json(rows[0]);
+  } catch (error) {
+    console.error("[API] Error fetching coordinator grade:", error);
+    res.status(500).json({ error: "Failed to fetch coordinator grade", details: error.message });
+  }
+});
+
 /** GET /users/:id  (any authenticated) */
 router.get("/:id", requireAuth, getUser);
 

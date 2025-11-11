@@ -929,6 +929,30 @@ export const getMySubmissionForAssignment = (req, res) => {
   });
 };
 
+// GET /submissions/by-assignment/:id → returns all submissions for a given report_assignment_id
+export const getSubmissionsByAssignment = (req, res) => {
+  const { id } = req.params; // report_assignment_id
+  const sql = `
+    SELECT 
+      submission_id,
+      report_assignment_id,
+      category_id,
+      submitted_by,
+      status,
+      number_of_submission,
+      value,
+      date_submitted,
+      fields
+    FROM submission 
+    WHERE report_assignment_id = ?
+    ORDER BY submitted_by
+  `;
+  db.query(sql, [id], (err, rows) => {
+    if (err) return res.status(500).send('Database error: ' + err);
+    res.json(rows || []);
+  });
+};
+
 /**
  * PATCH /submissions/:id
  * Generic endpoint for updating submission status and other fields

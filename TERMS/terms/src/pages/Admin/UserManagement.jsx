@@ -40,7 +40,8 @@ function UserManagement() {
     section: '',
     gradeLevel: '',
     category: '',
-    subCategory: ''
+    subCategory: '',
+    laemplGradeLevelId: ''
   });
   const [showYearQuarterModal, setShowYearQuarterModal] = useState(false);
   const [yearQuarter, setYearQuarter] = useState({
@@ -54,6 +55,7 @@ function UserManagement() {
   const [subCategories, setSubCategories] = useState([]);
   const [sections, setSections] = useState([]);
   const [gradeLevels, setGradeLevels] = useState([]);
+  const [laemplAssignments, setLaemplAssignments] = useState([]);
 
   useEffect(() => {
     // ensure the element id matches your index.html (#root is default in Vite)
@@ -64,6 +66,7 @@ function UserManagement() {
     fetchAllYearQuarters();
     fetchCategories();
     fetchGradeLevels();
+    fetchLaemplAssignments();
     initializeSchema();
   }, []);
 
@@ -280,7 +283,13 @@ function UserManagement() {
   const handleEditUser = (user) => {
     setSelectedUser(user);
     setSelectedSchool(user.school_name || '');
-    setAssignmentDetails({ section: '', gradeLevel: '', category: '', subCategory: '' });
+    setAssignmentDetails({
+      section: '',
+      gradeLevel: '',
+      category: '',
+      subCategory: '',
+      laemplGradeLevelId: ''
+    });
     setShowAssignmentModal(true);
     
     // If user has a school, fetch sections for that school
@@ -357,9 +366,154 @@ function UserManagement() {
     }
   };
 
+  const fetchLaemplAssignments = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/reports/laempl-mps/assignments`, { credentials: "include" });
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      setLaemplAssignments(data || []);
+    } catch (err) {
+      console.error("Error fetching LAEMPL & MPS assignments:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (!showAssignmentModal || !selectedUser || selectedUser.role !== "coordinator") return;
+
+    const match = laemplAssignments.find(
+      (assignment) => Number(assignment.coordinator_user_id) === Number(selectedUser.user_id)
+    );
+
+    setAssignmentDetails((prev) => ({
+      ...prev,
+      laemplGradeLevelId: match?.grade_level_id ? String(match.grade_level_id) : ""
+    }));
+  }, [showAssignmentModal, selectedUser, laemplAssignments]);
+
+  useEffect(() => {
+    if (!selectedUser || selectedUser.role !== "coordinator") return;
+    const isLaemplSelection =
+      String(assignmentDetails.category) === '1' &&
+      String(assignmentDetails.subCategory) === '3';
+    if (!isLaemplSelection) return;
+    if (!assignmentDetails.laemplGradeLevelId && assignmentDetails.gradeLevel) {
+      setAssignmentDetails((prev) => ({
+        ...prev,
+        laemplGradeLevelId: prev.gradeLevel
+      }));
+    }
+  }, [assignmentDetails.gradeLevel, assignmentDetails.category, assignmentDetails.subCategory, selectedUser]);
+
+  const getGradeLabel = (gradeLevelId) => {
+    const grade = gradeLevels.find((g) => String(g.grade_level_id) === String(gradeLevelId));
+    return grade?.grade_level ?? gradeLevelId;
+  };
+
+  const findLaemplAssignmentForGrade = (gradeLevelId) => {
+    const byGrade = laemplAssignments.find(
+      (assignment) => Number(assignment.grade_level_id) === Number(gradeLevelId)
+    );
+    if (byGrade) return byGrade;
+    return laemplAssignments.find((assignment) => assignment.grade_level_id == null);
+  };
+
+  const findLaemplAssignmentForCoordinator = (coordinatorUserId) =>
+    laemplAssignments.find(
+      (assignment) => Number(assignment.coordinator_user_id) === Number(coordinatorUserId)
+    );
+
+  const updateLaemplCoordinatorAssignment = async (options) => {
+    const {
+      gradeLevelId,
+      coordinatorUserId
+    } = options || {};
+
+    console.log("[UserManagement] updateLaemplCoordinatorAssignment called with:", { gradeLevelId, coordinatorUserId });
+    console.log("[UserManagement] Current laemplAssignments:", laemplAssignments);
+
+    const assignment = gradeLevelId != null
+      ? findLaemplAssignmentForGrade(gradeLevelId)
+      : findLaemplAssignmentForCoordinator(coordinatorUserId);
+
+    console.log("[UserManagement] Found assignment:", assignment);
+
+    // If assignment exists, update it using PATCH
+    if (assignment) {
+      const payload = {
+        grade_level_id: gradeLevelId != null ? Number(gradeLevelId) : null,
+        coordinator_user_id: coordinatorUserId != null ? Number(coordinatorUserId) : null,
+        advisory_user_id: null,
+      };
+
+      const response = await fetch(`${API_BASE}/reports/laempl-mps/assignments/${assignment.report_assignment_id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const responseData = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(responseData.error || responseData.message || "Failed to update LAEMPL & MPS assignment.");
+      }
+
+      await fetchLaemplAssignments();
+      
+      // Return the updated assignment from the response
+      return responseData.assignment || assignment;
+    } else {
+      // No assignment exists, create it using the create-or-update endpoint
+      console.log("[UserManagement] No assignment found! Creating new assignment.");
+      
+      if (!gradeLevelId || !coordinatorUserId || !activeYearQuarter) {
+        console.warn("[UserManagement] Cannot create assignment: missing gradeLevelId, coordinatorUserId, or activeYearQuarter");
+        return null;
+      }
+
+      const payload = {
+        grade_level_id: Number(gradeLevelId),
+        coordinator_user_id: Number(coordinatorUserId),
+        quarter: Number(activeYearQuarter.quarter),
+        year: Number(activeYearQuarter.year)
+      };
+
+      console.log("[UserManagement] Creating assignment with payload:", payload);
+
+      const response = await fetch(`${API_BASE}/reports/laempl-mps/assignments/create-or-update`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const responseData = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(responseData.error || responseData.message || "Failed to create LAEMPL & MPS assignment.");
+      }
+
+      await fetchLaemplAssignments();
+      
+      // Return the created assignment from the response
+      return responseData.assignment || null;
+    }
+  };
+
   const handleSchoolChange = (schoolName) => {
     setSelectedSchool(schoolName);
-    setAssignmentDetails(prev => ({ ...prev, section: '', gradeLevel: '' }));
+    setAssignmentDetails(prev => ({
+      ...prev,
+      section: '',
+      gradeLevel: '',
+      laemplGradeLevelId: prev.laemplGradeLevelId
+    }));
     
     // Find the school and fetch its sections
     const school = schools.find(s => s.school_name === schoolName);
@@ -373,7 +527,53 @@ function UserManagement() {
   const handleAssignUser = async () => {
     if (!selectedUser || !selectedSchool) return;
     
+    const isLaemplCoordinatorSelection =
+      selectedUser?.role === 'coordinator' &&
+      String(assignmentDetails.category) === '1' &&
+      String(assignmentDetails.subCategory) === '3';
+
+    if (isLaemplCoordinatorSelection) {
+      if (!assignmentDetails.laemplGradeLevelId) {
+        toast.error('Select a grade level before assigning LAEMPL & MPS.');
+        return;
+      }
+    }
+
     try {
+      let laemplAssignment = null;
+      if (isLaemplCoordinatorSelection) {
+        laemplAssignment = await updateLaemplCoordinatorAssignment({
+          gradeLevelId: Number(assignmentDetails.laemplGradeLevelId),
+          coordinatorUserId: selectedUser.user_id
+        });
+        
+        // Log the Coordinator Grade Level from report_assignment where sub_category_id=3
+        // Use the grade level we just set, or fetch from the updated assignment
+        let gradeLevelId = null;
+        let gradeLevelSource = 'report_assignment (sub_category_id=3)';
+        
+        // First, use the grade level we just set
+        if (assignmentDetails.laemplGradeLevelId) {
+          gradeLevelId = Number(assignmentDetails.laemplGradeLevelId);
+        } else if (laemplAssignment?.grade_level_id) {
+          // Fallback: use the assignment returned
+          gradeLevelId = laemplAssignment.grade_level_id;
+        } else {
+          // Fallback: fetch fresh to get the updated assignment
+          await fetchLaemplAssignments();
+          const updatedAssignment = findLaemplAssignmentForCoordinator(selectedUser.user_id);
+          if (updatedAssignment?.grade_level_id) {
+            gradeLevelId = updatedAssignment.grade_level_id;
+          }
+        }
+        
+        const gradeLevelName = gradeLevelId 
+          ? (gradeLevels.find(g => g.grade_level_id === gradeLevelId)?.grade_level || gradeLevelId)
+          : null;
+        const gradeLevelDisplay = gradeLevelName ? `Grade ${gradeLevelName}` : 'Not assigned';
+        console.log(`[UserManagement] Coordinator "${selectedUser.name}" (ID: ${selectedUser.user_id}) assigned/reassigned. Coordinator Grade Level (${gradeLevelSource}): ${gradeLevelDisplay} (grade_level_id: ${gradeLevelId || 'null'})`);
+      }
+
       const response = await fetch(`${API_BASE}/admin/assign-user`, {
         method: 'POST',
         headers: {
@@ -391,6 +591,12 @@ function UserManagement() {
       });
 
       if (!response.ok) {
+        if (isLaemplCoordinatorSelection && laemplAssignment) {
+          await updateLaemplCoordinatorAssignment({
+            gradeLevelId: laemplAssignment.grade_level_id,
+            coordinatorUserId: laemplAssignment.coordinator_user_id
+          });
+        }
         const errorData = await response.json();
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
@@ -412,7 +618,8 @@ function UserManagement() {
         section: '',
         gradeLevel: '',
         category: '',
-        subCategory: ''
+        subCategory: '',
+        laemplGradeLevelId: ''
       });
     } catch (err) {
       console.error("Error assigning user:", err);
@@ -442,6 +649,53 @@ function UserManagement() {
 
       const result = await response.json();
 
+      if (selectedUser.role === 'coordinator') {
+        const existingAssignment = findLaemplAssignmentForCoordinator(selectedUser.user_id);
+        if (existingAssignment && existingAssignment.grade_level_id != null) {
+          // Log before clearing
+          const gradeLevelIdBefore = existingAssignment.grade_level_id;
+          const gradeLevelNameBefore = gradeLevelIdBefore 
+            ? (gradeLevels.find(g => g.grade_level_id === gradeLevelIdBefore)?.grade_level || gradeLevelIdBefore)
+            : null;
+          const gradeLevelDisplayBefore = gradeLevelNameBefore ? `Grade ${gradeLevelNameBefore}` : 'Not assigned';
+          console.log(`[UserManagement] Coordinator "${selectedUser.name}" (ID: ${selectedUser.user_id}) unassigned. Previous Coordinator Grade Level (from report_assignment where sub_category_id=3): ${gradeLevelDisplayBefore} (grade_level_id: ${gradeLevelIdBefore || 'null'})`);
+          
+          const clearedAssignment = await updateLaemplCoordinatorAssignment({
+            gradeLevelId: null,
+            coordinatorUserId: selectedUser.user_id
+          });
+          
+          // Log after clearing - check coordinator_grade as fallback
+          let gradeLevelIdAfter = clearedAssignment?.grade_level_id;
+          let gradeLevelSourceAfter = 'report_assignment (sub_category_id=3)';
+          
+          if (!gradeLevelIdAfter) {
+            // Fallback to coordinator_grade table
+            try {
+              const cgRes = await fetch(`${API_BASE}/users/coordinator-grade/${selectedUser.user_id}`, { credentials: "include" });
+              if (cgRes.ok) {
+                const cgData = await cgRes.json();
+                if (cgData?.grade_level_id) {
+                  gradeLevelIdAfter = cgData.grade_level_id;
+                  gradeLevelSourceAfter = 'coordinator_grade (fallback)';
+                }
+              } else if (cgRes.status === 404) {
+                // Coordinator doesn't have a grade in coordinator_grade table - this is fine
+                gradeLevelSourceAfter = 'coordinator_grade (not found)';
+              }
+            } catch (err) {
+              console.error("[UserManagement] Failed to fetch coordinator grade:", err);
+            }
+          }
+          
+          const gradeLevelNameAfter = gradeLevelIdAfter 
+            ? (gradeLevels.find(g => g.grade_level_id === gradeLevelIdAfter)?.grade_level || gradeLevelIdAfter)
+            : null;
+          const gradeLevelDisplayAfter = gradeLevelNameAfter ? `Grade ${gradeLevelNameAfter}` : 'Not assigned';
+          console.log(`[UserManagement] Coordinator "${selectedUser.name}" (ID: ${selectedUser.user_id}) unassigned. Current Coordinator Grade Level (${gradeLevelSourceAfter}): ${gradeLevelDisplayAfter} (grade_level_id: ${gradeLevelIdAfter || 'null'})`);
+        }
+      }
+
       // Update the user in the local state
       setUsers(users.map(user => 
         user.user_id === selectedUser.user_id 
@@ -457,7 +711,8 @@ function UserManagement() {
         section: '',
         gradeLevel: '',
         category: '',
-        subCategory: ''
+        subCategory: '',
+        laemplGradeLevelId: ''
       });
     } catch (err) {
       console.error("Error unassigning user:", err);
@@ -503,6 +758,12 @@ function UserManagement() {
     fetchUser();
     fetchUsers();
   }, []);
+
+  const selectedLaemplGradeAssignment = assignmentDetails.laemplGradeLevelId
+    ? laemplAssignments.find(
+        (assignment) => Number(assignment.grade_level_id) === Number(assignmentDetails.laemplGradeLevelId)
+      )
+    : null;
 
   return (
     <>
@@ -816,7 +1077,7 @@ function UserManagement() {
                   >
                     <option value="">Select section...</option>
                     {sections
-                      .filter(section => String(section.grade_level) === String(assignmentDetails.gradeLevel))
+                      .filter(section => String(section.grade_level_id ?? section.grade_level) === String(assignmentDetails.gradeLevel))
                       .map(section => (
                         <option key={section.section_id} value={section.section}>
                           {section.section}
@@ -835,7 +1096,7 @@ function UserManagement() {
                   >
                     <option value="">Select grade level...</option>
                     {gradeLevels.map(grade => (
-                      <option key={grade.grade_level_id} value={grade.grade_level}>
+                      <option key={grade.grade_level_id} value={grade.grade_level_id}>
                         Grade {grade.grade_level}
                       </option>
                     ))}
@@ -850,7 +1111,12 @@ function UserManagement() {
                         id="categorySelect"
                         value={assignmentDetails.category}
                         onChange={(e) => {
-                          setAssignmentDetails(prev => ({...prev, category: e.target.value, subCategory: ''}));
+                          setAssignmentDetails(prev => ({
+                            ...prev,
+                            category: e.target.value,
+                            subCategory: '',
+                            laemplGradeLevelId: ''
+                          }));
                           if (e.target.value) {
                             fetchSubCategories(e.target.value);
                           } else {
@@ -873,7 +1139,11 @@ function UserManagement() {
                       <select
                         id="subCategorySelect"
                         value={assignmentDetails.subCategory}
-                        onChange={(e) => setAssignmentDetails(prev => ({...prev, subCategory: e.target.value}))}
+                        onChange={(e) => setAssignmentDetails(prev => ({
+                          ...prev,
+                          subCategory: e.target.value,
+                          laemplGradeLevelId: ''
+                        }))}
                         className="form-input"
                         disabled={!assignmentDetails.category}
                       >
@@ -885,6 +1155,40 @@ function UserManagement() {
                         ))}
                       </select>
                     </div>
+
+                    {String(assignmentDetails.category) === '1' && String(assignmentDetails.subCategory) === '3' && (
+                      <>
+                        <div className="form-group">
+                          <label htmlFor="laemplGradeSelect">Coordinator Grade Level:</label>
+                          <select
+                            id="laemplGradeSelect"
+                            value={assignmentDetails.laemplGradeLevelId}
+                            onChange={(e) => setAssignmentDetails(prev => ({
+                              ...prev,
+                              laemplGradeLevelId: e.target.value
+                            }))}
+                            className="form-input"
+                          >
+                            <option value="">Select grade level...</option>
+                            {gradeLevels.map((grade) => (
+                              <option key={grade.grade_level_id} value={grade.grade_level_id}>
+                                Grade {grade.grade_level}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {assignmentDetails.laemplGradeLevelId && selectedLaemplGradeAssignment && (
+                          <div className="form-hint">
+                            {selectedLaemplGradeAssignment.coordinator_user_id
+                              ? selectedLaemplGradeAssignment.coordinator_user_id === selectedUser?.user_id
+                                ? `Currently assigned to ${selectedUser?.name || 'this coordinator'}.`
+                                : `Currently assigned to ${selectedLaemplGradeAssignment.coordinator_name || 'another coordinator'}. Saving will transfer the grade.`
+                              : 'This grade is not yet assigned to any coordinator.'}
+                          </div>
+                        )}
+                      </>
+                    )}
                   </>
                 )}
               </div>

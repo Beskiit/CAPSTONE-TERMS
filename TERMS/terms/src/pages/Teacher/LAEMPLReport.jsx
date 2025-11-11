@@ -61,6 +61,10 @@ function LAEMPLReport() {
   const [allSections, setAllSections] = useState([]);
   const [consolidatedData, setConsolidatedData] = useState({});
   
+  // Report assignment tracking for parent-child linking
+  const [reportAssignmentId, setReportAssignmentId] = useState(null);
+  const [parentAssignmentId, setParentAssignmentId] = useState(null);
+  
   // Consolidate modal state
   const [showConsolidate, setShowConsolidate] = useState(false);
   const [peerData, setPeerData] = useState([]);
@@ -246,6 +250,10 @@ function LAEMPLReport() {
               [sectionData.section]: Object.fromEntries(COLS_MPS.map((c) => [c.key, ""]))
             });
           }
+        } else {
+          // If no teacher-section assignment (e.g., 404), fall back gracefully
+          setTeacherSection(null);
+          setTRAITS(DEFAULT_TRAITS);
         }
       } catch (error) {
         console.error("Error fetching teacher section:", error);
@@ -275,6 +283,49 @@ function LAEMPLReport() {
         const data = await res.json();
         setSubmissionData(data);
         
+        // Store report assignment IDs for parent-child linking
+        setReportAssignmentId(data?.report_assignment_id ?? null);
+        // Get parent_assignment_id from the report_assignment if available
+        if (data?.report_assignment_id) {
+          try {
+            // Fetch user data if not already available
+            let currentUser = user;
+            if (!currentUser) {
+              try {
+                const userRes = await fetch(`${API_BASE}/auth/me`, { credentials: "include" });
+                if (userRes.ok) {
+                  currentUser = await userRes.json();
+                }
+              } catch (err) {
+                console.warn("Failed to fetch user data:", err);
+              }
+            }
+            
+            const raRes = await fetch(`${API_BASE}/reports/assignment/${data.report_assignment_id}`, {
+              credentials: "include"
+            });
+            if (raRes.ok) {
+              const raData = await raRes.json();
+              // For coordinator submissions, the coordinator's report_assignment_id IS the parent
+              // Check both submission type and user role to determine if this is a coordinator view
+              const isCoordinatorSubmission = (data.fields && data.fields.type === "LAEMPL_COORDINATOR") || 
+                                             (currentUser && currentUser.role === "coordinator");
+              console.log("[LAEMPLReport] Setting parent assignment - isCoordinatorSubmission:", isCoordinatorSubmission, "user role:", currentUser?.role, "submission type:", data.fields?.type);
+              if (isCoordinatorSubmission) {
+                // Coordinator's own assignment is the parent - use it to find child assignments
+                console.log("[LAEMPLReport] Setting parentAssignmentId to coordinator's report_assignment_id:", data.report_assignment_id);
+                setParentAssignmentId(data.report_assignment_id);
+              } else {
+                // For teacher submissions, use the parent_report_assignment_id from the report assignment
+                console.log("[LAEMPLReport] Setting parentAssignmentId from report assignment:", raData?.parent_report_assignment_id);
+                setParentAssignmentId(raData?.parent_report_assignment_id ?? null);
+              }
+            }
+          } catch (err) {
+            console.warn("Failed to fetch parent assignment ID:", err);
+          }
+        }
+        
         // Extract subjects from the submission fields
         console.log("Submission data:", data);
         console.log("Fields data:", data.fields);
@@ -291,27 +342,62 @@ function LAEMPLReport() {
           const gradeLevelId = (data.fields && data.fields.grade) || 2;
           console.log("Using grade level:", gradeLevelId);
           
-          // Use hardcoded sections for Grade 2 (these match the actual database sections)
-          const sections = [
-            { section_name: "Gumamela", section_id: 9 },
-            { section_name: "Rosal", section_id: 10 },
-            { section_name: "Rose", section_id: 8 },
-            { section_name: "Sampaguita", section_id: 7 }
-          ];
-          console.log("Using hardcoded sections for Grade 2:", sections);
+          // Fetch sections dynamically from database based on grade level
+          const fetchSectionsForGrade = async () => {
+            try {
+              const sectionsRes = await fetch(`${API_BASE}/sections/grade/${gradeLevelId}`, {
+                credentials: "include"
+              });
+              
+              if (sectionsRes.ok) {
+                const sectionsData = await sectionsRes.json();
+                console.log("Fetched sections for grade", gradeLevelId, ":", sectionsData);
+                
+                if (sectionsData && sectionsData.length > 0) {
+                  // Map the database format to our expected format
+                  const sections = sectionsData.map(s => ({
+                    section_name: s.section_name || s.section,
+                    section_id: s.section_id
+                  }));
+                  console.log("Using fetched sections for Grade", gradeLevelId, ":", sections);
+                  setAllSections(sections);
+                  return sections;
+                } else {
+                  console.warn("No sections found for grade", gradeLevelId, ", using fallback");
+                  // Fallback to empty array or default sections
+                  setAllSections([]);
+                  return [];
+                }
+              } else {
+                console.warn("Failed to fetch sections, status:", sectionsRes.status);
+                setAllSections([]);
+                return [];
+              }
+            } catch (err) {
+              console.error("Error fetching sections:", err);
+              setAllSections([]);
+              return [];
+            }
+          };
           
-          setAllSections(sections);
-          
-          // Initialize data for all sections
-          const newData = {};
-          sections.forEach(section => {
-            newData[section.section_name] = {};
-            dynamicCols.forEach(col => {
-              newData[section.section_name][col.key] = "";
-            });
+          // Fetch sections and then initialize data
+          fetchSectionsForGrade().then(sections => {
+            if (sections.length > 0) {
+              // Initialize data for all sections
+              const newData = {};
+              sections.forEach(section => {
+                newData[section.section_name] = {};
+                dynamicCols.forEach(col => {
+                  newData[section.section_name][col.key] = "";
+                });
+              });
+              setData(newData);
+              setTRAITS(sections.map(s => s.section_name));
+            }
           });
-          setData(newData);
-          setTRAITS(sections.map(s => s.section_name));
+          
+          // Set a temporary empty array while fetching
+          setAllSections([]);
           
           // Create dynamic columns for coordinator - check if there's subject data in consolidated data
           let newCols = [
@@ -1128,24 +1214,48 @@ function LAEMPLReport() {
 
   // Open consolidate modal and fetch peer data
   const handleConsolidate = async () => {
-    if (!isCoordinatorView) return;
+    if (!isCoordinatorView) {
+      console.warn("[Consolidate] Not coordinator view, cannot consolidate");
+      return;
+    }
+    
+    console.log("[Consolidate] Starting consolidation...");
+    console.log("[Consolidate] SUBMISSION_ID:", SUBMISSION_ID);
+    console.log("[Consolidate] parentAssignmentId:", parentAssignmentId);
+    console.log("[Consolidate] reportAssignmentId:", reportAssignmentId);
+    console.log("[Consolidate] submissionData:", submissionData);
     
     setConsolidateError("");
     setConsolidateSuccess("");
     
     try {
-      // Fetch peer LAEMPL & MPS data
-      const url = `${API_BASE}/reports/laempl-mps/${SUBMISSION_ID}/peers`;
-      console.log("[Consolidate] Fetching peer data from:", url);
+      // Build URL with parent_assignment_id for coordinator view (similar to accomplishment reports)
+      // Coordinator: use 'pra' (parent assignment) to get teacher submissions from child assignments
+      // Teacher/Principal: use 'ra' (same assignment) or no parameter (default behavior)
+      let url = `${API_BASE}/reports/laempl-mps/${SUBMISSION_ID}/peers`;
       
+      if (isCoordinatorView && parentAssignmentId) {
+        url += `?pra=${encodeURIComponent(parentAssignmentId)}`;
+        console.log("[Consolidate] Using parent assignment ID:", parentAssignmentId);
+      } else if (reportAssignmentId) {
+        url += `?ra=${encodeURIComponent(reportAssignmentId)}`;
+        console.log("[Consolidate] Using report assignment ID:", reportAssignmentId);
+      } else {
+        console.warn("[Consolidate] No parentAssignmentId or reportAssignmentId available!");
+      }
+      
+      console.log("[Consolidate] Fetching from URL:", url);
       const res = await fetch(url, { credentials: "include" });
+      
       if (!res.ok) {
         const txt = await res.text().catch(() => "");
+        console.error("[Consolidate] Request failed:", res.status, txt);
         throw new Error(`Failed to load peer data: ${res.status} ${txt}`);
       }
       
       const peerData = await res.json();
-      console.log("[Consolidate] Peer data received:", peerData);
+      console.log("[Consolidate] Received peer data:", peerData);
+      console.log("[Consolidate] Peer count:", Array.isArray(peerData) ? peerData.length : "not an array");
       
       setPeerData(Array.isArray(peerData) ? peerData : []);
       setShowConsolidate(true);
@@ -1179,15 +1289,20 @@ function LAEMPLReport() {
           const fields = typeof peer.fields === 'string' ? JSON.parse(peer.fields) : peer.fields;
           console.log("Parsed fields:", fields);
           
-          // Get the section name from the peer data - ensure it matches our predefined sections
-          let sectionName = peer.section_name || "Rosal"; // Default to Rosal if not specified
+          // Get the section name from the peer data - ensure it matches our loaded sections
+          let sectionName = peer.section_name || (allSections.length > 0 ? allSections[0].section_name : "Unknown");
           
-          // Map peer section to our predefined sections if needed
-          const predefinedSections = ["Gumamela", "Rosal", "Rose", "Sampaguita"];
-          if (!predefinedSections.includes(sectionName)) {
-            // If the peer section doesn't match our predefined sections, default to Rosal
-            sectionName = "Rosal";
-            console.log("Peer section", peer.section_name, "not in predefined sections, mapping to Rosal");
+          // Map peer section to our loaded sections if needed
+          const loadedSectionNames = allSections.map(s => s.section_name);
+          if (!loadedSectionNames.includes(sectionName)) {
+            // If the peer section doesn't match our loaded sections, use the first available section
+            if (allSections.length > 0) {
+              sectionName = allSections[0].section_name;
+              console.log("Peer section", peer.section_name, "not in loaded sections, mapping to", sectionName);
+            } else {
+              console.warn("No sections loaded, cannot map peer section:", peer.section_name);
+              return; // Skip this peer if we can't map it (use return instead of continue in forEach)
+            }
           }
           
           // Get the subject from report title or fields
@@ -1201,8 +1316,8 @@ function LAEMPLReport() {
           
           console.log("Section:", sectionName, "Subject:", subjectName);
           
-          // Only process if the section is in our predefined sections
-          if (predefinedSections.includes(sectionName)) {
+          // Only process if the section is in our loaded sections
+          if (loadedSectionNames.includes(sectionName)) {
             // If this section doesn't exist in our consolidated data, create it
             if (!consolidatedData[sectionName]) {
               consolidatedData[sectionName] = {};
@@ -1430,8 +1545,8 @@ function LAEMPLReport() {
       
       setConsolidateSuccess(`Successfully consolidated data from ${selectedPeers.length} peer submissions. Subjects: ${subjectsList}`);
       
-      // Generate AI Summary after successful consolidation
-      await generateAISummary(selectedPeers, consolidatedData);
+      // TODO: Generate AI Summary after successful consolidation (if needed)
+      // await generateAISummary(selectedPeers, consolidatedData);
       
     } catch (error) {
       console.error("[Consolidate] Error consolidating:", error);
@@ -1552,7 +1667,6 @@ function LAEMPLReport() {
 
             {/* DYNAMIC TABLE — LAEMPL */}
             <div className="table-wrap">
-              {console.log("DEBUG: About to render LAEMPL table - isCoordinatorView:", isCoordinatorView, "allSections:", allSections, "dynamicCols:", dynamicCols)}
               <table className="laempl-table">
                 <caption>
                   {isCoordinatorView 
@@ -1565,27 +1679,18 @@ function LAEMPLReport() {
                 <thead>
                   <tr>
                     <th scope="col" className="row-head">&nbsp;</th>
-                    {dynamicCols.map((col) => {
-                      console.log("DEBUG: Rendering LAEMPL column header:", col.key, col.label);
-                      return (
-                        <th key={col.key} scope="col">{col.label}</th>
-                      );
-                    })}
+                    {dynamicCols.map((col) => (
+                      <th key={col.key} scope="col">{col.label}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {isCoordinatorView ? (
                     // Coordinator view: show all sections
-                    allSections.map((section, index) => {
-                      console.log("DEBUG: Rendering LAEMPL row for section:", section, "section_name:", section.section_name);
-                      console.log("DEBUG: Full allSections array:", allSections);
-                      return (
-                        <tr key={section.section_id || index}>
-                          <th scope="row" className="row-head">{(() => {
-                            console.log("DEBUG: About to render section name:", section.section_name);
-                            return section.section_name;
-                          })()}</th>
-                          {dynamicCols.map((col) => (
+                    allSections.map((section, index) => (
+                      <tr key={section.section_id || index}>
+                        <th scope="row" className="row-head">{section.section_name}</th>
+                        {dynamicCols.map((col) => (
                           <td key={col.key}>
                             <input
                               type="number"
@@ -1595,7 +1700,6 @@ function LAEMPLReport() {
                               step="1"
                               value={String(data[section.section_name]?.[col.key] || "")}
                               onChange={(e) => {
-                                console.log("Input changed:", section.section_name, col.key, e.target.value);
                                 handleChange(section.section_name, col.key, e.target.value);
                               }}
                               onKeyDown={handleKeyDown}
@@ -1604,9 +1708,8 @@ function LAEMPLReport() {
                             />
                           </td>
                         ))}
-                        </tr>
-                      );
-                    })
+                      </tr>
+                    ))
                   ) : (
                     // Teacher view: show traits
                     TRAITS.map((trait) => (
@@ -1669,15 +1772,9 @@ function LAEMPLReport() {
                 <tbody>
                   {isCoordinatorView ? (
                     // Coordinator view: show all sections
-                    allSections.map((section, index) => {
-                      console.log("DEBUG: Rendering MPS row for section:", section, "section_name:", section.section_name);
-                      console.log("DEBUG: Full allSections array in MPS:", allSections);
-                      return (
-                        <tr key={section.section_id || index}>
-                          <th scope="row" className="row-head">{(() => {
-                            console.log("DEBUG: About to render MPS section name:", section.section_name);
-                            return section.section_name;
-                          })()}</th>
+                    allSections.map((section, index) => (
+                      <tr key={section.section_id || index}>
+                        <th scope="row" className="row-head">{section.section_name}</th>
                         {COLS_MPS.map(col => {
                           // Fields that are synced from LAEMPL should be read-only
                           const isSyncedField = ["m", "f", "total", "total_score", "mean", "hs", "ls", "total_items", "median", "pl", "mps", "sd", "target"].includes(col.key);
@@ -1702,9 +1799,8 @@ function LAEMPLReport() {
                             </td>
                           );
                         })}
-                        </tr>
-                      );
-                    })
+                      </tr>
+                    ))
                   ) : (
                     // Teacher view: show traits
                     TRAITS.map(trait => (

@@ -395,6 +395,12 @@
     color: white;
   }
 
+.form-hint {
+  font-size: 0.85rem;
+  color: #555;
+  margin-top: 4px;
+}
+
   /* Status Badge Styles */
   .status-badge {
     padding: 4px 8px;

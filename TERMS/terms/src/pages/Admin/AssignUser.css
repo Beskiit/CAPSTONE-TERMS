@@ -179,27 +179,77 @@
     margin-top:12px; 
   }
   
-  .btn {
-   padding:8px 14px; 
-   border-radius:8px; 
-   border:1px solid #ccc; 
-   background:#1E56A0; 
-   cursor:pointer; 
-  }
-  
-  .btn-danger {
-    background:#e53935; 
-    color:#fff; 
-    border-color:#e53935;
-  }
-  
-  .action-btn{
-    align-self: center;
-  }
-  
-  .status-txt{
-    padding: 2px 12px;
-    background-color: #e53935;
-    border-radius: 2rem;
-    color: white;
-  }
+.btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: #f5f5f5;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #1E56A0;
+  border-color: #1E56A0;
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #184885;
+}
+
+.btn-danger {
+  background: #e53935;
+  color: #fff;
+  border-color: #e53935;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-action {
+  padding: 6px 12px;
+  border-radius: 20px;
+  border: none;
+  background: #1E56A0;
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.2s ease;
+}
+
+.btn-action:hover {
+  background: #184885;
+}
+
+.btn-action.secondary {
+  background: #f1f3f4;
+  color: #333;
+}
+
+.btn-action.secondary:hover {
+  background: #e0e0e0;
+}
+
+.form-error {
+  margin: 0;
+  color: #d93025;
+  font-size: 0.9rem;
+}
+
+.empty-row {
+  text-align: center;
+  color: #666;
+}

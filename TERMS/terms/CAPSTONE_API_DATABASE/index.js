@@ -22,6 +22,7 @@ import reportStatus from "./routes/reportStatusRoutes.js";
 import reportCountsRoutes from "./routes/reportCountsRoutes.js";
 import notificationsRouter from "./routes/notifications.js";
 import aiRouter from "./routes/ai.js";
+import { requireAuth } from "./middleware/auth.js";
 
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
@@ -2996,7 +2997,9 @@ app.get("/reports/upcoming-deadlines/health", (req, res) => {
 });
 
 // Get single report assignment for editing (must be defined BEFORE the param route)
-app.get("/reports/assignment/:reportId", async (req, res) => {
+// NOTE: This route is duplicated later - keeping the more complete version below
+// This one is kept for backward compatibility but should be removed if not needed
+app.get("/reports/assignment/:reportId", requireAuth, async (req, res) => {
   try {
     const { reportId } = req.params;
     console.log('🔄 [DEBUG] Fetching report assignment for editing:', reportId);
@@ -3016,12 +3019,14 @@ app.get("/reports/assignment/:reportId", async (req, res) => {
         ra.is_given,
         ra.is_archived,
         ra.allow_late,
+        ra.grade_level_id,
         c.category_name,
         sc.sub_category_name,
         sy.school_year,
-        ud.name AS given_by_name
+        ud.name AS given_by_name,
+        ud.role AS given_by_role
       FROM report_assignment ra
-      JOIN category c ON ra.category_id = c.category_id
+      LEFT JOIN category c ON ra.category_id = c.category_id
       LEFT JOIN sub_category sc ON ra.sub_category_id = sc.sub_category_id
       LEFT JOIN user_details ud ON ra.given_by = ud.user_id
       LEFT JOIN school_year sy ON sy.year_id = ra.year
@@ -3154,11 +3159,13 @@ app.use("/reports/accomplishment", accomplishmentRouter);
 app.get("/reports/laempl-mps/:submissionId/peers", async (req, res) => {
   try {
     const { submissionId } = req.params;
-    console.log("Fetching peer LAEMPL & MPS data for submission:", submissionId);
+    const { pra: parentAssignmentId, ra: reportAssignmentId } = req.query;
+    
+    console.log("[API] Peer query - submissionId:", submissionId, "pra:", parentAssignmentId, "ra:", reportAssignmentId);
     
     // Get the current submission to find the report assignment
     const currentSubmissionQuery = `
-      SELECT s.report_assignment_id, s.submitted_by, ra.title, ra.quarter, ra.year
+      SELECT s.report_assignment_id, s.submitted_by, ra.title, ra.quarter, ra.year, ra.parent_report_assignment_id
       FROM submission s
       JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
       WHERE s.submission_id = ?
@@ -3171,63 +3178,221 @@ app.get("/reports/laempl-mps/:submissionId/peers", async (req, res) => {
       });
     });
     
-    console.log("Current submission details:", currentSubmission);
-    
     if (!currentSubmission) {
-      console.log("No current submission found for ID:", submissionId);
       return res.status(404).json({ error: "Submission not found" });
     }
     
-    console.log("Current submission report_assignment_id:", currentSubmission.report_assignment_id);
+    // Determine requester role for filtering
+    const requesterRole = (req.user?.role || '').toLowerCase();
+    const roleClause = requesterRole === 'principal'
+      ? "LOWER(ud.role) IN ('teacher','coordinator')"
+      : "LOWER(ud.role) = 'teacher'";
     
-    // Find peer submissions with the same report assignment and LAEMPL & MPS type
-    // First try to find peers in the same report assignment
-    let peersQuery = `
-      SELECT 
-        s.submission_id,
-        s.status,
-        s.fields,
-        s.date_submitted,
-        ud.name,
-        ud.role,
-        gl.grade_level,
-        sec.section,
-        ts.role as teacher_role,
-        ra.title as report_title
-      FROM submission s
-      JOIN user_details ud ON s.submitted_by = ud.user_id
-      JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
-      LEFT JOIN teacher_section ts ON s.submitted_by = ts.user_id
-      LEFT JOIN section sec ON ts.section_id = sec.section_id
-      LEFT JOIN grade_level gl ON sec.grade_level_id = gl.grade_level_id
-      WHERE s.report_assignment_id = ?
-        AND s.submission_id != ?
-        AND s.status >= 2
-        AND JSON_EXTRACT(s.fields, '$.type') IN ('LAEMPL', 'LAEMPL_TEACHER', 'LAEMPL_COORDINATOR')
-      ORDER BY s.date_submitted DESC
-    `;
+    // Build query based on parent_assignment_id, report_assignment_id, or same assignment
+    let peersQuery;
+    let queryParams;
     
-    console.log("Executing peer query with params:", [currentSubmission.report_assignment_id, submissionId]);
-    console.log("Peer query SQL:", peersQuery);
+    // Convert parentAssignmentId to number if it's a string
+    const parentId = parentAssignmentId ? Number(parentAssignmentId) : null;
+    console.log("[API] Converted parentId:", parentId);
+    
+    if (parentId) {
+      // Parent-child query: get teacher submissions from child assignments of the parent
+      // Also check for submissions with same grade level and quarter/year if parent link is missing
+      
+      // First, get the parent assignment details to match by grade, quarter, year
+      const parentAssignmentQuery = `
+        SELECT grade_level_id, quarter, year, category_id, sub_category_id
+        FROM report_assignment
+        WHERE report_assignment_id = ?
+      `;
+      
+      const parentAssignment = await new Promise((resolve, reject) => {
+        db.query(parentAssignmentQuery, [parentId], (err, results) => {
+          if (err) reject(err);
+          else resolve(results[0]);
+        });
+      });
+      
+      console.log("[API] Parent assignment found:", parentAssignment);
+      
+      if (!parentAssignment) {
+        console.log("[API] Parent assignment not found for ID:", parentId);
+        return res.json([]);
+      }
+      
+      // Debug: Check for child assignments and their submissions
+      const childCheckQuery = `SELECT report_assignment_id, title, parent_report_assignment_id FROM report_assignment WHERE parent_report_assignment_id = ?`;
+      db.query(childCheckQuery, [parentId], async (err, childResults) => {
+        if (!err) {
+          console.log("[API] Child assignments found:", childResults?.length || 0, childResults);
+          
+          // Check submissions for each child assignment
+          if (childResults && childResults.length > 0) {
+            for (const child of childResults) {
+              const subCheckQuery = `
+                SELECT s.submission_id, s.report_assignment_id, s.status, s.submitted_by, 
+                       ud.name, ud.role, 
+                       JSON_EXTRACT(s.fields, '$.type') as submission_type,
+                       JSON_EXTRACT(s.fields, '$.grade') as grade
+                FROM submission s
+                JOIN user_details ud ON s.submitted_by = ud.user_id
+                WHERE s.report_assignment_id = ?
+              `;
+              db.query(subCheckQuery, [child.report_assignment_id], (err2, subResults) => {
+                if (!err2) {
+                  console.log(`[API] Submissions for child assignment ${child.report_assignment_id}:`, subResults?.length || 0, subResults);
+                }
+              });
+            }
+          }
+        }
+      });
+      
+      // Simplified query matching AccomplishmentReport pattern - just check parent link directly
+      // Use JSON_UNQUOTE to remove quotes from JSON string values for comparison
+      peersQuery = `
+        SELECT 
+          s.submission_id,
+          s.status,
+          s.fields,
+          s.date_submitted,
+          ud.name,
+          ud.role,
+          gl.grade_level,
+          sec.section as section_name,
+          ts.role as teacher_role,
+          ra.title as report_title,
+          ra.report_assignment_id,
+          ra.parent_report_assignment_id
+        FROM submission s
+        JOIN user_details ud ON s.submitted_by = ud.user_id
+        JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
+        LEFT JOIN teacher_section ts ON s.submitted_by = ts.user_id
+        LEFT JOIN section sec ON ts.section_id = sec.section_id
+        LEFT JOIN grade_level gl ON sec.grade_level_id = gl.grade_level_id
+        WHERE s.submission_id <> ?
+          AND s.status >= 2
+          AND ${roleClause}
+          AND ra.parent_report_assignment_id = ?
+          AND JSON_UNQUOTE(JSON_EXTRACT(s.fields, '$.type')) IN ('LAEMPL', 'LAEMPL_TEACHER')
+        ORDER BY s.date_submitted DESC
+      `;
+      queryParams = [submissionId, parentId];
+    } else if (reportAssignmentId) {
+      // Specific report assignment query
+      peersQuery = `
+        SELECT 
+          s.submission_id,
+          s.status,
+          s.fields,
+          s.date_submitted,
+          ud.name,
+          ud.role,
+          gl.grade_level,
+          sec.section,
+          ts.role as teacher_role,
+          ra.title as report_title
+        FROM submission s
+        JOIN user_details ud ON s.submitted_by = ud.user_id
+        JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
+        LEFT JOIN teacher_section ts ON s.submitted_by = ts.user_id
+        LEFT JOIN section sec ON ts.section_id = sec.section_id
+        LEFT JOIN grade_level gl ON sec.grade_level_id = gl.grade_level_id
+        WHERE s.submission_id <> ?
+          AND s.status >= 2
+          AND ${roleClause}
+          AND s.report_assignment_id = ?
+          AND JSON_EXTRACT(s.fields, '$.type') IN ('LAEMPL', 'LAEMPL_TEACHER', 'LAEMPL_COORDINATOR')
+        ORDER BY s.date_submitted DESC
+      `;
+      queryParams = [submissionId, reportAssignmentId];
+    } else {
+      // Default: same report assignment
+      peersQuery = `
+        SELECT 
+          s.submission_id,
+          s.status,
+          s.fields,
+          s.date_submitted,
+          ud.name,
+          ud.role,
+          gl.grade_level,
+          sec.section,
+          ts.role as teacher_role,
+          ra.title as report_title
+        FROM submission s
+        JOIN user_details ud ON s.submitted_by = ud.user_id
+        JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
+        LEFT JOIN teacher_section ts ON s.submitted_by = ts.user_id
+        LEFT JOIN section sec ON ts.section_id = sec.section_id
+        LEFT JOIN grade_level gl ON sec.grade_level_id = gl.grade_level_id
+        WHERE s.report_assignment_id = ?
+          AND s.submission_id != ?
+          AND s.status >= 2
+          AND ${roleClause}
+          AND JSON_EXTRACT(s.fields, '$.type') IN ('LAEMPL', 'LAEMPL_TEACHER', 'LAEMPL_COORDINATOR')
+        ORDER BY s.date_submitted DESC
+      `;
+      queryParams = [currentSubmission.report_assignment_id, submissionId];
+    }
+    
+    console.log("[API] Executing query with params:", queryParams);
+    console.log("[API] Query SQL:", peersQuery);
+    console.log("[API] Role clause:", roleClause);
+    console.log("[API] Requester role:", requesterRole);
     
     const peers = await new Promise((resolve, reject) => {
-      db.query(peersQuery, [currentSubmission.report_assignment_id, submissionId], (err, results) => {
+      db.query(peersQuery, queryParams, (err, results) => {
         if (err) {
-          console.error("Peer query error:", err);
+          console.error("[API] Query error:", err);
           reject(err);
         } else {
-          console.log("Raw peer query results:", results);
+          console.log("[API] Query returned", results?.length || 0, "peers");
+          if (results && results.length > 0) {
+            console.log("[API] Peer results:", results.map(r => ({
+              submission_id: r.submission_id,
+              status: r.status,
+              role: r.role,
+              report_assignment_id: r.report_assignment_id,
+              parent_report_assignment_id: r.parent_report_assignment_id
+            })));
+          }
           resolve(results);
         }
       });
     });
     
-    console.log("Found", peers.length, "raw peer submissions");
+    // Debug: Let's also run a simpler query to see what's being filtered out
+    if (parentId && peers.length === 0) {
+      const debugSimpleQuery = `
+        SELECT s.submission_id, s.status, s.report_assignment_id, 
+               ud.role, 
+               JSON_EXTRACT(s.fields, '$.type') as type,
+               s.fields as raw_fields,
+               ra.parent_report_assignment_id
+        FROM submission s
+        JOIN user_details ud ON s.submitted_by = ud.user_id
+        JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
+        WHERE ra.parent_report_assignment_id = ?
+      `;
+      db.query(debugSimpleQuery, [parentId], (err, debugResults) => {
+        if (!err && debugResults && debugResults.length > 0) {
+          console.log("[API] DEBUG: All submissions for child assignments (no filters):", debugResults.length);
+          debugResults.forEach((r, idx) => {
+            console.log(`[API] DEBUG [${idx}]: submission_id=${r.submission_id}, status=${r.status}, role=${r.role}, type=${r.type}, type_match=${['LAEMPL', 'LAEMPL_TEACHER'].includes(r.type?.replace(/"/g, ''))}, status_ok=${r.status >= 2}`);
+            // Check if type matches after removing quotes
+            const cleanType = r.type?.replace(/"/g, '').trim();
+            console.log(`[API] DEBUG [${idx}]: Clean type: "${cleanType}", Matches LAEMPL: ${cleanType === 'LAEMPL'}, Matches LAEMPL_TEACHER: ${cleanType === 'LAEMPL_TEACHER'}`);
+          });
+        }
+      });
+    }
     
     // If no peers found in same report assignment, look for teacher submissions across different report assignments for same grade level
     let allPeers = peers;
     if (peers.length === 0) {
-      console.log("No peers found in same report assignment, looking across different report assignments for same grade level...");
+      console.log("[API] No peers found, trying cross-assignment query...");
       
       const crossAssignmentQuery = `
         SELECT 
@@ -3254,133 +3419,31 @@ app.get("/reports/laempl-mps/:submissionId/peers", async (req, res) => {
         ORDER BY s.date_submitted DESC
       `;
       
-      console.log("Executing cross-assignment query for grade level:", currentSubmission.grade || 2);
-      
       const crossAssignmentPeers = await new Promise((resolve, reject) => {
         db.query(crossAssignmentQuery, [currentSubmission.grade || 2], (err, results) => {
           if (err) {
-            console.error("Cross-assignment query error:", err);
             reject(err);
           } else {
-            console.log("Cross-assignment query results:", results);
             resolve(results);
           }
         });
       });
       
       allPeers = crossAssignmentPeers;
-      console.log("Found", allPeers.length, "teacher submissions across different report assignments for grade", currentSubmission.grade || 2);
     }
-    
-    // Let's also check all submissions for this report assignment to see what's available
-        const allSubmissionsQuery = `
-          SELECT 
-            s.submission_id,
-            s.status,
-            s.fields,
-            s.date_submitted,
-            ud.name,
-            ud.role,
-            s.report_assignment_id
-          FROM submission s
-          JOIN user_details ud ON s.submitted_by = ud.user_id
-          WHERE s.report_assignment_id = ?
-          ORDER BY s.date_submitted DESC
-        `;
-    
-    const allSubmissions = await new Promise((resolve, reject) => {
-      db.query(allSubmissionsQuery, [currentSubmission.report_assignment_id], (err, results) => {
-        if (err) {
-          console.error("All submissions query error:", err);
-          reject(err);
-        } else {
-          console.log("All submissions for this report assignment:", results);
-          resolve(results);
-        }
-      });
-    });
-    
-    // Let's also check if there are any teacher submissions at all in the database
-    const anyTeacherSubmissionsQuery = `
-      SELECT 
-        s.submission_id,
-        s.status,
-        s.fields,
-        s.date_submitted,
-        ud.name,
-        ud.role,
-        s.report_assignment_id,
-        ra.title as report_title
-      FROM submission s
-      JOIN user_details ud ON s.submitted_by = ud.user_id
-      JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
-      WHERE ud.role = 'teacher'
-        AND JSON_EXTRACT(s.fields, '$.type') = 'LAEMPL'
-        AND s.status >= 2
-      ORDER BY s.date_submitted DESC
-      LIMIT 10
-    `;
-    
-    const anyTeacherSubmissions = await new Promise((resolve, reject) => {
-      db.query(anyTeacherSubmissionsQuery, [], (err, results) => {
-        if (err) {
-          console.error("Any teacher submissions query error:", err);
-          reject(err);
-        } else {
-          console.log("Any teacher submissions in database:", results);
-          resolve(results);
-        }
-      });
-    });
     
     // Format the peer data
     const formattedPeers = allPeers.map(peer => ({
       submission_id: peer.submission_id,
       teacher_name: peer.name,
       grade_level: peer.grade_level,
-      section_name: peer.section,
+      section_name: peer.section || peer.section_name,
       status: peer.status,
       date_submitted: peer.date_submitted,
       fields: peer.fields,
-      role: peer.role
+      role: peer.role,
+      report_title: peer.report_title
     }));
-    
-    console.log("Found", formattedPeers.length, "peer submissions after filtering");
-    console.log("Formatted peers:", formattedPeers);
-    
-    // Additional debugging: Check if we should look for teacher submissions across different report assignments
-    if (formattedPeers.length === 0) {
-      console.log("=== NO PEER SUBMISSIONS FOUND ===");
-      console.log("Current submission report_assignment_id:", currentSubmission.report_assignment_id);
-      console.log("Looking for teacher submissions in the same report assignment...");
-      console.log("But teacher submissions exist for different report assignments:");
-      
-      anyTeacherSubmissions.forEach(teacher => {
-        console.log(`- Teacher submission ${teacher.submission_id}: report_assignment_id ${teacher.report_assignment_id} (${teacher.report_title})`);
-      });
-      
-      console.log("=== SUGGESTION ===");
-      console.log("The coordinator might need to consolidate teacher submissions from different report assignments.");
-      console.log("Or the teacher submissions need to be created for the same report assignment (ID: 11).");
-      
-      // Let's also check if there are any teacher submissions for the same grade level (Grade 2)
-      const grade2TeacherSubmissions = anyTeacherSubmissions.filter(teacher => {
-        try {
-          const fields = typeof teacher.fields === 'string' ? JSON.parse(teacher.fields) : teacher.fields;
-          return fields.grade === 2;
-        } catch (e) {
-          return false;
-        }
-      });
-      
-      if (grade2TeacherSubmissions.length > 0) {
-        console.log("=== FOUND GRADE 2 TEACHER SUBMISSIONS ===");
-        console.log("These could potentially be consolidated:");
-        grade2TeacherSubmissions.forEach(teacher => {
-          console.log(`- Teacher submission ${teacher.submission_id}: ${teacher.report_title} (Grade 2)`);
-        });
-      }
-    }
     
     res.json(formattedPeers);
     
@@ -3433,6 +3496,36 @@ app.use("/reports/status", reportStatus);
 app.use("/notifications", notificationsRouter);
 app.use("/ai", aiRouter);
 
+// Get sections by grade level
+app.get("/sections/grade/:gradeLevelId", requireAuth, async (req, res) => {
+  try {
+    const { gradeLevelId } = req.params;
+    const query = `
+      SELECT 
+        s.section_id,
+        s.section as section_name,
+        s.grade_level_id,
+        gl.grade_level
+      FROM section s
+      JOIN grade_level gl ON s.grade_level_id = gl.grade_level_id
+      WHERE s.grade_level_id = ?
+      ORDER BY s.section
+    `;
+    
+    const rows = await new Promise((resolve, reject) => {
+      db.query(query, [gradeLevelId], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+    
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching sections by grade:", error);
+    res.status(500).json({ error: "Failed to fetch sections", details: error.message });
+  }
+});
+
 /* ----------------- 404 + Error ----------------- */
 app.use((req, res, _next) => {
   res.status(404).json({ error: "Not Found", path: req.originalUrl });
@@ -3446,48 +3539,6 @@ app.use((err, req, res, _next) => {
   }
   const status = err.status || 500;
   res.status(status).json({ error: err.message || "Server error" });
-});
-
-// Get coordinator's assigned grade level
-app.get("/users/coordinator-grade/:userId", async (req, res) => {
-  try {
-    // Check authentication
-    if (!req.isAuthenticated?.()) {
-      return res.status(401).json({ error: "Not authenticated" });
-    }
-    
-    const { userId } = req.params;
-    console.log("Fetching coordinator grade for user ID:", userId);
-    
-    const query = `
-      SELECT 
-        cg.grade_level_id,
-        gl.grade_level
-      FROM coordinator_grade cg
-      JOIN grade_level gl ON cg.grade_level_id = gl.grade_level_id
-      WHERE cg.user_id = ?
-      LIMIT 1
-    `;
-    
-    const rows = await new Promise((resolve, reject) => {
-      db.query(query, [userId], (err, results) => {
-        if (err) reject(err);
-        else resolve(results);
-      });
-    });
-    
-    console.log("Coordinator grade query results:", rows);
-    
-    if (rows.length > 0) {
-      res.json(rows[0]);
-    } else {
-      console.log("No grade level found for coordinator:", userId);
-      res.status(404).json({ error: "No grade level assigned to coordinator" });
-    }
-  } catch (error) {
-    console.error("Error fetching coordinator grade:", error);
-    res.status(500).json({ error: "Failed to fetch coordinator grade", details: error.message });
-  }
 });
 
 // Test endpoint to check sections without authentication
@@ -3601,41 +3652,6 @@ app.patch("/submissions/:id/fix-coordinator-type", async (req, res) => {
   }
 });
 
-// Get sections by grade level
-app.get("/sections/grade/:gradeLevelId", async (req, res) => {
-  try {
-    // Check authentication
-    if (!req.isAuthenticated?.()) {
-      return res.status(401).json({ error: "Not authenticated" });
-    }
-    
-    const { gradeLevelId } = req.params;
-    const query = `
-      SELECT 
-        s.section_id,
-        s.section as section_name,
-        s.grade_level_id,
-        gl.grade_level
-      FROM section s
-      JOIN grade_level gl ON s.grade_level_id = gl.grade_level_id
-      WHERE s.grade_level_id = ?
-      ORDER BY s.section
-    `;
-    
-    const rows = await new Promise((resolve, reject) => {
-      db.query(query, [gradeLevelId], (err, results) => {
-        if (err) reject(err);
-        else resolve(results);
-      });
-    });
-    
-    res.json(rows);
-  } catch (error) {
-    console.error("Error fetching sections by grade:", error);
-    res.status(500).json({ error: "Failed to fetch sections", details: error.message });
-  }
-});
-
 // Update report status from 0 (not given) to 1 (pending) when coordinator assigns to teachers
 app.post("/reports/update-status-to-pending", async (req, res) => {
   try {
@@ -3679,60 +3695,7 @@ app.post("/reports/update-status-to-pending", async (req, res) => {
   }
 });
 
-// Get single report assignment for editing
-app.get("/reports/assignment/:reportId", async (req, res) => {
-  try {
-    const { reportId } = req.params;
-    
-    console.log('🔄 [DEBUG] Fetching report assignment for editing:', reportId);
-
-    const query = `
-      SELECT 
-        ra.report_assignment_id,
-        ra.category_id,
-        ra.sub_category_id,
-        ra.given_by,
-        ra.quarter,
-        ra.year,
-        ra.title,
-        ra.from_date,
-        ra.to_date,
-        ra.instruction,
-        ra.is_given,
-        ra.is_archived,
-        ra.allow_late,
-        ra.number_of_submission,
-        c.category_name,
-        sc.sub_category_name,
-        sy.school_year,
-        u.name as given_by_name,
-        u.role as given_by_role
-      FROM report_assignment ra
-      LEFT JOIN category c ON c.category_id = ra.category_id
-      LEFT JOIN sub_category sc ON sc.sub_category_id = ra.sub_category_id
-      LEFT JOIN school_year sy ON sy.year_id = ra.year
-      LEFT JOIN user_details u ON u.user_id = ra.given_by
-      WHERE ra.report_assignment_id = ?
-    `;
-    
-    const result = await new Promise((resolve, reject) => {
-      db.query(query, [reportId], (err, results) => {
-        if (err) reject(err);
-        else resolve(results);
-      });
-    });
-
-    if (result.length === 0) {
-      return res.status(404).json({ error: "Report assignment not found" });
-    }
-
-    console.log('🔄 [DEBUG] Report assignment data:', result[0]);
-    res.json(result[0]);
-  } catch (error) {
-    console.error("Error fetching report assignment:", error);
-    res.status(500).json({ error: "Failed to fetch report assignment", details: error.message });
-  }
-});
+// Duplicate route removed - using the one above at line 3000
 
 // Update report assignment
 app.put("/reports/assignment/:reportId", async (req, res) => {
@@ -3746,14 +3709,14 @@ app.put("/reports/assignment/:reportId", async (req, res) => {
     const updateQuery = `
       UPDATE report_assignment 
       SET title = ?, quarter = ?, year = ?, from_date = ?, to_date = ?, 
-          instruction = ?, is_given = ?, allow_late = ?, number_of_submission = ?
+          instruction = ?, is_given = ?, allow_late = ?
       WHERE report_assignment_id = ?
     `;
     
     const updateResult = await new Promise((resolve, reject) => {
       db.query(updateQuery, [
         title, quarter, year, from_date, to_date, 
-        instruction, is_given, allow_late, number_of_submission, reportId
+        instruction, is_given, allow_late, reportId
       ], (err, results) => {
         if (err) reject(err);
         else resolve(results);
@@ -3762,47 +3725,110 @@ app.put("/reports/assignment/:reportId", async (req, res) => {
 
     console.log('🔄 [DEBUG] Updated report assignment:', updateResult.affectedRows);
 
-    // Update existing submissions for the new assignees
-    if (assignees && assignees.length > 0) {
-      // First, get existing submissions for this report
-      const getSubmissionsQuery = `SELECT submission_id FROM submission WHERE report_assignment_id = ?`;
+    // Handle assignees: add new ones, remove old ones, update existing
+    if (assignees && Array.isArray(assignees)) {
+      // Get existing submissions with their assignees
+      const getSubmissionsQuery = `
+        SELECT submission_id, submitted_by, category_id, number_of_submission, fields
+        FROM submission 
+        WHERE report_assignment_id = ?
+      `;
       const existingSubmissions = await new Promise((resolve, reject) => {
         db.query(getSubmissionsQuery, [reportId], (err, results) => {
           if (err) reject(err);
-          else resolve(results);
+          else resolve(results || []);
         });
       });
 
-      // Update existing submissions to new assignees
-      for (const submission of existingSubmissions) {
-        const updateSubmissionQuery = `
-          UPDATE submission 
-          SET submitted_by = ?, status = ?
-          WHERE submission_id = ?
+      const existingAssigneeIds = [...new Set(existingSubmissions.map(s => s.submitted_by))];
+      const newAssigneeIds = assignees.map(id => Number(id));
+      
+      // Identify assignees to remove (exist in DB but not in new list)
+      const assigneesToRemove = existingAssigneeIds.filter(id => !newAssigneeIds.includes(id));
+      
+      // Identify assignees to add (exist in new list but not in DB)
+      const assigneesToAdd = newAssigneeIds.filter(id => !existingAssigneeIds.includes(id));
+      
+      // Identify assignees that remain (exist in both)
+      const assigneesToKeep = newAssigneeIds.filter(id => existingAssigneeIds.includes(id));
+
+      console.log('🔄 [DEBUG] Assignee changes:', {
+        existing: existingAssigneeIds,
+        new: newAssigneeIds,
+        toRemove: assigneesToRemove,
+        toAdd: assigneesToAdd,
+        toKeep: assigneesToKeep
+      });
+
+      // Delete submissions for removed assignees (ONLY for this specific assignment)
+      if (assigneesToRemove.length > 0) {
+        // Use placeholders for IN clause to ensure proper scoping
+        const placeholders = assigneesToRemove.map(() => '?').join(',');
+        const deleteQuery = `
+          DELETE FROM submission 
+          WHERE report_assignment_id = ? AND submitted_by IN (${placeholders})
         `;
-        
-        // Assign to first assignee and set status to pending
         await new Promise((resolve, reject) => {
-          db.query(updateSubmissionQuery, [assignees[0], 1, submission.submission_id], (err, results) => {
+          db.query(deleteQuery, [reportId, ...assigneesToRemove], (err, results) => {
             if (err) reject(err);
-            else resolve(results);
+            else {
+              console.log('🔄 [DEBUG] Deleted submissions for removed assignees (assignment:', reportId, '):', assigneesToRemove);
+              resolve(results);
+            }
           });
         });
       }
 
-      // Create new submissions for additional assignees
-      for (let i = 1; i < assignees.length; i++) {
-        const insertSubmissionQuery = `
-          INSERT INTO submission (report_assignment_id, category_id, submitted_by, status, number_of_submission, fields)
-          SELECT ?, category_id, ?, 1, ?, '{}'
-          FROM report_assignment 
-          WHERE report_assignment_id = ?
-        `;
-        
-        await new Promise((resolve, reject) => {
-          db.query(insertSubmissionQuery, [reportId, assignees[i], number_of_submission, reportId], (err, results) => {
+      // Create new submissions for added assignees
+      if (assigneesToAdd.length > 0) {
+        // Get category_id and default number_of_submission from report_assignment
+        const getAssignmentQuery = `SELECT category_id FROM report_assignment WHERE report_assignment_id = ?`;
+        const assignmentData = await new Promise((resolve, reject) => {
+          db.query(getAssignmentQuery, [reportId], (err, results) => {
             if (err) reject(err);
-            else resolve(results);
+            else resolve(results[0]);
+          });
+        });
+
+        for (const assigneeId of assigneesToAdd) {
+          const insertSubmissionQuery = `
+            INSERT INTO submission (report_assignment_id, category_id, submitted_by, status, number_of_submission, fields)
+            VALUES (?, ?, ?, 1, ?, '{}')
+          `;
+          
+          await new Promise((resolve, reject) => {
+            db.query(insertSubmissionQuery, [
+              reportId, 
+              assignmentData?.category_id || 0, 
+              assigneeId, 
+              number_of_submission || 1
+            ], (err, results) => {
+              if (err) reject(err);
+              else {
+                console.log('🔄 [DEBUG] Created submission for new assignee:', assigneeId);
+                resolve(results);
+              }
+            });
+          });
+        }
+      }
+
+      // Update status to pending (1) for kept assignees (ONLY for this specific assignment)
+      if (assigneesToKeep.length > 0) {
+        // Use placeholders for IN clause to ensure proper scoping
+        const placeholders = assigneesToKeep.map(() => '?').join(',');
+        const updateStatusQuery = `
+          UPDATE submission 
+          SET status = 1
+          WHERE report_assignment_id = ? AND submitted_by IN (${placeholders})
+        `;
+        await new Promise((resolve, reject) => {
+          db.query(updateStatusQuery, [reportId, ...assigneesToKeep], (err, results) => {
+            if (err) reject(err);
+            else {
+              console.log('🔄 [DEBUG] Updated status for kept assignees (assignment:', reportId, '):', assigneesToKeep);
+              resolve(results);
+            }
           });
         });
       }

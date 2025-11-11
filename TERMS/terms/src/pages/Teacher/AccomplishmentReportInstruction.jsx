@@ -14,6 +14,19 @@ const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives
 
 function AccomplishmentReportInstruction() {
     const navigate = useNavigate();
+    const formatDateOnly = (val) => {
+        if (!val) return 'N/A';
+        try {
+            const d = new Date(val);
+            if (Number.isNaN(d.getTime())) return String(val).split('T')[0] || String(val);
+            const yyyy = d.getFullYear();
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            return `${mm}/${dd}/${yyyy}`;
+        } catch {
+            return String(val).split('T')[0] || String(val);
+        }
+    };
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
     const { search, state } = useLocation();
@@ -37,6 +50,7 @@ function AccomplishmentReportInstruction() {
     const isPrincipalSidebar = role === "principal";
     const recipientsCount = Number(state?.recipients_count || 0);
     const isGivenFlag = state?.is_given === 1 || state?.is_given === '1';
+    const fromAssignedReport = state?.fromAssignedReport === true;
 
 
     useEffect(() => {
@@ -107,6 +121,68 @@ function AccomplishmentReportInstruction() {
         navigate(`/SetReport?reportId=${reportAssignmentId}&isPrincipalReport=true`);
     };
 
+    const handleViewSubmission = () => {
+        // Use submissionId if available, otherwise fallback to reportAssignmentId
+        const idToUse = submissionId || reportAssignmentId;
+        if (idToUse) {
+            navigate(`/AssignedReportData/${idToUse}`, { 
+                state: { 
+                    assignmentTitle: title,
+                    report_assignment_id: reportAssignmentId
+                } 
+            });
+        } else {
+            toast.error("Unable to view submission: missing assignment or submission ID.");
+        }
+    };
+
+    const handleEdit = async () => {
+        if (!reportAssignmentId) {
+            toast.error("Missing report assignment ID.");
+            return;
+        }
+        
+        try {
+            // Fetch full assignment details to pass to SetReport
+            const res = await fetch(`${API_BASE}/reports/assignment/${reportAssignmentId}`, {
+                credentials: "include"
+            });
+            
+            if (res.ok) {
+                const assignmentData = await res.json();
+                
+                // Also fetch submissions to get assignees
+                const subRes = await fetch(`${API_BASE}/submissions/by-assignment/${reportAssignmentId}`, {
+                    credentials: "include"
+                });
+                
+                let assignees = [];
+                if (subRes.ok) {
+                    const submissions = await subRes.json();
+                    // Get unique submitted_by user IDs
+                    assignees = [...new Set(submissions.map(s => s.submitted_by).filter(Boolean))];
+                }
+                
+                // Navigate with all assignment data in state
+                navigate(`/SetReport?reportId=${reportAssignmentId}&isPrincipalReport=true`, {
+                    state: {
+                        assignmentData: assignmentData,
+                        assignees: assignees,
+                        prefillData: true, // Flag to indicate data should be pre-filled
+                        fromAssignedReport: fromAssignedReport // Pass the flag to allow editing even if is_given = 1
+                    }
+                });
+            } else {
+                // Fallback to just passing reportId
+                navigate(`/SetReport?reportId=${reportAssignmentId}&isPrincipalReport=true`);
+            }
+        } catch (error) {
+            console.error("Error fetching assignment data:", error);
+            // Fallback to just passing reportId
+            navigate(`/SetReport?reportId=${reportAssignmentId}&isPrincipalReport=true`);
+        }
+    };
+
     return (
         <>
         <Header userText={user ? user.name : "Guest"} />
@@ -119,14 +195,48 @@ function AccomplishmentReportInstruction() {
                     <div className="dashboard-main">
                         <h2>Accomplishment Report</h2>
                     </div>
-                    <div className="content">
-                        <h3 className="header">Instructions</h3>
-                        <p className="instruction">{instruction || "No instruction provided."}</p>
-                        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                            <button className="instruction-btn" onClick={ensureAndOpenTemplate}>+ Prepare Report</button>
-                            {isCoordinatorSidebar && !forceTeacherView && recipientsCount < 2 && (
-                                <button className="instruction-btn" onClick={handleSetAsReport}>Set as Report to Teachers</button>
-                            )}
+                    <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
+                        <div className="content" style={{ flex: 1 }}>
+                            <h3 className="header">Instructions</h3>
+                            <p className="instruction">{instruction || "No instruction provided."}</p>
+                            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                                {fromAssignedReport ? (
+                                    <>
+                                        <button className="instruction-btn" onClick={handleViewSubmission}>View Submission</button>
+                                        <button className="instruction-btn" onClick={handleEdit}>Edit</button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <button className="instruction-btn" onClick={ensureAndOpenTemplate}>+ Prepare Report</button>
+                                        {isCoordinatorSidebar && !forceTeacherView && recipientsCount < 2 && (
+                                            <button className="instruction-btn" onClick={handleSetAsReport}>Set as Report to Teachers</button>
+                                        )}
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                        <div style={{ width: '300px', backgroundColor: '#fff', borderRadius: '8px', padding: '16px', border: '1px solid #ccc' }}>
+                            <div style={{ marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid #ccc' }}>
+                                <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', fontWeight: 'bold' }}>Assignment</h3>
+                                <div style={{ marginBottom: '8px' }}>
+                                    <span style={{ fontWeight: '500' }}>Type:</span> <span>{state?.category_name || category_name || 'N/A'}</span>
+                                </div>
+                            </div>
+                            <div>
+                                <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', fontWeight: 'bold' }}>Details</h3>
+                                <div style={{ marginBottom: '8px' }}>
+                                    <span style={{ fontWeight: '500' }}>Title:</span> <span>{title || 'N/A'}</span>
+                                </div>
+                                <div style={{ marginBottom: '8px' }}>
+                                    <span style={{ fontWeight: '500' }}>Start Date:</span> <span>{formatDateOnly(fromDate)}</span>
+                                </div>
+                                <div style={{ marginBottom: '8px' }}>
+                                    <span style={{ fontWeight: '500' }}>Due Date:</span> <span>{formatDateOnly(toDate)}</span>
+                                </div>
+                                <div style={{ marginBottom: '8px' }}>
+                                    <span style={{ fontWeight: '500' }}>Report Type:</span> <span>{state?.sub_category_name || 'N/A'}</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

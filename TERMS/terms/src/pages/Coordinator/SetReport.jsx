@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import Header from "../../components/shared/Header.jsx";
 import Breadcrumb from "../../components/Breadcrumb.jsx";
 import Sidebar from "../../components/shared/SidebarCoordinator.jsx";
@@ -25,6 +25,7 @@ const TEMPLATE_MAP = {
 function SetReport() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const [user, setUser] = useState(null);
   const role = (user?.role || "").toLowerCase();
   const isCoordinator = role === "coordinator";
@@ -34,6 +35,7 @@ function SetReport() {
   const [editingReportId, setEditingReportId] = useState(null);
   const [isEditingPrincipalReport, setIsEditingPrincipalReport] = useState(false);
   const [originalReportData, setOriginalReportData] = useState(null);
+  const [subjectToExtractFromTitle, setSubjectToExtractFromTitle] = useState(null);
 
   const [users, setUsers] = useState([]);
   const [usersWithGrades, setUsersWithGrades] = useState([]);
@@ -111,6 +113,12 @@ function SetReport() {
 
   // Confirmation Modal
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  
+  // LAEMPL & MPS assignments for grade level auto-fill
+  const [laemplAssignments, setLaemplAssignments] = useState([]);
+  
+  // Store coordinator's inherited subject IDs for auto-population
+  const [inheritedSubjectIds, setInheritedSubjectIds] = useState([]);
 
   // Preview image resolver
   const previewSrc = useMemo(() => {
@@ -147,11 +155,26 @@ function SetReport() {
     const isLAEMPLMPS = selectedSubCategory === "3"; // LAEMPL & MPS sub-category ID
     
     if (isLAEMPLMPS && selectedGradeLevel) {
-      // Filter users by grade level for LAEMPL & MPS
-      const filteredUsers = usersWithGrades.filter(user => 
+      // Filter users by grade level for LAEMPL & MPS, but always include coordinators
+      const filteredTeachers = usersWithGrades.filter(user => 
         user.grade_level == selectedGradeLevel
       );
-      return filteredUsers;
+      
+      // Always include coordinators (they don't have grade_level in usersWithGrades)
+      const coordinatorsList = Array.isArray(coordinators) ? coordinators : [];
+      const byId = new Map();
+      
+      // Add filtered teachers
+      filteredTeachers.forEach((u) => {
+        if (u && u.user_id != null) byId.set(u.user_id, u);
+      });
+      
+      // Add coordinators (they should always be available for LAEMPL & MPS)
+      coordinatorsList.forEach((u) => {
+        if (u && u.user_id != null) byId.set(u.user_id, u);
+      });
+      
+      return Array.from(byId.values());
     }
     
     // Default behavior for other report types
@@ -174,6 +197,17 @@ function SetReport() {
       return user?.role?.toLowerCase() === 'coordinator';
     });
   }, [selectedTeachers, selectedTeacher, usersWithGrades]);
+
+  // Get the selected coordinator ID for LAEMPL & MPS
+  const selectedCoordinatorId = useMemo(() => {
+    if (!isPrincipal || selectedSubCategory !== "3") return null;
+    const allSelectedUsers = [...selectedTeachers, selectedTeacher].filter(Boolean);
+    const coordinator = allSelectedUsers.find((userId) => {
+      const user = usersWithGrades.find(u => u.user_id === userId);
+      return user?.role?.toLowerCase() === 'coordinator';
+    });
+    return coordinator ?? null;
+  }, [isPrincipal, selectedSubCategory, selectedTeachers, selectedTeacher, usersWithGrades]);
 
   // ✅ Load logged-in user
   useEffect(() => {
@@ -281,6 +315,89 @@ function SetReport() {
     }
   }, [isPrincipal]);
 
+  // ✅ Fetch LAEMPL & MPS assignments for principals
+  useEffect(() => {
+    if (!isPrincipal) return;
+
+    const fetchLaemplAssignments = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/reports/laempl-mps/assignments`, {
+          credentials: "include",
+        });
+        if (!res.ok) {
+          console.warn("[SetReport] Failed to fetch LAEMPL & MPS assignments, status:", res.status);
+          return;
+        }
+        const data = await res.json();
+        console.log("[SetReport] Fetched LAEMPL & MPS assignments:", data);
+        setLaemplAssignments(Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.error("[SetReport] Failed to fetch LAEMPL & MPS assignments:", err);
+      }
+    };
+
+    fetchLaemplAssignments();
+  }, [isPrincipal]);
+
+  // ✅ Auto-fill grade level when coordinator is selected for LAEMPL & MPS
+  useEffect(() => {
+    if (!isPrincipal || selectedSubCategory !== "3") return;
+    if (!selectedCoordinatorId) {
+      // Clear grade level if no coordinator selected
+      if (selectedGradeLevel) setSelectedGradeLevel("");
+      return;
+    }
+
+    const fetchGradeLevel = async () => {
+      try {
+        console.log("[SetReport] Fetching grade level for coordinator ID:", selectedCoordinatorId);
+        
+        // First, try to get from LAEMPL & MPS assignments
+        const assignment = laemplAssignments.find(
+          (a) => Number(a.coordinator_user_id) === Number(selectedCoordinatorId)
+        );
+
+        if (assignment?.grade_level_id) {
+          const gl = String(assignment.grade_level_id);
+          console.log("[SetReport] Setting grade level to:", gl, "(from LAEMPL & MPS assignment)");
+          if (selectedGradeLevel !== gl) setSelectedGradeLevel(gl);
+          return;
+        }
+
+        // Fallback to coordinator_grade table
+        console.log("[SetReport] No LAEMPL & MPS assignment found, checking coordinator_grade table");
+        const cgRes = await fetch(`${API_BASE}/users/coordinator-grade/${selectedCoordinatorId}`, {
+          credentials: "include",
+        });
+        
+        if (cgRes.ok) {
+          const cgData = await cgRes.json();
+          if (cgData?.grade_level_id) {
+            const gl = String(cgData.grade_level_id);
+            console.log("[SetReport] Setting grade level to:", gl, "(from coordinator_grade table - fallback)");
+            if (selectedGradeLevel !== gl) setSelectedGradeLevel(gl);
+          } else {
+            console.log("[SetReport] No grade level found in coordinator_grade table");
+            if (selectedGradeLevel) setSelectedGradeLevel("");
+          }
+        } else if (cgRes.status === 404) {
+          console.log("[SetReport] Coordinator grade not found (404)");
+          if (selectedGradeLevel) setSelectedGradeLevel("");
+        }
+      } catch (err) {
+        console.error("[SetReport] Failed to fetch coordinator grade:", err);
+        if (selectedGradeLevel) setSelectedGradeLevel("");
+      }
+    };
+
+    fetchGradeLevel();
+  }, [isPrincipal, selectedSubCategory, selectedCoordinatorId, laemplAssignments, selectedGradeLevel]);
+
+  // Lock grade level when it's auto-filled for LAEMPL & MPS
+  const shouldLockGradeLevel = useMemo(() => {
+    return isPrincipal && selectedSubCategory === "3" && selectedCoordinatorId != null && selectedGradeLevel != null;
+  }, [isPrincipal, selectedSubCategory, selectedCoordinatorId, selectedGradeLevel]);
+
   // ✅ Load categories
   useEffect(() => {
     const fetchCategories = async () => {
@@ -329,6 +446,167 @@ function SetReport() {
     };
     fetchGradeLevels();
   }, []);
+
+  // ✅ Auto-populate grade level for coordinators when Category is "Quarterly Achievement Test" and Sub-Category is "LAEMPL & MPS"
+  useEffect(() => {
+    // Only for coordinators
+    if (!isCoordinator || !user?.user_id) return;
+    
+    // Include editingReportId in dependencies so we refetch when editing a different assignment
+    
+    // Check if Category is "Quarterly Achievement Test" (category_id = 1) and Sub-Category is "LAEMPL & MPS" (sub_category_id = 3)
+    const isQuarterlyAchievementTest = String(selectedCategory) === "1";
+    const isLAEMPLMPS = String(selectedSubCategory) === "3";
+    
+    if (!isQuarterlyAchievementTest || !isLAEMPLMPS) {
+      // Clear grade level if conditions are not met
+      if (selectedGradeLevel && isQuarterlyAchievementTest && !isLAEMPLMPS) {
+        // Only clear if we're still on Quarterly Achievement Test but not LAEMPL & MPS
+        // Don't clear if category changed
+      }
+      return;
+    }
+
+    // Fetch coordinator's assigned grade level from report_assignment
+    const fetchCoordinatorGrade = async () => {
+      try {
+        console.log("[SetReport] Fetching coordinator's LAEMPL & MPS grade level for user:", user.user_id);
+        const res = await fetch(`${API_BASE}/reports/laempl-mps/coordinator-grade`, {
+          credentials: "include"
+        });
+        
+        if (!res.ok) {
+          console.warn("[SetReport] Failed to fetch coordinator grade level, status:", res.status);
+          return;
+        }
+        
+        const data = await res.json();
+        console.log("[SetReport] Coordinator grade level data:", data);
+        console.log("[SetReport] Full API response:", JSON.stringify(data, null, 2));
+        
+        if (data?.grade_level_id) {
+          const gradeLevelId = String(data.grade_level_id);
+          console.log("[SetReport] Setting grade level to:", gradeLevelId, "(Grade", data.grade_level, ")");
+          if (selectedGradeLevel !== gradeLevelId) {
+            setSelectedGradeLevel(gradeLevelId);
+          }
+          
+          // Store subject IDs for auto-population (will be set when subjects list is loaded)
+          // BUT skip if we're editing a specific report (extracting from title)
+          if (editingReportId) {
+            console.log("[SetReport] Skipping inherited subjects - editing specific report, will extract from title");
+            setInheritedSubjectIds([]);
+          } else if (data?.subject_ids && Array.isArray(data.subject_ids) && data.subject_ids.length > 0) {
+            const subjectIds = data.subject_ids.map(id => String(id));
+            console.log("[SetReport] Storing inherited subject IDs:", subjectIds);
+            setInheritedSubjectIds(subjectIds);
+          } else {
+            console.log("[SetReport] No subjects found for coordinator's LAEMPL & MPS assignment. subject_ids:", data?.subject_ids);
+            setInheritedSubjectIds([]);
+          }
+        } else {
+          console.log("[SetReport] No grade level assigned to coordinator for LAEMPL & MPS");
+          setInheritedSubjectIds([]);
+          // Don't clear existing selection if no assignment found
+        }
+      } catch (err) {
+        console.error("[SetReport] Failed to fetch coordinator grade level:", err);
+      }
+    };
+
+    fetchCoordinatorGrade();
+  }, [isCoordinator, user?.user_id, selectedCategory, selectedSubCategory, selectedGradeLevel, editingReportId, subjectToExtractFromTitle]);
+
+  // ✅ Auto-populate subjects when they're loaded and we have inherited subject IDs
+  useEffect(() => {
+    // Only for coordinators with LAEMPL & MPS
+    if (!isCoordinator) return;
+    const isQuarterlyAchievementTest = String(selectedCategory) === "1";
+    const isLAEMPLMPS = String(selectedSubCategory) === "3";
+    if (!isQuarterlyAchievementTest || !isLAEMPLMPS) {
+      setInheritedSubjectIds([]);
+      return;
+    }
+    
+    // Skip auto-population if we're extracting subject from title (editing specific report)
+    if (subjectToExtractFromTitle) {
+      console.log("[SetReport] Skipping inherited subjects auto-population - extracting from title instead");
+      return;
+    }
+    
+    console.log("[SetReport] Subject auto-population check:", {
+      inheritedSubjectIds,
+      subjectsCount: subjects.length,
+      selectedSubjectsCount: selectedSubjects.length
+    });
+    
+    // If we have inherited subject IDs and subjects are loaded, auto-populate
+    if (inheritedSubjectIds.length > 0 && subjects.length > 0) {
+      // Verify that the subject IDs exist in the available subjects list
+      const validSubjectIds = inheritedSubjectIds.filter(id => 
+        subjects.some(s => String(s.subject_id) === id)
+      );
+      
+      console.log("[SetReport] Valid subject IDs after filtering:", validSubjectIds);
+      
+      if (validSubjectIds.length > 0) {
+        // Convert to numbers to match subject.subject_id type
+        const numericSubjectIds = validSubjectIds.map(id => Number(id));
+        
+        // Only set if the current selection is different or empty
+        if (selectedSubjects.length === 0 || 
+            selectedSubjects.length !== numericSubjectIds.length ||
+            !numericSubjectIds.every(id => selectedSubjects.includes(id))) {
+          console.log("[SetReport] Auto-populating subjects:", numericSubjectIds);
+          setSelectedSubjects(numericSubjectIds);
+        } else {
+          console.log("[SetReport] Subjects already match, skipping auto-population");
+        }
+      } else {
+        console.log("[SetReport] No valid subject IDs found after filtering with available subjects");
+      }
+    } else {
+      console.log("[SetReport] Waiting for subjects to load or inherited IDs. inheritedSubjectIds:", inheritedSubjectIds.length, "subjects:", subjects.length);
+    }
+  }, [isCoordinator, selectedCategory, selectedSubCategory, inheritedSubjectIds, subjects, selectedSubjects, subjectToExtractFromTitle]);
+
+  // ✅ Extract and set subject from report title when editing
+  useEffect(() => {
+    // Only for LAEMPL & MPS reports when we have a subject name to extract
+    if (!subjectToExtractFromTitle || 
+        String(selectedCategory) !== "1" || 
+        String(selectedSubCategory) !== "3" ||
+        subjects.length === 0) {
+      return;
+    }
+    
+    console.log('[SetReport] Looking for subject:', subjectToExtractFromTitle, 'in', subjects.length, 'subjects');
+    
+    const matchingSubject = subjects.find(s => {
+      const subjectName = s.subject_name?.trim();
+      // Try exact match first
+      if (subjectName === subjectToExtractFromTitle) return true;
+      // Try matching if subject name starts with the extracted name (handles cases like "GMRC (15 - 25 points)")
+      if (subjectName && subjectName.startsWith(subjectToExtractFromTitle)) return true;
+      // Try matching if extracted name starts with subject name
+      if (subjectToExtractFromTitle.startsWith(subjectName)) return true;
+      return false;
+    });
+    
+    if (matchingSubject) {
+      console.log('[SetReport] Found matching subject from title:', matchingSubject.subject_id, matchingSubject.subject_name);
+      // Set ONLY this subject (clear any other selections)
+      setSelectedSubjects([matchingSubject.subject_id]);
+      // Clear inherited subject IDs to prevent auto-population from overriding
+      setInheritedSubjectIds([]);
+      // Clear the extraction flag
+      setSubjectToExtractFromTitle(null);
+    } else {
+      console.log('[SetReport] No matching subject found for:', subjectToExtractFromTitle, 'Available subjects:', subjects.map(s => s.subject_name));
+      // Clear the extraction flag even if not found to prevent infinite loop
+      setSubjectToExtractFromTitle(null);
+    }
+  }, [subjectToExtractFromTitle, subjects, selectedCategory, selectedSubCategory, selectedSubjects]);
 
   // ✅ Load subjects when grade level changes
   useEffect(() => {
@@ -419,23 +697,44 @@ function SetReport() {
   const loadReportData = async (reportId) => {
     try {
       console.log('🔄 [DEBUG] Loading report data for editing:', reportId);
+      console.log('🔄 [DEBUG] API_BASE:', API_BASE);
       
       const res = await fetch(`${API_BASE}/reports/assignment/${reportId}`, {
         credentials: "include"
       });
       
+      console.log('🔄 [DEBUG] Response status:', res.status, res.statusText);
+      
       if (!res.ok) {
-        throw new Error('Failed to fetch report data');
+        const errorText = await res.text().catch(() => 'Unknown error');
+        console.error('🔄 [DEBUG] Response error:', errorText);
+        throw new Error(`Failed to fetch report data: ${res.status} ${res.statusText}. ${errorText}`);
       }
       
       const reportData = await res.json();
       console.log('🔄 [DEBUG] Loaded report data:', reportData);
+      
+      if (!reportData || !reportData.report_assignment_id) {
+        throw new Error('Invalid report data received from server');
+      }
 
-      // Guard: coordinators cannot edit when already given
-      if (isCoordinator && (reportData?.is_given === 1 || reportData?.is_given === '1')) {
+      // Guard: coordinators cannot edit when already given (unless coming from AssignedReport)
+      const fromAssignedReport = location.state?.fromAssignedReport || location.state?.prefillData;
+      if (isCoordinator && (reportData?.is_given === 1 || reportData?.is_given === '1') && !fromAssignedReport) {
         toast.error('This report has already been given to teachers.');
         navigate(-1);
         return;
+      }
+      
+      // If coming from AssignedReport and report is already given, show a warning but allow editing
+      if (isCoordinator && (reportData?.is_given === 1 || reportData?.is_given === '1') && fromAssignedReport) {
+        toast('This report has already been given to teachers. Changes may affect existing submissions.', {
+          icon: '⚠️',
+          style: {
+            background: '#f59e0b',
+            color: '#fff',
+          },
+        });
       }
       
       // Store original data
@@ -477,11 +776,69 @@ function SetReport() {
         setSelectedQuarter(reportData.quarter.toString());
       }
       
+      // Fetch and set assignees from submissions
+      try {
+        console.log('[SetReport] Fetching assignees for report:', reportId);
+        const subRes = await fetch(`${API_BASE}/submissions/by-assignment/${reportId}`, {
+          credentials: "include"
+        });
+        
+        console.log('[SetReport] Submissions response status:', subRes.status);
+        
+        if (subRes.ok) {
+          const submissions = await subRes.json();
+          console.log('[SetReport] Received submissions:', submissions);
+          
+          // Get unique submitted_by user IDs (these are the assignees)
+          const assigneeIds = [...new Set(submissions.map(s => s.submitted_by).filter(Boolean))];
+          console.log('[SetReport] Extracted assignee IDs:', assigneeIds);
+          
+          if (assigneeIds.length > 0) {
+            // Always use selectedTeachers for the multi-select UI
+            // Convert all assignee IDs to strings for consistency
+            const assigneeIdsAsStrings = assigneeIds.map(id => String(id));
+            console.log('[SetReport] Setting selectedTeachers to:', assigneeIdsAsStrings);
+            setSelectedTeachers(assigneeIdsAsStrings);
+            setSelectedTeacher(""); // Clear single selection since we're using multi-select
+            console.log('[SetReport] Successfully loaded assignees:', assigneeIds);
+          } else {
+            console.warn('[SetReport] No assignees found in submissions');
+          }
+        } else {
+          const errorText = await subRes.text().catch(() => 'Unknown error');
+          console.error('[SetReport] Failed to fetch assignees. Status:', subRes.status, 'Error:', errorText);
+        }
+      } catch (err) {
+        console.error('[SetReport] Error fetching assignees:', err);
+      }
+      
+      // Extract subject from title for LAEMPL & MPS reports (format: "Title - SubjectName")
+      if (reportData.title && 
+          reportData.category_id === 1 && 
+          reportData.sub_category_id === 3 && 
+          reportData.title.includes(' - ')) {
+        const subjectNameFromTitle = reportData.title.split(' - ').pop()?.trim();
+        console.log('[SetReport] Extracted subject from title:', subjectNameFromTitle);
+        
+        // Store the subject name to match later when subjects list is loaded
+        if (subjectNameFromTitle) {
+          setSubjectToExtractFromTitle(subjectNameFromTitle);
+          // Set grade level first if available, so subjects can load
+          if (reportData.grade_level_id) {
+            setSelectedGradeLevel(String(reportData.grade_level_id));
+          }
+        }
+      } else {
+        setSubjectToExtractFromTitle(null);
+      }
+      
       toast.success('Report data loaded. You can now modify the schedule before assigning to teachers.');
       
     } catch (error) {
       console.error('Error loading report data:', error);
-      toast.error('Failed to load report data');
+      const errorMessage = error.message || 'Failed to load report data';
+      toast.error(errorMessage);
+      // Don't navigate away, let user see the error and try again
     }
   };
 
@@ -636,8 +993,8 @@ function SetReport() {
         toast.error("Please select a grade level for LAEMPL & MPS.");
         return;
       }
-      // Only require subject selection if no coordinator is selected
-      if (!hasCoordinatorSelected && selectedSubjects.length === 0) {
+      // Always require subject selection for LAEMPL & MPS
+      if (selectedSubjects.length === 0) {
         toast.error("Please select at least one subject for LAEMPL & MPS.");
         return;
       }
@@ -750,30 +1107,68 @@ function SetReport() {
       } else if (reportType === "laempl") {
         // Check if this is LAEMPL & MPS with subject selection
         const isLAEMPLMPS = selectedSubCategory === "3"; // LAEMPL & MPS sub-category ID
-        if (isLAEMPLMPS && selectedGradeLevel) {
+        if (isLAEMPLMPS && selectedGradeLevel && selectedSubjects.length > 0) {
+          // For both coordinators and teachers: create separate submissions per subject
+          // The laempl-mps endpoint automatically creates one assignment per subject
+          const subjectIds = selectedSubjects.map((id) => Number(id));
+          
+          // Determine assignees based on whether coordinator or teachers are selected
+          let assigneesList = [];
           if (hasCoordinatorSelected) {
-            // For coordinators: create single submission with all subjects
-            endpoint = `${API_BASE}/reports/laempl-mps-coordinator`;
-            body = {
-              ...base,
-              title: fallbackTitle,
-              grade_level_id: Number(selectedGradeLevel),
-              number_of_submission: numberValue, // INT or NULL
-            };
-          } else if (selectedSubjects.length > 0) {
-            // For teachers: create separate submissions per subject
-            endpoint = `${API_BASE}/reports/laempl-mps`;
-            body = {
-              ...base,
-              title: fallbackTitle,
-              grade_level_id: Number(selectedGradeLevel),
-              subject_ids: selectedSubjects.map((id) => Number(id)),
-              number_of_submission: numberValue, // INT or NULL
-            };
+            // Use the selected coordinator as assignee
+            assigneesList = [selectedCoordinatorId];
           } else {
-            toast.error("Please select subjects for teachers or ensure coordinators are selected.");
+            // Use selected teachers as assignees
+            assigneesList = selectedTeachers.length > 0 ? selectedTeachers : (selectedTeacher ? [selectedTeacher] : []);
+          }
+          
+          // If no assignees selected and we're editing, try to get from original report's submissions
+          if (assigneesList.length === 0 && editingReportId) {
+            try {
+              // Fetch submissions for this report to get the original assignees
+              const subRes = await fetch(`${API_BASE}/submissions/by-assignment/${editingReportId}`, {
+                credentials: "include"
+              });
+              if (subRes.ok) {
+                const submissions = await subRes.json();
+                if (submissions && submissions.length > 0) {
+                  // Extract unique submitted_by user IDs
+                  const originalAssignees = [...new Set(submissions.map(s => s.submitted_by).filter(Boolean))];
+                  if (originalAssignees.length > 0) {
+                    console.log("[SetReport] Using original assignees from submissions:", originalAssignees);
+                    assigneesList = originalAssignees;
+                  }
+                }
+              }
+            } catch (err) {
+              console.warn("[SetReport] Failed to fetch original assignees:", err);
+            }
+          }
+          
+          // Validate assignees are not empty
+          if (assigneesList.length === 0) {
+            toast.error('Please select at least one teacher or coordinator to assign this report to.');
             return;
           }
+          
+          // Ensure all assignees are valid numbers
+          assigneesList = assigneesList.filter(id => id != null && !isNaN(Number(id))).map(id => Number(id));
+          
+          if (assigneesList.length === 0) {
+            toast.error('Invalid assignees selected. Please select valid teachers or coordinators.');
+            return;
+          }
+          
+          endpoint = `${API_BASE}/reports/laempl-mps`;
+          body = {
+            ...base,
+            assignees: assigneesList, // Set assignees (coordinator or teachers)
+            title: fallbackTitle,
+            grade_level_id: Number(selectedGradeLevel),
+            subject_ids: subjectIds, // This will create one assignment per subject
+            number_of_submission: numberValue, // INT or NULL
+            parent_report_assignment_id: editingReportId || null // Link child assignments to parent if editing
+          };
         } else {
           endpoint = `${API_BASE}/reports/laempl`;
           body = {
@@ -810,27 +1205,47 @@ function SetReport() {
       const data = await res.json();
 
       // After creating a new assignment (res received and data parsed):
-      if (isCoordinator && editingReportId && data && data.report_assignment_id) {
+      // Handle parent linking for both Accomplishment Reports and LAEMPL & MPS
+      if (isCoordinator && editingReportId) {
         // editingReportId = parent/coordinator assignment
-        // data.report_assignment_id = child/teacher assignment just created
-        try {
-          const linkResponse = await fetch(`${API_BASE}/reports/accomplishment/link-parent`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({
-              teacher_assignment_id: data.report_assignment_id,
-              coordinator_assignment_id: editingReportId
-            })
-          });
-          if (linkResponse.ok) {
-            console.log("Parent assignment linked to teacher assignment automatically!");
-          } else {
-            const errText = await linkResponse.text();
-            console.warn("Parent-link API failed:", errText);
+        // For LAEMPL & MPS, data.assignments is an array of assignments (one per subject)
+        // For Accomplishment Reports, data.report_assignment_id is a single ID
+        const assignmentsToLink = [];
+        
+        if (reportType === "laempl" && selectedSubCategory === "3" && data.assignments && Array.isArray(data.assignments)) {
+          // LAEMPL & MPS: link all subject assignments to parent
+          assignmentsToLink.push(...data.assignments.map(a => a.report_assignment_id));
+        } else if (data.report_assignment_id) {
+          // Accomplishment Report: single assignment
+          assignmentsToLink.push(data.report_assignment_id);
+        }
+        
+        // Link all assignments to the parent
+        if (assignmentsToLink.length > 0) {
+          try {
+            // Link all assignments in parallel
+            const linkPromises = assignmentsToLink.map(assignmentId => 
+              fetch(`${API_BASE}/reports/accomplishment/link-parent`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({
+                  teacher_assignment_id: assignmentId,
+                  coordinator_assignment_id: editingReportId
+                })
+              })
+            );
+            
+            const linkResults = await Promise.allSettled(linkPromises);
+            const successCount = linkResults.filter(r => r.status === 'fulfilled' && r.value.ok).length;
+            console.log(`Parent assignment linked to ${successCount}/${assignmentsToLink.length} teacher assignment(s) automatically!`);
+            
+            if (successCount < assignmentsToLink.length) {
+              console.warn("Some parent-link operations failed");
+            }
+          } catch (e) {
+            console.warn("Parent-link API threw error:", e);
           }
-        } catch (e) {
-          console.warn("Parent-link API threw error:", e);
         }
       }
 
@@ -903,13 +1318,14 @@ function SetReport() {
 
   // --- Teacher multi-select helpers ---
   const toggleTeacher = (userId) => {
+    const userIdStr = String(userId);
     setSelectedTeachers((prev) =>
-      prev.includes(userId)
-        ? prev.filter((id) => id !== userId)
-        : prev.concat(userId)
+      prev.includes(userIdStr)
+        ? prev.filter((id) => id !== userIdStr)
+        : prev.concat(userIdStr)
     );
   };
-  const selectAllTeachers = () => setSelectedTeachers(selectableUsers.map((u) => u.user_id));
+  const selectAllTeachers = () => setSelectedTeachers(selectableUsers.map((u) => String(u.user_id)));
   const clearAllTeachers = () => setSelectedTeachers([]);
 
   // --- Subject selection helpers ---
@@ -1037,24 +1453,32 @@ function SetReport() {
                     title={
                       selectedTeachers.length
                         ? selectableUsers
-                            .filter(u => selectedTeachers.includes(u.user_id))
+                            .filter(u => selectedTeachers.includes(String(u.user_id)))
                             .map(u => u.name)
                             .join(", ")
                         : "Select Teachers & Coordinators"
                     }
                   >
                     <span className="teacher-trigger-label">
-                      {selectedTeachers.length
-                        ? selectedTeachers.length === 1
-                          ? selectableUsers
-                              .filter(u => selectedTeachers.includes(u.user_id))
-                              .map(u => u.name)[0]
-                          : selectedTeachers.length <= 3
-                          ? selectableUsers
-                              .filter(u => selectedTeachers.includes(u.user_id))
-                              .map(u => u.name)
-                              .join(", ")
-                          : `${selectedTeachers.length} teachers selected`
+                      {selectedTeachers.length > 0
+                        ? (() => {
+                            // Try to get names from selectableUsers
+                            const matchedUsers = selectableUsers.filter(u => selectedTeachers.includes(String(u.user_id)));
+                            
+                            if (matchedUsers.length === 0) {
+                              // Users not loaded yet, show count
+                              return `${selectedTeachers.length} teacher${selectedTeachers.length > 1 ? 's' : ''} selected`;
+                            }
+                            
+                            if (selectedTeachers.length === 1) {
+                              return matchedUsers[0]?.name || `${selectedTeachers.length} teacher selected`;
+                            } else if (selectedTeachers.length <= 3) {
+                              const names = matchedUsers.map(u => u.name).join(", ");
+                              return names || `${selectedTeachers.length} teachers selected`;
+                            } else {
+                              return `${selectedTeachers.length} teachers selected`;
+                            }
+                          })()
                         : "Select Teachers & Coordinators"}
                     </span>
                   </button>
@@ -1083,11 +1507,12 @@ function SetReport() {
 
                       <div className="teacher-menu-content">
                         {selectableUsers.map((u) => {
-                          const checked = selectedTeachers.includes(u.user_id);
+                          // Compare as strings to handle type mismatch
+                          const checked = selectedTeachers.includes(String(u.user_id));
                           return (
                             <div
                               key={u.user_id}
-                              onClick={() => toggleTeacher(u.user_id)}
+                              onClick={() => toggleTeacher(String(u.user_id))}
                               className={`teacher-menu-item ${checked ? 'selected' : ''}`}
                             >
                               <input
@@ -1135,10 +1560,15 @@ function SetReport() {
                     <select
                       value={selectedGradeLevel}
                       onChange={(e) => {
-                        setSelectedGradeLevel(e.target.value);
+                        const newGradeLevel = e.target.value;
+                        setSelectedGradeLevel(newGradeLevel);
                         setSelectedSubjects([]); // Clear subjects when grade changes
-                        setSelectedTeachers([]); // Clear teachers when grade changes (for LAEMPL & MPS)
+                        // Only clear teachers if no coordinator is selected (to preserve coordinator selection)
+                        if (!hasCoordinatorSelected) {
+                          setSelectedTeachers([]); // Clear teachers when grade changes (for LAEMPL & MPS)
+                        }
                       }}
+                      disabled={isCoordinator || shouldLockGradeLevel}
                     >
                       <option value="">Select Grade Level</option>
                       {gradeLevels.map((grade) => (
@@ -1148,7 +1578,7 @@ function SetReport() {
                       ))}
                     </select>
 
-                    {selectedGradeLevel && !hasCoordinatorSelected && (
+                    {selectedGradeLevel && (
                       <>
                         <label>Subjects:</label>
                         <div ref={subjectMenuRef} style={{ position: "relative", width: "100%" }}>

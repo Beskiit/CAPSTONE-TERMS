@@ -61,10 +61,10 @@ function App() {
           <Route path="/LAEMPL" element={<ProtectedRoute requiredRoles={['teacher']}><LAEMPL /></ProtectedRoute>} />
           <Route path="/LAEMPLReport" element={<ProtectedRoute requiredRoles={['teacher']}><LAEMPLReport /></ProtectedRoute>} />
           <Route path="/MPS" element={<ProtectedRoute requiredRoles={['teacher']}><MPS /></ProtectedRoute>} />
-          <Route path="/LAEMPLInstruction" element={<ProtectedRoute requiredRoles={['teacher']}><LAEMPLInstruction /></ProtectedRoute>} />
-          <Route path="/MPSInstruction" element={<ProtectedRoute requiredRoles={['teacher']}><MPSInstruction /></ProtectedRoute>} />
-          <Route path="/AccomplishmentReportInstruction" element={<ProtectedRoute requiredRoles={['teacher']}><AccomplishmentReportInstruction /></ProtectedRoute>} />
-          <Route path="/ClassificationOfGradesInstruction" element={<ProtectedRoute requiredRoles={['teacher']}><ClassificationOfGradesInstruction /></ProtectedRoute>} />
+          <Route path="/LAEMPLInstruction" element={<ProtectedRoute requiredRoles={['teacher', 'coordinator', 'principal', 'admin']}><LAEMPLInstruction /></ProtectedRoute>} />
+          <Route path="/MPSInstruction" element={<ProtectedRoute requiredRoles={['teacher', 'coordinator', 'principal', 'admin']}><MPSInstruction /></ProtectedRoute>} />
+          <Route path="/AccomplishmentReportInstruction" element={<ProtectedRoute requiredRoles={['teacher', 'coordinator', 'principal', 'admin']}><AccomplishmentReportInstruction /></ProtectedRoute>} />
+          <Route path="/ClassificationOfGradesInstruction" element={<ProtectedRoute requiredRoles={['teacher', 'coordinator', 'principal', 'admin']}><ClassificationOfGradesInstruction /></ProtectedRoute>} />
           <Route path="/SubmittedReport" element={<ProtectedRoute requiredRoles={['teacher']}><SubmittedReport /></ProtectedRoute>} />
           <Route path="/submission/:submissionId" element={<ProtectedRoute requiredRoles={['teacher']}><ViewSubmissionTeacher /></ProtectedRoute>} />
           

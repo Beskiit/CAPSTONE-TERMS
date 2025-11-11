@@ -934,9 +934,6 @@ function AccomplishmentReport() {
             {(isTeacher || isCoordinatorActingAsTeacher) ? (
               <>
                 <div className="buttons">
-                  <button className="btn primary" disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}>
-                      {saving ? "Saving…" : "Save Changes"}
-                  </button>
                   <button
                     onClick={isCoordinatorActingAsTeacher ? onSubmitToPrincipalAsTeacher : handleCoordinatorConfirmation}
                     disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}
@@ -1184,30 +1181,32 @@ function AccomplishmentReport() {
                                   console.log('✅ [DEBUG] Image loaded successfully:', img.url);
                                 }}
                               />
-                              <button
-                                type="button"
-                                className="remove-image-btn"
-                                onClick={() => setExistingImages(prev => prev.filter((_, i) => i !== index))}
-                                title="Remove image"
-                              >
-                                X
-                              </button>
+                              {(submissionStatus < 2 || submissionStatus === 4) && (
+                                <button
+                                  type="button"
+                                  className="remove-image-btn"
+                                  onClick={() => setExistingImages(prev => prev.filter((_, i) => i !== index))}
+                                  title="Remove image"
+                                >
+                                  ×
+                                </button>
+                              )}
                             </div>
                           );
                         })}
                         {newFiles.map((f, i) => (
                           <div key={`new-${i}`} className="thumb">
                             <img src={URL.createObjectURL(f)} alt={f.name} />
-                            <div className="thumb-meta">
+                            {(submissionStatus < 2 || submissionStatus === 4) && (
                               <button
                                 type="button"
-                                className="btn tiny"
+                                className="remove-image-btn"
                                 onClick={() => removeNewFileAt(i)}
-                                disabled={submissionStatus >= 2 && submissionStatus !== 4}
+                                title="Remove image"
                               >
-                                Remove
+                                ×
                               </button>
-                            </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1401,29 +1400,32 @@ function AccomplishmentReport() {
                                     console.error('Image object:', img);
                                   }}
                                 />
-                                <button
-                                  type="button"
-                                  className="remove-image-btn"
-                                  onClick={() => setExistingImages(prev => prev.filter((_, i) => i !== index))}
-                                  title="Remove image"
-                                >
-                                  ×
-                                </button>
+                                {(submissionStatus < 2 || submissionStatus === 4) && (
+                                  <button
+                                    type="button"
+                                    className="remove-image-btn"
+                                    onClick={() => setExistingImages(prev => prev.filter((_, i) => i !== index))}
+                                    title="Remove image"
+                                  >
+                                    ×
+                                  </button>
+                                )}
                               </div>
                             );
                           })}
                         {newFiles.map((f, i) => (
                           <div key={`new-${i}-${f.name}`} className="thumb">
                             <img src={URL.createObjectURL(f)} alt={f.name} />
-                            <div className="thumb-meta">
+                            {(submissionStatus < 2 || submissionStatus === 4) && (
                               <button
                                 type="button"
-                                className="btn tiny"
+                                className="remove-image-btn"
                                 onClick={() => removeNewFileAt(i)}
+                                title="Remove image"
                               >
-                                Remove
+                                ×
                               </button>
-                            </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1440,12 +1442,6 @@ function AccomplishmentReport() {
                         required
                         disabled={submissionStatus >= 2 && submissionStatus !== 4}
                       />
-                    </div>
-
-                    <div className="form-row">
-                      <button className="btn primary" disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}>
-                        {saving ? "Saving…" : "Save Changes"}
-                      </button>
                     </div>
                   </>
                 )}
