@@ -56,6 +56,9 @@ function UserManagement() {
   const [sections, setSections] = useState([]);
   const [gradeLevels, setGradeLevels] = useState([]);
   const [laemplAssignments, setLaemplAssignments] = useState([]);
+  const [debugCoordinators, setDebugCoordinators] = useState([]);
+  const [showDebugSection, setShowDebugSection] = useState(false);
+  const [debugLoading, setDebugLoading] = useState(false);
 
   useEffect(() => {
     // ensure the element id matches your index.html (#root is default in Vite)
@@ -379,6 +382,24 @@ function UserManagement() {
     }
   };
 
+  const fetchDebugCoordinators = async () => {
+    setDebugLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/admin/debug/laempl-coordinators`, { credentials: "include" });
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      console.log("[UserManagement Debug] LAEMPL & MPS Coordinators:", data);
+      setDebugCoordinators(data.coordinators || []);
+    } catch (err) {
+      console.error("Error fetching debug coordinators:", err);
+      toast.error("Failed to fetch debug coordinator data");
+    } finally {
+      setDebugLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!showAssignmentModal || !selectedUser || selectedUser.role !== "coordinator") return;
 
@@ -536,6 +557,20 @@ function UserManagement() {
       if (!assignmentDetails.laemplGradeLevelId) {
         toast.error('Select a grade level before assigning LAEMPL & MPS.');
         return;
+      }
+
+      // Check if this grade level is already assigned to a different coordinator
+      const existingAssignment = findLaemplAssignmentForGrade(Number(assignmentDetails.laemplGradeLevelId));
+      if (existingAssignment && existingAssignment.coordinator_user_id) {
+        const existingCoordinatorId = Number(existingAssignment.coordinator_user_id);
+        const currentCoordinatorId = Number(selectedUser.user_id);
+        
+        if (existingCoordinatorId !== currentCoordinatorId) {
+          const existingCoordinatorName = existingAssignment.coordinator_name || 'another coordinator';
+          const gradeLevelName = gradeLevels.find(g => g.grade_level_id === Number(assignmentDetails.laemplGradeLevelId))?.grade_level || assignmentDetails.laemplGradeLevelId;
+          toast.error(`Grade ${gradeLevelName} is already assigned to ${existingCoordinatorName}. Cannot reassign to a different coordinator.`);
+          return;
+        }
       }
     }
 
@@ -785,7 +820,165 @@ function UserManagement() {
               <button className="add-user-btn year-quarter-btn" type="button" onClick={() => setShowYearQuarterModal(true)}>
                 <span className="add-user-text">Add School Year</span>
               </button>
+              <button 
+                className="add-user-btn debug-btn" 
+                type="button" 
+                onClick={() => {
+                  setShowDebugSection(!showDebugSection);
+                  if (!showDebugSection && debugCoordinators.length === 0) {
+                    fetchDebugCoordinators();
+                  }
+                }}
+                style={{ backgroundColor: '#6c757d', marginLeft: '10px' }}
+              >
+                <span className="add-user-text">{showDebugSection ? 'Hide' : 'Show'} Debug: LAEMPL & MPS Coordinators</span>
+              </button>
             </div>
+
+          {/* Debug Section */}
+          {showDebugSection && (
+            <div className="debug-section" style={{ 
+              marginBottom: '20px', 
+              padding: '15px', 
+              backgroundColor: '#f8f9fa', 
+              border: '1px solid #dee2e6', 
+              borderRadius: '5px' 
+            }}>
+              <h3 style={{ marginTop: 0, color: '#495057' }}>Debug: LAEMPL & MPS Coordinators</h3>
+              {debugLoading ? (
+                <div>Loading coordinator data...</div>
+              ) : (
+                <>
+                  <p><strong>Total Coordinators:</strong> {debugCoordinators.length}</p>
+                  <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
+                    <table className="report-table" style={{ fontSize: '0.9em' }}>
+                      <thead>
+                        <tr>
+                          <th>Coordinator ID</th>
+                          <th>Name</th>
+                          <th>Email</th>
+                          <th>Teacher Grade Level<br/>(from section assignment)</th>
+                          <th>Coordinator Grade Level<br/>(coordinator_grade table)</th>
+                          <th>LAEMPL & MPS Assignments<br/>(Coordinator Grade Level from report_assignment)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {debugCoordinators.length === 0 ? (
+                          <tr>
+                            <td colSpan="6" style={{ textAlign: 'center', padding: '20px' }}>
+                              No coordinators found
+                            </td>
+                          </tr>
+                        ) : (
+                          debugCoordinators.map((coord) => (
+                            <tr key={coord.coordinator_id}>
+                              <td>{coord.coordinator_id}</td>
+                              <td><strong>{coord.coordinator_name}</strong></td>
+                              <td>{coord.coordinator_email}</td>
+                              <td>
+                                {coord.teacher_sections && coord.teacher_sections.length > 0 ? (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    {coord.teacher_sections.map((ts, idx) => (
+                                      <span key={idx} style={{ 
+                                        padding: '4px 8px', 
+                                        backgroundColor: '#cfe2ff', 
+                                        borderRadius: '3px',
+                                        color: '#084298',
+                                        fontSize: '0.85em'
+                                      }}>
+                                        {ts.section}: Grade {ts.teacher_grade_level} (ID: {ts.teacher_grade_level_id})
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <span style={{ color: '#6c757d' }}>Not assigned</span>
+                                )}
+                              </td>
+                              <td>
+                                {coord.coordinator_grade_level_id ? (
+                                  <span style={{ 
+                                    padding: '4px 8px', 
+                                    backgroundColor: '#d4edda', 
+                                    borderRadius: '3px',
+                                    color: '#155724'
+                                  }}>
+                                    Grade {coord.coordinator_grade_level} (ID: {coord.coordinator_grade_level_id})
+                                  </span>
+                                ) : (
+                                  <span style={{ color: '#6c757d' }}>Not assigned</span>
+                                )}
+                              </td>
+                              <td>
+                                {coord.assignments.length === 0 ? (
+                                  <span style={{ color: '#6c757d' }}>No LAEMPL & MPS assignments</span>
+                                ) : (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    {coord.assignments.map((assignment, idx) => (
+                                      <div key={idx} style={{ 
+                                        padding: '8px', 
+                                        backgroundColor: '#fff', 
+                                        border: '1px solid #dee2e6', 
+                                        borderRadius: '3px',
+                                        fontSize: '0.85em'
+                                      }}>
+                                        <div><strong>Assignment ID:</strong> {assignment.report_assignment_id}</div>
+                                        <div><strong>Coordinator Grade Level:</strong> {
+                                          assignment.grade_level_id ? (
+                                            <span style={{ color: '#28a745' }}>
+                                              Grade {assignment.grade_level} (ID: {assignment.grade_level_id})
+                                            </span>
+                                          ) : (
+                                            <span style={{ color: '#dc3545' }}>NULL</span>
+                                          )
+                                        }</div>
+                                        <div><strong>Title:</strong> {assignment.assignment_title || 'N/A'}</div>
+                                        <div><strong>School Year:</strong> {assignment.school_year || 'N/A'}</div>
+                                        <div><strong>Quarter:</strong> {assignment.quarter || 'N/A'}</div>
+                                        <div><strong>Year ID:</strong> {assignment.year || 'N/A'}</div>
+                                        <div><strong>Coordinator User ID:</strong> {
+                                          assignment.coordinator_user_id ? (
+                                            <span style={{ color: '#28a745' }}>{assignment.coordinator_user_id}</span>
+                                          ) : (
+                                            <span style={{ color: '#dc3545' }}>NULL</span>
+                                          )
+                                        }</div>
+                                        <div><strong>Parent Assignment ID:</strong> {
+                                          assignment.parent_report_assignment_id ? (
+                                            <span style={{ color: '#ffc107' }}>{assignment.parent_report_assignment_id} (Child assignment)</span>
+                                          ) : (
+                                            <span style={{ color: '#28a745' }}>NULL (Parent assignment)</span>
+                                          )
+                                        }</div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  <button 
+                    type="button" 
+                    onClick={fetchDebugCoordinators}
+                    style={{ 
+                      marginTop: '10px', 
+                      padding: '8px 16px', 
+                      backgroundColor: '#007bff', 
+                      color: 'white', 
+                      border: 'none', 
+                      borderRadius: '3px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Refresh Data
+                  </button>
+                </>
+              )}
+            </div>
+          )}
 
           <div className="content">
             {loading ? (
@@ -1069,6 +1262,23 @@ function UserManagement() {
             {(selectedUser?.role === 'teacher' || selectedUser?.role === 'coordinator') && (
               <div className="assignment-details">
                 <div className="form-group">
+                  <label htmlFor="gradeLevel">Teacher Grade Level:</label>
+                  <select
+                    id="gradeLevel"
+                    value={assignmentDetails.gradeLevel}
+                    onChange={(e) => setAssignmentDetails(prev => ({...prev, gradeLevel: e.target.value, section: ''}))}
+                    className="form-input"
+                  >
+                    <option value="">Select grade level...</option>
+                    {gradeLevels.map(grade => (
+                      <option key={grade.grade_level_id} value={grade.grade_level_id}>
+                        Grade {grade.grade_level}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group">
                   <label htmlFor="sectionSelect">Section:</label>
                   <select
                     id="sectionSelect"
@@ -1085,23 +1295,6 @@ function UserManagement() {
                           {section.section}
                         </option>
                       ))}
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor="gradeLevel">Grade Level:</label>
-                  <select
-                    id="gradeLevel"
-                    value={assignmentDetails.gradeLevel}
-                    onChange={(e) => setAssignmentDetails(prev => ({...prev, gradeLevel: e.target.value, section: ''}))}
-                    className="form-input"
-                  >
-                    <option value="">Select grade level...</option>
-                    {gradeLevels.map(grade => (
-                      <option key={grade.grade_level_id} value={grade.grade_level_id}>
-                        Grade {grade.grade_level}
-                      </option>
-                    ))}
                   </select>
                 </div>
 
@@ -1181,11 +1374,15 @@ function UserManagement() {
                         </div>
 
                         {assignmentDetails.laemplGradeLevelId && selectedLaemplGradeAssignment && (
-                          <div className="form-hint">
+                          <div className="form-hint" style={{
+                            color: selectedLaemplGradeAssignment.coordinator_user_id && 
+                                   selectedLaemplGradeAssignment.coordinator_user_id !== selectedUser?.user_id
+                                   ? '#dc3545' : '#6c757d'
+                          }}>
                             {selectedLaemplGradeAssignment.coordinator_user_id
                               ? selectedLaemplGradeAssignment.coordinator_user_id === selectedUser?.user_id
                                 ? `Currently assigned to ${selectedUser?.name || 'this coordinator'}.`
-                                : `Currently assigned to ${selectedLaemplGradeAssignment.coordinator_name || 'another coordinator'}. Saving will transfer the grade.`
+                                : `⚠️ Already assigned to ${selectedLaemplGradeAssignment.coordinator_name || 'another coordinator'}. Cannot reassign to a different coordinator.`
                               : 'This grade is not yet assigned to any coordinator.'}
                           </div>
                         )}

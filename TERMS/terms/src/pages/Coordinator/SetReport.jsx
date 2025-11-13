@@ -407,26 +407,9 @@ function SetReport() {
           console.warn("[SetReport] Failed to lookup coordinator grade via report_assignment:", lookupErr);
         }
 
-        // Fallback to coordinator_grade table
-        console.log("[SetReport] No LAEMPL & MPS assignment found, checking coordinator_grade table");
-        const cgRes = await fetch(`${API_BASE}/users/coordinator-grade/${selectedCoordinatorId}`, {
-          credentials: "include",
-        });
-        
-        if (cgRes.ok) {
-          const cgData = await cgRes.json();
-          if (cgData?.grade_level_id) {
-            const gl = String(cgData.grade_level_id);
-            console.log("[SetReport] Setting grade level to:", gl, "(from coordinator_grade table - fallback)");
-            if (selectedGradeLevel !== gl) setSelectedGradeLevel(gl);
-          } else {
-            console.log("[SetReport] No grade level found in coordinator_grade table");
-            if (selectedGradeLevel) setSelectedGradeLevel("");
-          }
-        } else if (cgRes.status === 404) {
-          console.log("[SetReport] Coordinator grade not found (404)");
-          if (selectedGradeLevel) setSelectedGradeLevel("");
-        }
+        // No LAEMPL & MPS assignment found - leave grade level empty
+        console.log("[SetReport] No LAEMPL & MPS assignment found for this coordinator. Leaving grade level empty.");
+        if (selectedGradeLevel) setSelectedGradeLevel("");
       } catch (err) {
         console.error("[SetReport] Failed to fetch coordinator grade:", err);
         if (selectedGradeLevel) setSelectedGradeLevel("");

@@ -1158,16 +1158,28 @@ export const updateLAEMPLMPSAssignment = (req, res) => {
 
   const grade_level_id = normalize(rawGradeLevelId);
   const coordinator_user_id = normalize(rawCoordinatorId);
-  const advisory_user_id = normalize(rawAdvisoryId);
+  // advisory_user_id can be null, so only normalize if provided
+  const advisory_user_id = rawAdvisoryId === null || rawAdvisoryId === undefined || rawAdvisoryId === '' 
+    ? null 
+    : normalize(rawAdvisoryId);
 
   const isClearing = [rawGradeLevelId, rawCoordinatorId, rawAdvisoryId].every((v) => v === null || v === undefined || v === '');
 
   if (!isClearing) {
-    if ([grade_level_id, coordinator_user_id, advisory_user_id].some((v) => v === null || Number.isNaN(v))) {
-      return res.status(400).json({ error: 'grade_level_id, coordinator_user_id, and advisory_user_id are required and must be integers.' });
+    // grade_level_id and coordinator_user_id are required, advisory_user_id can be null
+    if (grade_level_id === null || Number.isNaN(grade_level_id)) {
+      return res.status(400).json({ error: 'grade_level_id is required and must be an integer.' });
+    }
+    if (coordinator_user_id === null || Number.isNaN(coordinator_user_id)) {
+      return res.status(400).json({ error: 'coordinator_user_id is required and must be an integer.' });
+    }
+    // advisory_user_id can be null, but if provided, it must be a valid integer
+    if (advisory_user_id !== null && Number.isNaN(advisory_user_id)) {
+      return res.status(400).json({ error: 'advisory_user_id must be an integer if provided.' });
     }
   } else {
-    if ([grade_level_id, coordinator_user_id, advisory_user_id].some((v) => Number.isNaN(v))) {
+    // When clearing, all values should be null (not NaN)
+    if (Number.isNaN(grade_level_id) || Number.isNaN(coordinator_user_id) || (advisory_user_id !== null && Number.isNaN(advisory_user_id))) {
       return res.status(400).json({ error: 'Invalid numeric value provided.' });
     }
   }
