@@ -38,6 +38,8 @@ import AssignedReportData from './pages/Coordinator/AssignedReportData.jsx'
 import SubmissionData from './pages/Principal/SubmissionData.jsx'
 import ForApprovalData from './pages/Principal/ForApprovalData.jsx'
 import ViewSubmissionData from './pages/Principal/ViewSubmissionData.jsx'
+import LAEMPLMPSReports from './pages/Principal/LAEMPLMPSReports.jsx'
+import ViewCoordinatorSubmissions from './pages/Principal/ViewCoordinatorSubmissions.jsx'
 import UserManagement from './pages/Admin/UserManagement.jsx'
 import AssignUser from './pages/Admin/AssignUser.jsx'
 import AddSchool from './pages/Admin/AddSchool.jsx'
@@ -82,6 +84,8 @@ function App() {
           <Route path="/SubmissionData" element={<ProtectedRoute requiredRoles={['principal', 'admin']}><SubmissionData /></ProtectedRoute>} />
           <Route path="/ForApprovalData" element={<ProtectedRoute requiredRoles={['principal', 'admin']}><ForApprovalData /></ProtectedRoute>} />
           <Route path="/ViewSubmissionData" element={<ProtectedRoute requiredRoles={['principal', 'admin']}><ViewSubmissionData /></ProtectedRoute>} />
+          <Route path="/LAEMPLMPSReports" element={<ProtectedRoute requiredRoles={['principal', 'admin']}><LAEMPLMPSReports /></ProtectedRoute>} />
+          <Route path="/ViewCoordinatorSubmissions" element={<ProtectedRoute requiredRoles={['principal', 'admin']}><ViewCoordinatorSubmissions /></ProtectedRoute>} />
           
           {/* Admin Routes */}
           <Route path="/UserManagement" element={<ProtectedRoute requiredRoles={['admin']}><UserManagement /></ProtectedRoute>} />

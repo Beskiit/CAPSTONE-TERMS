@@ -26,6 +26,10 @@ function SetReport() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const location = useLocation();
+  const forceCreateAssignments = location.state?.forceCreate === true;
+  const parentAssignmentIdFromState = location.state?.parentAssignmentId != null
+    ? Number(location.state.parentAssignmentId)
+    : null;
   const [user, setUser] = useState(null);
   const role = (user?.role || "").toLowerCase();
   const isCoordinator = role === "coordinator";
@@ -193,21 +197,27 @@ function SetReport() {
   const hasCoordinatorSelected = useMemo(() => {
     const allSelectedUsers = [...selectedTeachers, selectedTeacher].filter(Boolean);
     return allSelectedUsers.some(userId => {
-      const user = usersWithGrades.find(u => u.user_id === userId);
-      return user?.role?.toLowerCase() === 'coordinator';
+      const user =
+        usersWithGrades.find((u) => String(u.user_id) === String(userId)) ||
+        coordinators.find((u) => String(u.user_id) === String(userId));
+      const role = user?.role ? user.role.toLowerCase() : 'coordinator';
+      return role === 'coordinator';
     });
-  }, [selectedTeachers, selectedTeacher, usersWithGrades]);
+  }, [selectedTeachers, selectedTeacher, usersWithGrades, coordinators]);
 
   // Get the selected coordinator ID for LAEMPL & MPS
   const selectedCoordinatorId = useMemo(() => {
     if (!isPrincipal || selectedSubCategory !== "3") return null;
     const allSelectedUsers = [...selectedTeachers, selectedTeacher].filter(Boolean);
     const coordinator = allSelectedUsers.find((userId) => {
-      const user = usersWithGrades.find(u => u.user_id === userId);
-      return user?.role?.toLowerCase() === 'coordinator';
+      const user =
+        usersWithGrades.find((u) => String(u.user_id) === String(userId)) ||
+        coordinators.find((u) => String(u.user_id) === String(userId));
+      const role = user?.role ? user.role.toLowerCase() : 'coordinator';
+      return role === 'coordinator';
     });
     return coordinator ?? null;
-  }, [isPrincipal, selectedSubCategory, selectedTeachers, selectedTeacher, usersWithGrades]);
+  }, [isPrincipal, selectedSubCategory, selectedTeachers, selectedTeacher, usersWithGrades, coordinators]);
 
   // ✅ Load logged-in user
   useEffect(() => {
@@ -231,12 +241,12 @@ function SetReport() {
     const reportId = searchParams.get('reportId');
     const isPrincipalReport = searchParams.get('isPrincipalReport') === 'true';
     
-    if (reportId && isPrincipalReport && isCoordinator) {
+    if (reportId && isPrincipalReport && (isCoordinator || isPrincipal)) {
       setEditingReportId(reportId);
       setIsEditingPrincipalReport(true);
       loadReportData(reportId);
     }
-  }, [searchParams, isCoordinator]);
+  }, [searchParams, isCoordinator, isPrincipal]);
 
   // ✅ Load active year and quarter
   useEffect(() => {
@@ -364,6 +374,39 @@ function SetReport() {
           return;
         }
 
+        // Next, query the coordinator-grade lookup that reads directly from report_assignment
+        try {
+          const selectedYearData = availableSchoolYears.find(
+            (year) => year.school_year === selectedSchoolYear
+          );
+          const yearId = selectedYearData?.year_id ?? activeYearQuarter.year ?? null;
+          const quarterId = selectedQuarter ? Number(selectedQuarter) : activeYearQuarter.quarter ?? null;
+
+          const params = new URLSearchParams();
+          if (yearId != null) params.append("year", yearId);
+          if (quarterId != null) params.append("quarter", quarterId);
+
+          const coordinatorGradeUrl = `${API_BASE}/reports/laempl-mps/coordinator-grade/${selectedCoordinatorId}${
+            params.toString() ? `?${params.toString()}` : ""
+          }`;
+
+          console.log("[SetReport] Checking report_assignment for coordinator grade via:", coordinatorGradeUrl);
+          const directGradeRes = await fetch(coordinatorGradeUrl, { credentials: "include" });
+          if (directGradeRes.ok) {
+            const directGradeData = await directGradeRes.json();
+            if (directGradeData?.grade_level_id) {
+              const gl = String(directGradeData.grade_level_id);
+              console.log("[SetReport] Setting grade level to:", gl, "(from report_assignment lookup)");
+              if (selectedGradeLevel !== gl) setSelectedGradeLevel(gl);
+              return;
+            }
+          } else if (directGradeRes.status !== 404) {
+            console.warn("[SetReport] Coordinator grade lookup via report_assignment failed:", directGradeRes.status);
+          }
+        } catch (lookupErr) {
+          console.warn("[SetReport] Failed to lookup coordinator grade via report_assignment:", lookupErr);
+        }
+
         // Fallback to coordinator_grade table
         console.log("[SetReport] No LAEMPL & MPS assignment found, checking coordinator_grade table");
         const cgRes = await fetch(`${API_BASE}/users/coordinator-grade/${selectedCoordinatorId}`, {
@@ -391,7 +434,7 @@ function SetReport() {
     };
 
     fetchGradeLevel();
-  }, [isPrincipal, selectedSubCategory, selectedCoordinatorId, laemplAssignments, selectedGradeLevel]);
+  }, [isPrincipal, selectedSubCategory, selectedCoordinatorId, laemplAssignments, selectedGradeLevel, availableSchoolYears, selectedSchoolYear, selectedQuarter, activeYearQuarter]);
 
   // Lock grade level when it's auto-filled for LAEMPL & MPS
   const shouldLockGradeLevel = useMemo(() => {
@@ -719,7 +762,7 @@ function SetReport() {
       }
 
       // Guard: coordinators cannot edit when already given (unless coming from AssignedReport)
-      const fromAssignedReport = location.state?.fromAssignedReport || location.state?.prefillData;
+      const fromAssignedReport = location.state?.fromAssignedReport || location.state?.prefillData || forceCreateAssignments;
       if (isCoordinator && (reportData?.is_given === 1 || reportData?.is_given === '1') && !fromAssignedReport) {
         toast.error('This report has already been given to teachers.');
         navigate(-1);
@@ -1026,13 +1069,37 @@ function SetReport() {
     setSubmitting(true);
 
     try {
-      // Handle editing existing principal's report
-      // Previously this path UPDATED the existing assignment. Per new requirement,
-      // coordinators should CREATE a new assignment instead, preserving original as-is.
-      // if (isEditingPrincipalReport && editingReportId) {
-      //   await updateExistingReport();
-      //   return;
-      // }
+      // Determine recipients early to check if coordinator is assigning to teachers
+      const recipients =
+        selectedTeachers.length > 0 ? selectedTeachers : [selectedTeacher];
+      
+      const coordinatorAwareRecipients = [...recipients];
+      if (isPrincipal && selectedSubCategory === "3" && selectedCoordinatorId) {
+        coordinatorAwareRecipients.push(String(selectedCoordinatorId));
+      }
+
+      // Check if any recipients are coordinators
+      const hasCoordinatorRecipients = coordinatorAwareRecipients.some(userId => {
+        const user = usersWithGrades.find(u => String(u.user_id) === String(userId)) ||
+          coordinators.find(u => String(u.user_id) === String(userId));
+        return user?.role?.toLowerCase() === 'coordinator';
+      });
+
+      // Handle editing existing report - UPDATE instead of CREATE
+      // BUT: If coordinator is assigning to teachers or other coordinators (acting as teachers), create NEW assignments
+      // Only update if:
+      // 1. Principal is editing, OR
+      // 2. Coordinator is editing their own assignment details (not assigning to others)
+      const fromAssignedReport = location.state?.fromAssignedReport || location.state?.prefillData || forceCreateAssignments;
+      const shouldUpdate = editingReportId && !forceCreateAssignments && (
+        (isPrincipal && (fromAssignedReport || isEditingPrincipalReport)) ||
+        (isCoordinator && fromAssignedReport && !hasCoordinatorRecipients) // Only update if editing own assignment, not assigning to others
+      );
+      
+      if (shouldUpdate) {
+        await updateExistingReport();
+        return;
+      }
 
       const reportType = detectReportType(subCategories, selectedSubCategory, selectedCategory);
 
@@ -1040,8 +1107,7 @@ function SetReport() {
       const numberValue =
         attempts === "" || attempts === "unlimited" ? null : Number(attempts);
 
-      const recipients =
-        selectedTeachers.length > 0 ? selectedTeachers : [selectedTeacher];
+      // recipients, coordinatorAwareRecipients, and hasCoordinatorRecipients already calculated above
 
       const givenBy =
         workflowType === "coordinated" ? Number(selectedCoordinator) : user.user_id;
@@ -1050,12 +1116,6 @@ function SetReport() {
       const selectedYearData = availableSchoolYears.find(year => year.school_year === selectedSchoolYear);
       const yearId = selectedYearData ? selectedYearData.year_id : (activeYearQuarter.year || 1);
       const quarterId = selectedQuarter ? Number(selectedQuarter) : (activeYearQuarter.quarter || 1);
-
-      // Determine if any recipients are coordinators
-      const hasCoordinatorRecipients = recipients.some(userId => {
-        const user = usersWithGrades.find(u => u.user_id === userId);
-        return user?.role?.toLowerCase() === 'coordinator';
-      });
 
       // Set status based on workflow:
       // - Principal → Coordinator: is_given = 0 (not given, shows upcoming deadline)
@@ -1070,6 +1130,17 @@ function SetReport() {
         // We'll also need to update any existing reports with status 0
       }
 
+      const parentAssignmentId = parentAssignmentIdFromState ?? (editingReportId ? Number(editingReportId) : null);
+      const isCoordinatorAssigning = Boolean(
+        isCoordinator &&
+        !isPrincipal &&
+        parentAssignmentId &&
+        !hasCoordinatorRecipients
+      );
+
+      // Only include coordinator_user_id when principal assigns to coordinator
+      // Do NOT include it when coordinator assigns to teachers (including coordinators acting as teachers)
+      // to avoid conflicts with the parent assignment's coordinator_user_id
       const base = {
         category_id: Number(selectedCategory),
         sub_category_id: reportType === "accomplishment" ? null : Number(selectedSubCategory),
@@ -1083,7 +1154,14 @@ function SetReport() {
         is_given: isGiven,
         is_archived: 0,
         allow_late: allowLate ? 1 : 0,
+        parent_report_assignment_id: isCoordinatorAssigning ? parentAssignmentId ?? null : null,
       };
+      
+      // Only add coordinator_user_id if principal is assigning to a coordinator
+      // Never add it when coordinator is assigning to avoid conflicts
+      if (isPrincipal && selectedSubCategory === "3" && selectedCoordinatorId) {
+        base.coordinator_user_id = Number(selectedCoordinatorId);
+      }
 
       let endpoint = "";
       let body = {};
@@ -1112,14 +1190,12 @@ function SetReport() {
           // The laempl-mps endpoint automatically creates one assignment per subject
           const subjectIds = selectedSubjects.map((id) => Number(id));
           
-          // Determine assignees based on whether coordinator or teachers are selected
-          let assigneesList = [];
-          if (hasCoordinatorSelected) {
-            // Use the selected coordinator as assignee
-            assigneesList = [selectedCoordinatorId];
-          } else {
-            // Use selected teachers as assignees
-            assigneesList = selectedTeachers.length > 0 ? selectedTeachers : (selectedTeacher ? [selectedTeacher] : []);
+          // Use the recipients list that was already calculated (includes coordinator if principal, or teachers if coordinator)
+          let assigneesList = recipients.map(id => String(id));
+          
+          // If principal is assigning to coordinator, include coordinator in assignees
+          if (isPrincipal && selectedSubCategory === "3" && selectedCoordinatorId) {
+            assigneesList.push(String(selectedCoordinatorId));
           }
           
           // If no assignees selected and we're editing, try to get from original report's submissions
@@ -1136,13 +1212,19 @@ function SetReport() {
                   const originalAssignees = [...new Set(submissions.map(s => s.submitted_by).filter(Boolean))];
                   if (originalAssignees.length > 0) {
                     console.log("[SetReport] Using original assignees from submissions:", originalAssignees);
-                    assigneesList = originalAssignees;
+                    assigneesList = originalAssignees.map(id => String(id));
                   }
                 }
               }
             } catch (err) {
               console.warn("[SetReport] Failed to fetch original assignees:", err);
             }
+          }
+          
+          // IMPORTANT: Filter out the assigner (current user) from assignees only when it matches
+          const currentUserId = user?.user_id ? Number(user.user_id) : null;
+          if (currentUserId) {
+            assigneesList = assigneesList.filter((assigneeId) => Number(assigneeId) !== currentUserId);
           }
           
           // Validate assignees are not empty

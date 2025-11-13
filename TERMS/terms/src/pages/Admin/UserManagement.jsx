@@ -584,6 +584,8 @@ function UserManagement() {
           school_name: selectedSchool,
           section: assignmentDetails.section,
           grade_level: assignmentDetails.gradeLevel,
+          // For LAEMPL & MPS coordinators, use the coordinator grade level for conflict checking
+          coordinator_grade_level: isLaemplCoordinatorSelection ? assignmentDetails.laemplGradeLevelId : undefined,
           category: assignmentDetails.category,
           sub_category: assignmentDetails.subCategory
         }),

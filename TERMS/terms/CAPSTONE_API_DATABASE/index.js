@@ -2588,7 +2588,7 @@ app.post("/admin/year-quarter", async (req, res) => {
 // Assign user to school
 app.post("/admin/assign-user", async (req, res) => {
   try {
-    const { user_id, school_name, section, grade_level, category, sub_category } = req.body;
+    const { user_id, school_name, section, grade_level, coordinator_grade_level, category, sub_category } = req.body;
     
     if (!user_id || !school_name) {
       return res.status(400).json({ error: "User ID and school name are required" });
@@ -2636,26 +2636,87 @@ app.post("/admin/assign-user", async (req, res) => {
     }
     
     if (category && sub_category) {
-      // Check if another coordinator is already assigned to this category and sub-category
-      const checkCoordinatorQuery = `
-        SELECT cg.user_id, ud.name 
-        FROM coordinator_grade cg
-        JOIN user_details ud ON cg.user_id = ud.user_id
-        WHERE cg.school_id = ? AND cg.grade_level_id = ?
-        AND cg.user_id != ?
-      `;
+      // For LAEMPL & MPS coordinators, use coordinator_grade_level if provided, otherwise use grade_level
+      const gradeLevelToCheck = coordinator_grade_level || grade_level;
       
-      const existingCoordinatorResult = await new Promise((resolve, reject) => {
-        db.query(checkCoordinatorQuery, [school_id, grade_level, user_id], (err, results) => {
+      // Get the grade_level_id from the grade_level table
+      const getGradeLevelIdQuery = `SELECT grade_level_id FROM grade_level WHERE grade_level = ?`;
+      const gradeLevelIdResult = await new Promise((resolve, reject) => {
+        db.query(getGradeLevelIdQuery, [gradeLevelToCheck], (err, results) => {
           if (err) reject(err);
           else resolve(results);
         });
       });
       
-      if (existingCoordinatorResult.length > 0) {
-        return res.status(400).json({ 
-          error: `Grade ${grade_level} coordinator position is already assigned to ${existingCoordinatorResult[0].name}` 
+      if (gradeLevelIdResult.length === 0) {
+        return res.status(400).json({ error: `Invalid grade level: ${gradeLevelToCheck}` });
+      }
+      
+      const gradeLevelId = gradeLevelIdResult[0].grade_level_id;
+      
+      // For LAEMPL & MPS (category_id = 1, sub_category_id = 3), check report_assignment table
+      // For other categories, check coordinator_grade table
+      if (category == 1 && sub_category == 3) {
+        // Get the active year/quarter
+        const getYearQuery = `SELECT year, quarter FROM year_and_quarter WHERE is_active = 1 ORDER BY yr_and_qtr_id DESC LIMIT 1`;
+        const yearResult = await new Promise((resolve, reject) => {
+          db.query(getYearQuery, (err, results) => {
+            if (err) reject(err);
+            else resolve(results);
+          });
         });
+        
+        if (yearResult.length > 0) {
+          const activeYear = yearResult[0].year;
+          // Convert enum quarter to integer for comparison with report_assignment.quarter
+          const activeQuarter = parseInt(yearResult[0].quarter, 10);
+          
+          // Check if another coordinator is already assigned to this grade level in report_assignment
+          const checkReportAssignmentQuery = `
+            SELECT ra.coordinator_user_id, ud.name 
+            FROM report_assignment ra
+            JOIN user_details ud ON ra.coordinator_user_id = ud.user_id
+            WHERE ra.category_id = 1 AND ra.sub_category_id = 3
+            AND ra.grade_level_id = ? AND ra.year = ? AND ra.quarter = ?
+            AND ra.coordinator_user_id IS NOT NULL
+            AND ra.coordinator_user_id != ?
+          `;
+          
+          const existingReportAssignmentResult = await new Promise((resolve, reject) => {
+            db.query(checkReportAssignmentQuery, [gradeLevelId, activeYear, activeQuarter, user_id], (err, results) => {
+              if (err) reject(err);
+              else resolve(results);
+            });
+          });
+          
+          if (existingReportAssignmentResult.length > 0) {
+            return res.status(400).json({ 
+              error: `Grade ${gradeLevelToCheck} LAEMPL & MPS coordinator position is already assigned to ${existingReportAssignmentResult[0].name}` 
+            });
+          }
+        }
+      } else {
+        // For non-LAEMPL & MPS categories, check coordinator_grade table
+        const checkCoordinatorQuery = `
+          SELECT cg.user_id, ud.name 
+          FROM coordinator_grade cg
+          JOIN user_details ud ON cg.user_id = ud.user_id
+          WHERE cg.school_id = ? AND cg.grade_level_id = ?
+          AND cg.user_id != ?
+        `;
+        
+        const existingCoordinatorResult = await new Promise((resolve, reject) => {
+          db.query(checkCoordinatorQuery, [school_id, gradeLevelId, user_id], (err, results) => {
+            if (err) reject(err);
+            else resolve(results);
+          });
+        });
+        
+        if (existingCoordinatorResult.length > 0) {
+          return res.status(400).json({ 
+            error: `Grade ${gradeLevelToCheck} coordinator position is already assigned to ${existingCoordinatorResult[0].name}` 
+          });
+        }
       }
     }
     
@@ -2746,10 +2807,13 @@ app.post("/admin/assign-user", async (req, res) => {
       
       const yearId = yearResult[0].yr_and_qtr_id;
       
+      // For LAEMPL & MPS coordinators, use coordinator_grade_level if provided, otherwise use grade_level
+      const gradeLevelToUse = coordinator_grade_level || grade_level;
+      
       // Get the grade_level_id from the grade_level table
       const getGradeLevelQuery = `SELECT grade_level_id FROM grade_level WHERE grade_level = ?`;
       const gradeResult = await new Promise((resolve, reject) => {
-        db.query(getGradeLevelQuery, [grade_level], (err, results) => {
+        db.query(getGradeLevelQuery, [gradeLevelToUse], (err, results) => {
           if (err) reject(err);
           else resolve(results);
         });
@@ -2758,27 +2822,61 @@ app.post("/admin/assign-user", async (req, res) => {
       if (gradeResult.length > 0) {
         const gradeLevelId = gradeResult[0].grade_level_id;
         
-        // First, remove any existing coordinator_grade assignments for this user
-        const deleteExistingCoordinatorQuery = `DELETE FROM coordinator_grade WHERE user_id = ?`;
-        await new Promise((resolve, reject) => {
-          db.query(deleteExistingCoordinatorQuery, [user_id], (err, results) => {
-            if (err) reject(err);
-            else resolve(results);
+        // For LAEMPL & MPS, skip coordinator_grade insertion since assignment is stored in report_assignment
+        // For other categories, insert into coordinator_grade
+        if (category != 1 || sub_category != 3) {
+          // First, remove any existing coordinator_grade assignments for this user
+          const deleteExistingCoordinatorQuery = `DELETE FROM coordinator_grade WHERE user_id = ?`;
+          await new Promise((resolve, reject) => {
+            db.query(deleteExistingCoordinatorQuery, [user_id], (err, results) => {
+              if (err) reject(err);
+              else resolve(results);
+            });
           });
-        });
-        
-        // Insert new coordinator_grade assignment
-        const insertCoordinatorGradeQuery = `
-          INSERT INTO coordinator_grade (user_id, school_id, grade_level_id, yr_and_qtr_id, role) 
-          VALUES (?, ?, ?, ?, 'coordinator')
-        `;
-        
-        await new Promise((resolve, reject) => {
-          db.query(insertCoordinatorGradeQuery, [user_id, school_id, gradeLevelId, yearId], (err, results) => {
-            if (err) reject(err);
-            else resolve(results);
+          
+          // Check if another coordinator is already assigned to this school, grade level, and year/quarter
+          const checkExistingQuery = `
+            SELECT cg.user_id, ud.name 
+            FROM coordinator_grade cg
+            JOIN user_details ud ON cg.user_id = ud.user_id
+            WHERE cg.school_id = ? AND cg.grade_level_id = ? AND cg.yr_and_qtr_id = ?
+            AND cg.user_id != ?
+          `;
+          
+          const existingAssignment = await new Promise((resolve, reject) => {
+            db.query(checkExistingQuery, [school_id, gradeLevelId, yearId, user_id], (err, results) => {
+              if (err) reject(err);
+              else resolve(results);
+            });
           });
-        });
+          
+          // If another coordinator is assigned, remove their assignment first (reassign)
+          if (existingAssignment.length > 0) {
+            const deleteExistingAssignmentQuery = `
+              DELETE FROM coordinator_grade 
+              WHERE school_id = ? AND grade_level_id = ? AND yr_and_qtr_id = ?
+            `;
+            await new Promise((resolve, reject) => {
+              db.query(deleteExistingAssignmentQuery, [school_id, gradeLevelId, yearId], (err, results) => {
+                if (err) reject(err);
+                else resolve(results);
+              });
+            });
+          }
+          
+          // Insert new coordinator_grade assignment
+          const insertCoordinatorGradeQuery = `
+            INSERT INTO coordinator_grade (user_id, school_id, grade_level_id, yr_and_qtr_id, role) 
+            VALUES (?, ?, ?, ?, 'coordinator')
+          `;
+          
+          await new Promise((resolve, reject) => {
+            db.query(insertCoordinatorGradeQuery, [user_id, school_id, gradeLevelId, yearId], (err, results) => {
+              if (err) reject(err);
+              else resolve(results);
+            });
+          });
+        }
       }
     }
     
@@ -2872,6 +2970,58 @@ app.delete("/admin/users/:userId", async (req, res) => {
         else resolve(results);
       });
     });
+    
+    // Remove references from report_assignment (advisory_user_id and coordinator_user_id)
+    // Note: given_by is NOT NULL, so we'll need to handle assignments created by this user
+    // For now, we'll set advisory_user_id and coordinator_user_id to NULL
+    // If given_by has a foreign key constraint, we may need to delete or reassign those assignments
+    const updateReportAssignmentQuery = `
+      UPDATE report_assignment 
+      SET advisory_user_id = NULL, coordinator_user_id = NULL 
+      WHERE advisory_user_id = ? OR coordinator_user_id = ?
+    `;
+    await new Promise((resolve, reject) => {
+      db.query(updateReportAssignmentQuery, [userId, userId], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+    
+    // Handle report_assignment.given_by - if it has a foreign key constraint, we need to reassign
+    // Find an admin user to reassign assignments to, or delete orphaned assignments
+    const findAdminUserQuery = `SELECT user_id FROM user_details WHERE role = 'admin' LIMIT 1`;
+    const adminResult = await new Promise((resolve, reject) => {
+      db.query(findAdminUserQuery, [], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+    
+    const adminUserId = adminResult.length > 0 ? adminResult[0].user_id : null;
+    
+    if (adminUserId) {
+      // Reassign assignments created by this user to an admin user
+      const reassignGivenByQuery = `UPDATE report_assignment SET given_by = ? WHERE given_by = ?`;
+      await new Promise((resolve, reject) => {
+        db.query(reassignGivenByQuery, [adminUserId, userId], (err, results) => {
+          if (err) reject(err);
+          else resolve(results);
+        });
+      });
+    } else {
+      // If no admin user exists, delete orphaned assignments (those with no submissions)
+      const deleteOrphanedAssignmentsQuery = `
+        DELETE FROM report_assignment 
+        WHERE given_by = ? 
+        AND report_assignment_id NOT IN (SELECT DISTINCT report_assignment_id FROM submission)
+      `;
+      await new Promise((resolve, reject) => {
+        db.query(deleteOrphanedAssignmentsQuery, [userId], (err, results) => {
+          if (err) reject(err);
+          else resolve(results);
+        });
+      });
+    }
     
     // Remove school assignment
     const updateUserQuery = `UPDATE user_details SET school_id = NULL WHERE user_id = ?`;
@@ -3020,6 +3170,7 @@ app.get("/reports/assignment/:reportId", requireAuth, async (req, res) => {
         ra.is_archived,
         ra.allow_late,
         ra.grade_level_id,
+        ra.coordinator_user_id,
         c.category_name,
         sc.sub_category_name,
         sy.school_year,
@@ -3146,6 +3297,337 @@ app.get("/reports/upcoming-deadlines/:userId", async (req, res) => {
 
 /* ----------------- App routes ----------------- */
 app.use("/users", usersRouter);
+
+// PUT route for updating report assignments - must be defined BEFORE the /reports router
+// to avoid route conflicts
+app.put("/reports/assignment/:reportId", requireAuth, async (req, res) => {
+  try {
+    const { reportId } = req.params;
+    const { title, quarter, year, from_date, to_date, instruction, is_given, allow_late, number_of_submission, assignees } = req.body;
+    
+    console.log('🔄 [DEBUG] Updating report assignment:', reportId, req.body);
+
+    // First, verify the report assignment exists
+    const checkQuery = `SELECT report_assignment_id FROM report_assignment WHERE report_assignment_id = ?`;
+    const existingReport = await new Promise((resolve, reject) => {
+      db.query(checkQuery, [reportId], (err, results) => {
+        if (err) reject(err);
+        else resolve(results && results.length > 0 ? results[0] : null);
+      });
+    });
+
+    if (!existingReport) {
+      return res.status(404).json({ error: "Report assignment not found", path: `/reports/assignment/${reportId}` });
+    }
+
+    // Update the report assignment
+    const updateQuery = `
+      UPDATE report_assignment 
+      SET title = ?, quarter = ?, year = ?, from_date = ?, to_date = ?, 
+          instruction = ?, is_given = ?, allow_late = ?
+      WHERE report_assignment_id = ?
+    `;
+    
+    const updateResult = await new Promise((resolve, reject) => {
+      db.query(updateQuery, [
+        title, quarter, year, from_date, to_date, 
+        instruction, is_given, allow_late, reportId
+      ], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+
+    console.log('🔄 [DEBUG] Updated report assignment:', updateResult.affectedRows);
+
+    // Handle assignees: add new ones, remove old ones, update existing
+    if (assignees && Array.isArray(assignees)) {
+      // Get existing submissions with their assignees
+      const getSubmissionsQuery = `
+        SELECT submission_id, submitted_by, category_id, number_of_submission, fields
+        FROM submission 
+        WHERE report_assignment_id = ?
+      `;
+      const existingSubmissions = await new Promise((resolve, reject) => {
+        db.query(getSubmissionsQuery, [reportId], (err, results) => {
+          if (err) reject(err);
+          else resolve(results || []);
+        });
+      });
+
+      const existingAssigneeIds = [...new Set(existingSubmissions.map(s => s.submitted_by))];
+      const newAssigneeIds = assignees.map(id => Number(id));
+      
+      // Identify assignees to remove (exist in DB but not in new list)
+      const assigneesToRemove = existingAssigneeIds.filter(id => !newAssigneeIds.includes(id));
+      
+      // Identify assignees to add (exist in new list but not in DB)
+      const assigneesToAdd = newAssigneeIds.filter(id => !existingAssigneeIds.includes(id));
+      
+      // Identify assignees that remain (exist in both)
+      const assigneesToKeep = newAssigneeIds.filter(id => existingAssigneeIds.includes(id));
+
+      console.log('🔄 [DEBUG] Assignee changes:', {
+        existing: existingAssigneeIds,
+        new: newAssigneeIds,
+        toRemove: assigneesToRemove,
+        toAdd: assigneesToAdd,
+        toKeep: assigneesToKeep
+      });
+
+      // Delete submissions for removed assignees (ONLY for this specific assignment)
+      if (assigneesToRemove.length > 0) {
+        // Use placeholders for IN clause to ensure proper scoping
+        const placeholders = assigneesToRemove.map(() => '?').join(',');
+        const deleteQuery = `
+          DELETE FROM submission 
+          WHERE report_assignment_id = ? AND submitted_by IN (${placeholders})
+        `;
+        await new Promise((resolve, reject) => {
+          db.query(deleteQuery, [reportId, ...assigneesToRemove], (err, results) => {
+            if (err) reject(err);
+            else {
+              console.log('🔄 [DEBUG] Deleted submissions for removed assignees (assignment:', reportId, '):', assigneesToRemove);
+              resolve(results);
+            }
+          });
+        });
+      }
+
+      // Create new submissions for added assignees
+      if (assigneesToAdd.length > 0) {
+        // Get category_id and default number_of_submission from report_assignment
+        const getAssignmentQuery = `SELECT category_id FROM report_assignment WHERE report_assignment_id = ?`;
+        const assignmentData = await new Promise((resolve, reject) => {
+          db.query(getAssignmentQuery, [reportId], (err, results) => {
+            if (err) reject(err);
+            else resolve(results[0]);
+          });
+        });
+
+        for (const assigneeId of assigneesToAdd) {
+          const insertSubmissionQuery = `
+            INSERT INTO submission (report_assignment_id, category_id, submitted_by, status, number_of_submission, fields)
+            VALUES (?, ?, ?, 1, ?, '{}')
+          `;
+          
+          await new Promise((resolve, reject) => {
+            db.query(insertSubmissionQuery, [
+              reportId, 
+              assignmentData?.category_id || 0, 
+              assigneeId, 
+              number_of_submission || 1
+            ], (err, results) => {
+              if (err) reject(err);
+              else {
+                console.log('🔄 [DEBUG] Created submission for new assignee:', assigneeId);
+                resolve(results);
+              }
+            });
+          });
+        }
+      }
+
+      // Update status to pending (1) for kept assignees (ONLY for this specific assignment)
+      if (assigneesToKeep.length > 0) {
+        // Use placeholders for IN clause to ensure proper scoping
+        const placeholders = assigneesToKeep.map(() => '?').join(',');
+        const updateStatusQuery = `
+          UPDATE submission 
+          SET status = 1
+          WHERE report_assignment_id = ? AND submitted_by IN (${placeholders})
+        `;
+        await new Promise((resolve, reject) => {
+          db.query(updateStatusQuery, [reportId, ...assigneesToKeep], (err, results) => {
+            if (err) reject(err);
+            else {
+              console.log('🔄 [DEBUG] Updated status for kept assignees (assignment:', reportId, '):', assigneesToKeep);
+              resolve(results);
+            }
+          });
+        });
+      }
+    }
+
+    res.json({ 
+      success: true, 
+      affectedRows: updateResult.affectedRows,
+      message: "Report assignment updated successfully"
+    });
+  } catch (error) {
+    console.error("Error updating report assignment:", error);
+    res.status(500).json({ error: "Failed to update report assignment", details: error.message });
+  }
+});
+
+// Get coordinator LAEMPL & MPS submissions for principal view (filtered by year, quarter, grade level)
+app.get("/reports/laempl-mps/coordinator-submissions", requireAuth, async (req, res) => {
+  try {
+    const { year, quarter } = req.query;
+    
+    if (!year || !quarter) {
+      return res.status(400).json({ error: "Year and quarter are required" });
+    }
+
+    const query = `
+      SELECT
+        s.submission_id,
+        s.report_assignment_id,
+        s.submitted_by,
+        s.status,
+        s.value AS submission_title,
+        DATE_FORMAT(s.date_submitted, '%m/%d/%Y') AS date_submitted,
+        s.fields,
+        
+        ra.title AS assignment_title,
+        ra.quarter,
+        ra.year,
+        ra.grade_level_id,
+        ra.coordinator_user_id,
+        gl.grade_level,
+        
+        c.category_name,
+        sc.sub_category_name,
+        sy.school_year,
+        
+        ud.name AS coordinator_name,
+        ud.role AS coordinator_role,
+        
+        -- Extract subject from title (format: "Title - SubjectName")
+        TRIM(SUBSTRING_INDEX(ra.title, ' - ', -1)) AS subject_name
+        
+      FROM submission s
+      JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
+      JOIN category c ON ra.category_id = c.category_id
+      LEFT JOIN sub_category sc ON ra.sub_category_id = sc.sub_category_id
+      LEFT JOIN grade_level gl ON ra.grade_level_id = gl.grade_level_id
+      LEFT JOIN user_details ud ON s.submitted_by = ud.user_id
+      LEFT JOIN school_year sy ON sy.year_id = ra.year
+      WHERE ra.category_id = 1 
+        AND ra.sub_category_id = 3
+        AND ra.year = ?
+        AND ra.quarter = ?
+        AND ra.grade_level_id BETWEEN 1 AND 6
+        AND ud.role = 'coordinator'
+        -- Only show assignments where coordinator was assigned by principal
+        -- (coordinator_user_id IS NOT NULL means principal assigned to coordinator)
+        AND ra.coordinator_user_id IS NOT NULL
+        -- Only show parent assignments (not child assignments from coordinator assigning to teachers)
+        AND ra.parent_report_assignment_id IS NULL
+        -- Ensure submission is from the coordinator that was assigned by the principal
+        AND s.submitted_by = ra.coordinator_user_id
+        AND (
+          JSON_UNQUOTE(JSON_EXTRACT(s.fields, '$.type')) = 'LAEMPL' 
+          OR JSON_UNQUOTE(JSON_EXTRACT(s.fields, '$.type')) = 'LAEMPL_COORDINATOR'
+          OR JSON_UNQUOTE(JSON_EXTRACT(s.fields, '$.type')) = 'LAEMPL_TEACHER'
+        )
+      ORDER BY gl.grade_level ASC, ra.title ASC, s.date_submitted DESC
+    `;
+
+    const result = await new Promise((resolve, reject) => {
+      db.query(query, [year, quarter], (err, results) => {
+        if (err) reject(err);
+        else resolve(results || []);
+      });
+    });
+
+    // Parse fields for each submission
+    const parsedResults = result.map(row => {
+      const parsed = { ...row };
+      // Parse fields if it's a string
+      if (typeof parsed.fields === 'string') {
+        try {
+          parsed.fields = JSON.parse(parsed.fields);
+        } catch (e) {
+          console.warn(`Failed to parse fields for submission ${row.submission_id}:`, e);
+          parsed.fields = {};
+        }
+      }
+      // Ensure fields is an object
+      if (!parsed.fields || typeof parsed.fields !== 'object') {
+        parsed.fields = {};
+      }
+      return parsed;
+    });
+
+    console.log(`[API] Found ${parsedResults.length} coordinator LAEMPL & MPS submissions for year ${year}, quarter ${quarter}`);
+    res.json(parsedResults);
+  } catch (error) {
+    console.error("Error fetching coordinator LAEMPL & MPS submissions:", error);
+    res.status(500).json({ error: "Failed to fetch coordinator submissions", details: error.message });
+  }
+});
+
+// Temporary endpoint to check coordinator grade level assignment
+app.get("/admin/check-coordinator-grade/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    // Check LAEMPL & MPS assignment (report_assignment table)
+    const laemplQuery = `
+      SELECT 
+        ra.report_assignment_id,
+        ra.grade_level_id,
+        gl.grade_level,
+        ra.coordinator_user_id,
+        ud.name AS coordinator_name,
+        ra.year,
+        ra.quarter,
+        'LAEMPL & MPS (report_assignment)' AS source
+      FROM report_assignment ra
+      LEFT JOIN grade_level gl ON ra.grade_level_id = gl.grade_level_id
+      LEFT JOIN user_details ud ON ra.coordinator_user_id = ud.user_id
+      WHERE ra.category_id = 1 
+        AND ra.sub_category_id = 3
+        AND ra.coordinator_user_id = ?
+      ORDER BY ra.year DESC, ra.quarter DESC
+      LIMIT 1
+    `;
+    
+    // Check general coordinator assignment (coordinator_grade table)
+    const coordinatorGradeQuery = `
+      SELECT 
+        cg.coordinator_grade_id,
+        cg.grade_level_id,
+        gl.grade_level,
+        cg.user_id,
+        ud.name AS coordinator_name,
+        cg.yr_and_qtr_id,
+        'coordinator_grade' AS source
+      FROM coordinator_grade cg
+      LEFT JOIN grade_level gl ON cg.grade_level_id = gl.grade_level_id
+      LEFT JOIN user_details ud ON cg.user_id = ud.user_id
+      WHERE cg.user_id = ?
+      ORDER BY cg.yr_and_qtr_id DESC
+      LIMIT 1
+    `;
+    
+    const [laemplResult, coordinatorGradeResult] = await Promise.all([
+      new Promise((resolve, reject) => {
+        db.query(laemplQuery, [userId], (err, results) => {
+          if (err) reject(err);
+          else resolve(results);
+        });
+      }),
+      new Promise((resolve, reject) => {
+        db.query(coordinatorGradeQuery, [userId], (err, results) => {
+          if (err) reject(err);
+          else resolve(results);
+        });
+      })
+    ]);
+    
+    res.json({
+      user_id: userId,
+      laempl_mps_assignment: laemplResult.length > 0 ? laemplResult[0] : null,
+      coordinator_grade_assignment: coordinatorGradeResult.length > 0 ? coordinatorGradeResult[0] : null
+    });
+  } catch (error) {
+    console.error("Error checking coordinator grade:", error);
+    res.status(500).json({ error: "Failed to check coordinator grade", details: error.message });
+  }
+});
+
 app.use("/reports", reportAssignmentRouter);
 app.use("/categories", categoryRouter);
 app.use("/subcategories", subCategoryRouter);
@@ -3184,9 +3666,6 @@ app.get("/reports/laempl-mps/:submissionId/peers", async (req, res) => {
     
     // Determine requester role for filtering
     const requesterRole = (req.user?.role || '').toLowerCase();
-    const roleClause = requesterRole === 'principal'
-      ? "LOWER(ud.role) IN ('teacher','coordinator')"
-      : "LOWER(ud.role) = 'teacher'";
     
     // Build query based on parent_assignment_id, report_assignment_id, or same assignment
     let peersQuery;
@@ -3195,6 +3674,21 @@ app.get("/reports/laempl-mps/:submissionId/peers", async (req, res) => {
     // Convert parentAssignmentId to number if it's a string
     const parentId = parentAssignmentId ? Number(parentAssignmentId) : null;
     console.log("[API] Converted parentId:", parentId);
+    
+    // Role clause: When querying child assignments (parentId exists), include coordinators
+    // because coordinators can act as teachers and submit to child assignments
+    // For same-assignment queries, only include teachers (or coordinators if principal)
+    let roleClause;
+    if (parentId) {
+      // For parent-child queries: include both teachers and coordinators
+      // Coordinators submitting to child assignments are acting as teachers
+      roleClause = "LOWER(ud.role) IN ('teacher','coordinator')";
+    } else {
+      // For same-assignment queries: use standard role filtering
+      roleClause = requesterRole === 'principal'
+        ? "LOWER(ud.role) IN ('teacher','coordinator')"
+        : "LOWER(ud.role) = 'teacher'";
+    }
     
     if (parentId) {
       // Parent-child query: get teacher submissions from child assignments of the parent
@@ -3391,7 +3885,9 @@ app.get("/reports/laempl-mps/:submissionId/peers", async (req, res) => {
     
     // If no peers found in same report assignment, look for teacher submissions across different report assignments for same grade level
     let allPeers = peers;
-    if (peers.length === 0) {
+    if (peers.length === 0 && !parentId) {
+      // Only use cross-assignment query if we're not already querying by parent
+      // (parent-child queries should have found peers already)
       console.log("[API] No peers found, trying cross-assignment query...");
       
       const crossAssignmentQuery = `
@@ -3695,155 +4191,7 @@ app.post("/reports/update-status-to-pending", async (req, res) => {
   }
 });
 
-// Duplicate route removed - using the one above at line 3000
-
-// Update report assignment
-app.put("/reports/assignment/:reportId", async (req, res) => {
-  try {
-    const { reportId } = req.params;
-    const { title, quarter, year, from_date, to_date, instruction, is_given, allow_late, number_of_submission, assignees } = req.body;
-    
-    console.log('🔄 [DEBUG] Updating report assignment:', reportId, req.body);
-
-    // Update the report assignment
-    const updateQuery = `
-      UPDATE report_assignment 
-      SET title = ?, quarter = ?, year = ?, from_date = ?, to_date = ?, 
-          instruction = ?, is_given = ?, allow_late = ?
-      WHERE report_assignment_id = ?
-    `;
-    
-    const updateResult = await new Promise((resolve, reject) => {
-      db.query(updateQuery, [
-        title, quarter, year, from_date, to_date, 
-        instruction, is_given, allow_late, reportId
-      ], (err, results) => {
-        if (err) reject(err);
-        else resolve(results);
-      });
-    });
-
-    console.log('🔄 [DEBUG] Updated report assignment:', updateResult.affectedRows);
-
-    // Handle assignees: add new ones, remove old ones, update existing
-    if (assignees && Array.isArray(assignees)) {
-      // Get existing submissions with their assignees
-      const getSubmissionsQuery = `
-        SELECT submission_id, submitted_by, category_id, number_of_submission, fields
-        FROM submission 
-        WHERE report_assignment_id = ?
-      `;
-      const existingSubmissions = await new Promise((resolve, reject) => {
-        db.query(getSubmissionsQuery, [reportId], (err, results) => {
-          if (err) reject(err);
-          else resolve(results || []);
-        });
-      });
-
-      const existingAssigneeIds = [...new Set(existingSubmissions.map(s => s.submitted_by))];
-      const newAssigneeIds = assignees.map(id => Number(id));
-      
-      // Identify assignees to remove (exist in DB but not in new list)
-      const assigneesToRemove = existingAssigneeIds.filter(id => !newAssigneeIds.includes(id));
-      
-      // Identify assignees to add (exist in new list but not in DB)
-      const assigneesToAdd = newAssigneeIds.filter(id => !existingAssigneeIds.includes(id));
-      
-      // Identify assignees that remain (exist in both)
-      const assigneesToKeep = newAssigneeIds.filter(id => existingAssigneeIds.includes(id));
-
-      console.log('🔄 [DEBUG] Assignee changes:', {
-        existing: existingAssigneeIds,
-        new: newAssigneeIds,
-        toRemove: assigneesToRemove,
-        toAdd: assigneesToAdd,
-        toKeep: assigneesToKeep
-      });
-
-      // Delete submissions for removed assignees (ONLY for this specific assignment)
-      if (assigneesToRemove.length > 0) {
-        // Use placeholders for IN clause to ensure proper scoping
-        const placeholders = assigneesToRemove.map(() => '?').join(',');
-        const deleteQuery = `
-          DELETE FROM submission 
-          WHERE report_assignment_id = ? AND submitted_by IN (${placeholders})
-        `;
-        await new Promise((resolve, reject) => {
-          db.query(deleteQuery, [reportId, ...assigneesToRemove], (err, results) => {
-            if (err) reject(err);
-            else {
-              console.log('🔄 [DEBUG] Deleted submissions for removed assignees (assignment:', reportId, '):', assigneesToRemove);
-              resolve(results);
-            }
-          });
-        });
-      }
-
-      // Create new submissions for added assignees
-      if (assigneesToAdd.length > 0) {
-        // Get category_id and default number_of_submission from report_assignment
-        const getAssignmentQuery = `SELECT category_id FROM report_assignment WHERE report_assignment_id = ?`;
-        const assignmentData = await new Promise((resolve, reject) => {
-          db.query(getAssignmentQuery, [reportId], (err, results) => {
-            if (err) reject(err);
-            else resolve(results[0]);
-          });
-        });
-
-        for (const assigneeId of assigneesToAdd) {
-          const insertSubmissionQuery = `
-            INSERT INTO submission (report_assignment_id, category_id, submitted_by, status, number_of_submission, fields)
-            VALUES (?, ?, ?, 1, ?, '{}')
-          `;
-          
-          await new Promise((resolve, reject) => {
-            db.query(insertSubmissionQuery, [
-              reportId, 
-              assignmentData?.category_id || 0, 
-              assigneeId, 
-              number_of_submission || 1
-            ], (err, results) => {
-              if (err) reject(err);
-              else {
-                console.log('🔄 [DEBUG] Created submission for new assignee:', assigneeId);
-                resolve(results);
-              }
-            });
-          });
-        }
-      }
-
-      // Update status to pending (1) for kept assignees (ONLY for this specific assignment)
-      if (assigneesToKeep.length > 0) {
-        // Use placeholders for IN clause to ensure proper scoping
-        const placeholders = assigneesToKeep.map(() => '?').join(',');
-        const updateStatusQuery = `
-          UPDATE submission 
-          SET status = 1
-          WHERE report_assignment_id = ? AND submitted_by IN (${placeholders})
-        `;
-        await new Promise((resolve, reject) => {
-          db.query(updateStatusQuery, [reportId, ...assigneesToKeep], (err, results) => {
-            if (err) reject(err);
-            else {
-              console.log('🔄 [DEBUG] Updated status for kept assignees (assignment:', reportId, '):', assigneesToKeep);
-              resolve(results);
-            }
-          });
-        });
-      }
-    }
-
-    res.json({ 
-      success: true, 
-      affectedRows: updateResult.affectedRows,
-      message: "Report assignment updated successfully"
-    });
-  } catch (error) {
-    console.error("Error updating report assignment:", error);
-    res.status(500).json({ error: "Failed to update report assignment", details: error.message });
-  }
-});
+// Duplicate route removed - using the one defined at line 3152 (before /reports router)
 
 // Get upcoming deadline submissions for coordinators (individual submissions with is_given = 0)
 // NOTE: This is a duplicate endpoint - the one above (line 3072) takes precedence since it's registered first

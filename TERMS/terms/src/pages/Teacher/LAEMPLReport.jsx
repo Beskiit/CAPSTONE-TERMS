@@ -285,7 +285,10 @@ function LAEMPLReport() {
         
         // Store report assignment IDs for parent-child linking
         setReportAssignmentId(data?.report_assignment_id ?? null);
-        // Get parent_assignment_id from the report_assignment if available
+        // Get parent_assignment_id and grade_level_id from the report_assignment if available
+        let assignmentGradeLevelId = null;
+        let raData = null;
+        
         if (data?.report_assignment_id) {
           try {
             // Fetch user data if not already available
@@ -305,11 +308,14 @@ function LAEMPLReport() {
               credentials: "include"
             });
             if (raRes.ok) {
-              const raData = await raRes.json();
+              raData = await raRes.json();
+              assignmentGradeLevelId = raData?.grade_level_id;
+              console.log("[LAEMPLReport] Assignment grade level:", assignmentGradeLevelId);
+              
               // For coordinator submissions, the coordinator's report_assignment_id IS the parent
-              // Check both submission type and user role to determine if this is a coordinator view
-              const isCoordinatorSubmission = (data.fields && data.fields.type === "LAEMPL_COORDINATOR") || 
-                                             (currentUser && currentUser.role === "coordinator");
+              // Determine if this is a coordinator submission based on submission type only
+              // Don't check user role - submission type is the source of truth
+              const isCoordinatorSubmission = data.fields && data.fields.type === "LAEMPL_COORDINATOR";
               console.log("[LAEMPLReport] Setting parent assignment - isCoordinatorSubmission:", isCoordinatorSubmission, "user role:", currentUser?.role, "submission type:", data.fields?.type);
               if (isCoordinatorSubmission) {
                 // Coordinator's own assignment is the parent - use it to find child assignments
@@ -322,7 +328,7 @@ function LAEMPLReport() {
               }
             }
           } catch (err) {
-            console.warn("Failed to fetch parent assignment ID:", err);
+            console.warn("Failed to fetch assignment data:", err);
           }
         }
         
@@ -330,20 +336,65 @@ function LAEMPLReport() {
         console.log("Submission data:", data);
         console.log("Fields data:", data.fields);
         
-        // Check if this is a coordinator submission OR if user is a coordinator
-        const isCoordinatorSubmission = data.fields && data.fields.type === "LAEMPL_COORDINATOR";
-        const isCoordinatorUser = user && user.role === "coordinator";
-        
-        if (isCoordinatorSubmission || isCoordinatorUser) {
-        console.log("Coordinator view detected - submission type:", data.fields?.type, "user role:", user?.role);
-          setIsCoordinatorView(true);
+        // Determine view type based on whether coordinator is the assigned coordinator for this assignment
+        // If coordinator is NOT the assigned coordinator, they're acting as a teacher → teacher view
+        // If coordinator IS the assigned coordinator → coordinator view
+        const determineViewType = async () => {
+          // Fetch user data if not already available
+          let currentUser = user;
+          if (!currentUser) {
+            try {
+              const userRes = await fetch(`${API_BASE}/auth/me`, { credentials: "include" });
+              if (userRes.ok) {
+                currentUser = await userRes.json();
+              }
+            } catch (err) {
+              console.warn("Failed to fetch user data:", err);
+            }
+          }
           
-          // Use grade level from submission fields or default to 2
-          const gradeLevelId = (data.fields && data.fields.grade) || 2;
-          console.log("Using grade level:", gradeLevelId);
+          const isCoordinatorSubmission = data.fields && data.fields.type === "LAEMPL_COORDINATOR";
+          const isCoordinatorUser = currentUser && currentUser.role === "coordinator";
           
-          // Fetch sections dynamically from database based on grade level
-          const fetchSectionsForGrade = async () => {
+          // If submission type is explicitly "LAEMPL_COORDINATOR", use coordinator view
+          // Otherwise, check if coordinator is the assigned coordinator for this assignment
+          let shouldUseCoordinatorView = false;
+          
+          if (isCoordinatorSubmission) {
+            // Explicit coordinator submission type
+            shouldUseCoordinatorView = true;
+            console.log("[LAEMPLReport] Coordinator view - explicit submission type: LAEMPL_COORDINATOR");
+            // Ensure parent assignment points to this coordinator assignment
+            setParentAssignmentId((prev) => prev ?? data.report_assignment_id);
+          } else if (isCoordinatorUser && raData) {
+            // Check if current coordinator is the assigned coordinator for this assignment
+            const assignmentCoordinatorId = raData?.coordinator_user_id;
+            const currentUserId = currentUser?.user_id;
+            
+            console.log("[LAEMPLReport] Assignment coordinator_user_id:", assignmentCoordinatorId, "Current user ID:", currentUserId);
+            
+            // If coordinator is the assigned coordinator for this assignment, use coordinator view
+            // Otherwise, they're acting as a teacher (recipient) → use teacher view
+            if (assignmentCoordinatorId != null && Number(assignmentCoordinatorId) === Number(currentUserId)) {
+              shouldUseCoordinatorView = true;
+              console.log("[LAEMPLReport] Coordinator view - user is the assigned coordinator for this assignment");
+              // Coordinator's assignment is the parent for child teacher submissions
+              setParentAssignmentId((prev) => prev ?? data.report_assignment_id);
+            } else {
+              console.log("[LAEMPLReport] Teacher view - coordinator is acting as a teacher (not the assigned coordinator)");
+            }
+          }
+          
+          if (shouldUseCoordinatorView) {
+            console.log("[LAEMPLReport] Using coordinator view");
+            setIsCoordinatorView(true);
+          
+            // Use grade level from assignment or submission fields or default to 2
+            const gradeLevelId = assignmentGradeLevelId || (data.fields && data.fields.grade) || 2;
+            console.log("Using grade level:", gradeLevelId);
+            
+            // Fetch sections dynamically from database based on grade level
+            const fetchSectionsForGrade = async () => {
             try {
               const sectionsRes = await fetch(`${API_BASE}/sections/grade/${gradeLevelId}`, {
                 credentials: "include"
@@ -380,12 +431,12 @@ function LAEMPLReport() {
             }
           };
           
-          // Fetch sections and then initialize data
-          fetchSectionsForGrade().then(sections => {
-            if (sections.length > 0) {
-              // Initialize data for all sections
-              const newData = {};
-              sections.forEach(section => {
+            // Fetch sections and then initialize data
+            fetchSectionsForGrade().then(sections => {
+              if (sections.length > 0) {
+                // Initialize data for all sections
+                const newData = {};
+                sections.forEach(section => {
                 newData[section.section_name] = {};
                 dynamicCols.forEach(col => {
                   newData[section.section_name][col.key] = "";
@@ -398,6 +449,17 @@ function LAEMPLReport() {
           
           // Set a temporary empty array while fetching
           setAllSections([]);
+        } else {
+          // Teacher view - not coordinator view
+          console.log("[LAEMPLReport] Using teacher view");
+        }
+      };
+      
+      // Call the async function to determine view type
+      determineViewType();
+      
+      // Continue with teacher view logic if not coordinator view
+      if (!isCoordinatorView) {
           
           // Create dynamic columns for coordinator - check if there's subject data in consolidated data
           let newCols = [

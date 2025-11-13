@@ -206,10 +206,18 @@ export const giveReport = (req, res) => {
     return res.status(400).send('title is required (string).');
   }
 
-  const recipients =
+  const recipientsRaw =
     Array.isArray(assignees) && assignees.length
       ? assignees
       : (submitted_by != null ? [submitted_by] : []);
+
+  const recipients = recipientsRaw
+    .map((id) => {
+      if (id == null) return null;
+      const num = Number(id);
+      return Number.isFinite(num) ? num : null;
+    })
+    .filter((id) => id != null);
 
   if (!recipients.length) {
     return res.status(400).send('Provide submitted_by or a non-empty assignees array.');
@@ -368,6 +376,7 @@ export const giveLAEMPLMPSReport = (req, res) => {
     assignees,
     title,
     grade_level_id,
+    coordinator_user_id = null,
     subject_ids = [], // Array of subject IDs
     number_of_submission,
     number_of_submissions,
@@ -416,9 +425,58 @@ export const giveLAEMPLMPSReport = (req, res) => {
     conn.beginTransaction((txErr) => {
       if (txErr) { conn.release(); return res.status(500).send('Begin TX error: ' + txErr.message); }
 
+      // Determine coordinator recipient (if any) once per request
+      // BUT: Skip this if parent_report_assignment_id is provided (coordinator assigning to teachers)
+      // to avoid setting coordinator_user_id on child assignments
+      let coordinatorRecipientId = null;
+      const computeCoordinatorRecipient = async () => {
+        if (!recipients.length) return;
+        
+        // If parent_report_assignment_id is provided, this is a child assignment from a coordinator
+        // Don't automatically set coordinator_user_id - only use it if explicitly provided
+        if (parent_report_assignment_id != null) {
+          // Only set if explicitly provided in request
+          if (coordinator_user_id != null && Number.isFinite(Number(coordinator_user_id))) {
+            coordinatorRecipientId = Number(coordinator_user_id);
+          }
+          // Otherwise, leave it as null to avoid conflicts
+          return;
+        }
+        
+        // For principal assignments, compute coordinator recipient as before
+        if (coordinator_user_id != null && Number.isFinite(Number(coordinator_user_id))) {
+          coordinatorRecipientId = Number(coordinator_user_id);
+          return;
+        }
+        const placeholders = recipients.map(() => '?').join(', ');
+        const sql = `
+          SELECT user_id
+          FROM user_details
+          WHERE user_id IN (${placeholders})
+            AND LOWER(role) = 'coordinator'
+          LIMIT 1
+        `;
+        const row = await new Promise((resolve, reject) => {
+          conn.query(sql, recipients, (err, results) => {
+            if (err) reject(err);
+            else resolve(results?.[0] || null);
+          });
+        }).catch(() => null);
+        if (row?.user_id != null) {
+          coordinatorRecipientId = Number(row.user_id);
+        } else {
+          coordinatorRecipientId = Number(recipients[0]);
+        }
+      };
+
       // Create assignments for each subject
       const createAssignments = async () => {
         const results = [];
+        await computeCoordinatorRecipient();
+        const normalizedCoordinatorId =
+          coordinatorRecipientId != null && Number.isFinite(coordinatorRecipientId)
+            ? coordinatorRecipientId
+            : null;
         
         for (const subject_id of subject_ids) {
           // Get subject name for title
@@ -443,33 +501,127 @@ export const giveLAEMPLMPSReport = (req, res) => {
           // Insert assignment for this subject
           const insertReportSql = `
             INSERT INTO report_assignment
-              (category_id, sub_category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title, parent_report_assignment_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              (category_id, sub_category_id, grade_level_id, coordinator_user_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title, parent_report_assignment_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `;
-          const raVals = [
-            category_id,
-            sub_category_id ?? null,
-            given_by,
-            quarter,
-            year,
-            fromDateValue,
-            to_date,
-            instruction,
-            _is_given,
-            _is_archived,
-            _allow_late,
-            assignmentTitle,
-            parent_report_assignment_id // Link to parent assignment if provided
-          ];
+          const finalGradeLevelId = grade_level_id ?? null;
+          let finalCoordinatorUserId = coordinator_user_id ?? null;
 
-          const assignmentResult = await new Promise((resolve, reject) => {
-            conn.query(insertReportSql, raVals, (err, result) => {
-              if (err) reject(err);
-              else resolve(result);
+          // Only use normalizedCoordinatorId fallback if:
+          // 1. coordinator_user_id is not explicitly provided, AND
+          // 2. parent_report_assignment_id is NOT provided (not a child assignment from coordinator)
+          // This prevents setting coordinator_user_id on child assignments when coordinator assigns to teachers
+          if ((finalCoordinatorUserId === null || Number.isNaN(Number(finalCoordinatorUserId))) 
+              && parent_report_assignment_id == null) {
+            finalCoordinatorUserId = normalizedCoordinatorId;
+          }
+
+          if (finalCoordinatorUserId != null) {
+            finalCoordinatorUserId = Number(finalCoordinatorUserId);
+            if (!Number.isFinite(finalCoordinatorUserId)) {
+              finalCoordinatorUserId = null;
+            }
+          }
+
+          let report_assignment_id;
+          try {
+            const assignmentResult = await new Promise((resolve, reject) => {
+              conn.query(insertReportSql, [
+                category_id,
+                sub_category_id ?? null,
+                finalGradeLevelId,
+                finalCoordinatorUserId,
+                given_by,
+                quarter,
+                year,
+                fromDateValue,
+                to_date,
+                instruction,
+                _is_given,
+                _is_archived,
+                _allow_late,
+                assignmentTitle,
+                parent_report_assignment_id // Link to parent assignment if provided
+              ], (err, result) => {
+                if (err) reject(err);
+                else resolve(result);
+              });
             });
-          });
+            report_assignment_id = assignmentResult.insertId;
+          } catch (err) {
+            if (err.code === 'ER_DUP_ENTRY' && finalGradeLevelId != null) {
+              console.warn('[giveLAEMPLMPSReport] Duplicate coordinator assignment detected, reusing existing record.', {
+                grade_level_id: finalGradeLevelId,
+                quarter,
+                year,
+                coordinator_user_id: finalCoordinatorUserId
+              });
 
-          const report_assignment_id = assignmentResult.insertId;
+              const existingSql = `
+                SELECT report_assignment_id, grade_level_id, coordinator_user_id
+                FROM report_assignment
+                WHERE category_id = ?
+                  AND (sub_category_id = ? OR (sub_category_id IS NULL AND ? IS NULL))
+                  AND grade_level_id = ?
+                  AND quarter = ?
+                  AND year = ?
+                ORDER BY report_assignment_id DESC
+                LIMIT 1
+              `;
+
+              const existingRows = await new Promise((resolve, reject) => {
+                conn.query(
+                  existingSql,
+                  [
+                    category_id,
+                    sub_category_id ?? null,
+                    sub_category_id ?? null,
+                    finalGradeLevelId,
+                    quarter,
+                    year
+                  ],
+                  (selectErr, rows) => {
+                    if (selectErr) reject(selectErr);
+                    else resolve(rows);
+                  }
+                );
+              });
+
+              if (!existingRows || existingRows.length === 0) {
+                throw err;
+              }
+
+              const existing = existingRows[0];
+              report_assignment_id = existing.report_assignment_id;
+
+              // Ensure coordinator_user_id and grade_level_id are up to date
+              // BUT: Don't update coordinator_user_id if parent_report_assignment_id is provided
+              // (coordinator assigning to teachers - child assignments shouldn't have coordinator_user_id)
+              const shouldUpdateCoordinatorId = parent_report_assignment_id == null && 
+                                                finalCoordinatorUserId != null && 
+                                                existing.coordinator_user_id !== finalCoordinatorUserId;
+              const shouldUpdateGradeLevel = existing.grade_level_id == null && finalGradeLevelId != null;
+              
+              if (shouldUpdateGradeLevel || shouldUpdateCoordinatorId) {
+                await new Promise((resolve, reject) => {
+                  conn.query(
+                    `
+                      UPDATE report_assignment
+                      SET grade_level_id = ?, coordinator_user_id = ?
+                      WHERE report_assignment_id = ?
+                    `,
+                    [finalGradeLevelId, finalCoordinatorUserId, report_assignment_id],
+                    (updateErr) => {
+                      if (updateErr) reject(updateErr);
+                      else resolve();
+                    }
+                  );
+                });
+              }
+            } else {
+              throw err;
+            }
+          }
 
           // Create submissions for each recipient for this subject
           for (let i = 0; i < recipients.length; i++) {
@@ -1502,6 +1654,59 @@ export const getCoordinatorLAEMPLMPSGrade = (req, res) => {
         });
       });
     });
+  });
+};
+
+// GET /reports/laempl-mps/coordinator-grade/:coordinatorId
+// Principal lookup of a coordinator's assigned grade level for LAEMPL & MPS
+export const getCoordinatorLAEMPLMPSGradeById = (req, res) => {
+  const { coordinatorId } = req.params;
+  const { year, quarter } = req.query;
+
+  if (!coordinatorId) {
+    return res.status(400).json({ error: 'coordinatorId is required.' });
+  }
+
+  const filters = [];
+  const values = [Number(coordinatorId)];
+
+  if (year) {
+    filters.push('ra.year = ?');
+    values.push(Number(year));
+  }
+
+  if (quarter) {
+    filters.push('ra.quarter = ?');
+    values.push(Number(quarter));
+  }
+
+  const whereClause = filters.length ? ` AND ${filters.join(' AND ')}` : '';
+
+  const sql = `
+    SELECT 
+      ra.grade_level_id,
+      gl.grade_level
+    FROM report_assignment ra
+    LEFT JOIN grade_level gl ON ra.grade_level_id = gl.grade_level_id
+    WHERE ra.category_id = 1
+      AND ra.sub_category_id = 3
+      AND ra.coordinator_user_id = ?
+      ${whereClause}
+    ORDER BY ra.year DESC, ra.quarter DESC, ra.report_assignment_id DESC
+    LIMIT 1
+  `;
+
+  db.query(sql, values, (err, rows) => {
+    if (err) {
+      console.error('[API] Failed to fetch coordinator grade by ID:', err);
+      return res.status(500).json({ error: 'Database error', details: err.message });
+    }
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Coordinator grade not found for LAEMPL & MPS.' });
+    }
+
+    res.json(rows[0]);
   });
 };
 

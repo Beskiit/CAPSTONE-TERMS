@@ -1,4 +1,4 @@
-import React, {useEffect, useState} from "react";
+import React, {useEffect, useMemo, useState} from "react";
 import { Link } from "react-router-dom";
 import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import './Instruction.css';
@@ -13,6 +13,11 @@ const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives
 function LAEMPLInstruction() {
     const navigate = useNavigate();
     const { state } = useLocation();
+    
+    // Debug: Log state received from navigation
+    useEffect(() => {
+        console.log("🔍 [LAEMPLInstruction] State received from navigation:", state);
+    }, []);
     const formatDateOnly = (val) => {
         if (!val) return 'N/A';
         try {
@@ -38,28 +43,56 @@ function LAEMPLInstruction() {
 
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
+    const initialCoordinatorId =
+        state?.coordinator_user_id != null && !Number.isNaN(Number(state.coordinator_user_id))
+            ? Number(state.coordinator_user_id)
+            : state?.coordinatorUserId != null && !Number.isNaN(Number(state.coordinatorUserId))
+            ? Number(state.coordinatorUserId)
+            : null;
+    const [assignedCoordinatorId, setAssignedCoordinatorId] = useState(initialCoordinatorId);
+    const initialAssignmentGradeLevelId = 
+        state?.grade_level_id != null && !Number.isNaN(Number(state.grade_level_id))
+            ? Number(state.grade_level_id)
+            : null;
+    const [assignmentGradeLevelId, setAssignmentGradeLevelId] = useState(initialAssignmentGradeLevelId);
+    const [coordinatorGradeLevelId, setCoordinatorGradeLevelId] = useState(null);
+    const initialIsGiven = state?.is_given === 1 || state?.is_given === '1';
+    const [assignmentIsGiven, setAssignmentIsGiven] = useState(initialIsGiven);
 
 
     const role = (user?.role || "").toLowerCase();
     const isTeacher = role === "teacher";
     const isCoordinator = role === "coordinator";
-    const forceTeacherView = state?.forceTeacherView === true;
+    
+    // Compute forceTeacherView: check state first, then check if coordinator_user_id is null
+    const forceTeacherView = useMemo(() => {
+        // Check state first
+        const v = state?.forceTeacherView;
+        if (typeof v === "string" && (v === "true" || v === "1")) return true;
+        if (typeof v === "number" && v === 1) return true;
+        if (v === true) return true;
+        
+        // If coordinator and assignedCoordinatorId is null, force teacher view
+        if (isCoordinator && assignedCoordinatorId == null && !loading) {
+            return true;
+        }
+        
+        return false;
+    }, [state?.forceTeacherView, isCoordinator, assignedCoordinatorId, loading]);
+    
     const fromAssignedReport = state?.fromAssignedReport === true;
     const recipientsCount = Number(state?.recipients_count || 0);
     const isGivenFlag = state?.is_given === 1 || state?.is_given === '1';
     
-    // Debug logging
-    console.log("[LAEMPLInstruction] User:", user);
-    console.log("[LAEMPLInstruction] Role:", role);
-    console.log("[LAEMPLInstruction] isCoordinator:", isCoordinator);
-    console.log("[LAEMPLInstruction] forceTeacherView:", forceTeacherView);
+    // Debug logging - moved to useEffect to log after user is fetched
     const onPrepare = () => {
         navigate(`/LAEMPLReport?id=${submissionId || ''}`);
     };
 
     const onSetAsReport = () => {
-        const isGiven = state?.is_given === 1 || state?.is_given === '1';
-        if (isCoordinator && isGiven) {
+        // Check both state and assignment data for is_given value
+        const isGiven = assignmentIsGiven || state?.is_given === 1 || state?.is_given === '1';
+        if (isGiven) {
             toast.error("This report has already been given to teachers.");
             return;
         }
@@ -67,7 +100,14 @@ function LAEMPLInstruction() {
             toast.error("Missing report assignment ID.");
             return;
         }
-        navigate(`/SetReport?reportId=${reportAssignmentId}&isPrincipalReport=true`);
+        navigate(`/SetReport?reportId=${reportAssignmentId}&isPrincipalReport=true`, {
+            state: {
+                fromAssignedReport: true,
+                prefillData: true,
+                forceCreate: true,
+                parentAssignmentId: reportAssignmentId
+            }
+        });
     };
 
     const handleViewSubmission = () => {
@@ -144,6 +184,147 @@ function LAEMPLInstruction() {
     fetchUser();
   }, []);
 
+    useEffect(() => {
+        if (!reportAssignmentId) return;
+
+        const fetchAssignmentData = async () => {
+            try {
+                const res = await fetch(`${API_BASE}/reports/assignment/${reportAssignmentId}`, {
+                    credentials: "include"
+                });
+                if (!res.ok) return;
+                const assignment = await res.json();
+                
+                // Set coordinator_user_id if available
+                if (assignment?.coordinator_user_id != null && assignedCoordinatorId == null) {
+                    setAssignedCoordinatorId(Number(assignment.coordinator_user_id));
+                }
+                
+                // Set assignment grade level
+                if (assignment?.grade_level_id != null) {
+                    setAssignmentGradeLevelId(Number(assignment.grade_level_id));
+                }
+                
+                // Set assignment is_given flag
+                if (assignment?.is_given != null) {
+                    setAssignmentIsGiven(assignment.is_given === 1 || assignment.is_given === '1');
+                }
+            } catch (err) {
+                console.warn("[LAEMPLInstruction] Failed to fetch assignment data:", err);
+            }
+        };
+
+        fetchAssignmentData();
+    }, [reportAssignmentId, assignedCoordinatorId]);
+
+    // Fetch coordinator's assigned grade level
+    useEffect(() => {
+        if (!isCoordinator || !user?.user_id) return;
+        if (coordinatorGradeLevelId != null) return;
+
+        const fetchCoordinatorGrade = async () => {
+            try {
+                const res = await fetch(`${API_BASE}/reports/laempl-mps/coordinator-grade`, {
+                    credentials: "include"
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data?.grade_level_id != null) {
+                        setCoordinatorGradeLevelId(Number(data.grade_level_id));
+                    }
+                }
+            } catch (err) {
+                console.warn("[LAEMPLInstruction] Failed to fetch coordinator grade level:", err);
+            }
+        };
+
+        fetchCoordinatorGrade();
+    }, [isCoordinator, user, coordinatorGradeLevelId]);
+
+    const isAssignedCoordinator = useMemo(() => {
+        if (!isCoordinator) return false;
+        if (!user?.user_id) return false;
+        
+        // Only check coordinator_user_id - if it's null or doesn't match, coordinator acts as teacher
+        // No grade level fallback - coordinator_user_id must explicitly match
+        if (assignedCoordinatorId != null) {
+            return Number(assignedCoordinatorId) === Number(user.user_id);
+        }
+        
+        // If assignedCoordinatorId is null, coordinator is NOT the assigned coordinator
+        return false;
+    }, [isCoordinator, assignedCoordinatorId, user]);
+
+    const canSetReportToTeachers = useMemo(() => {
+        if (loading) {
+            console.log("❌ [canSetReportToTeachers] Blocked: loading");
+            return false;
+        }
+        if (!isCoordinator) {
+            console.log("❌ [canSetReportToTeachers] Blocked: not coordinator");
+            return false;
+        }
+        if (forceTeacherView) {
+            console.log("❌ [canSetReportToTeachers] Blocked: forceTeacherView");
+            return false;
+        }
+        // Removed isGivenFlag check - button should show even if report is already given
+        // The toast will be shown in onSetAsReport if is_given = 1
+        if (recipientsCount >= 2) {
+            console.log("❌ [canSetReportToTeachers] Blocked: recipientsCount >= 2");
+            return false;
+        }
+        
+        // If coordinator IS the assigned coordinator, they should see the button
+        // even if they have a submission (they can distribute to other teachers)
+        // even if is_given = 1 (toast will show when clicked)
+        if (isAssignedCoordinator) {
+            console.log("✅ [canSetReportToTeachers] Allowed: isAssignedCoordinator = true");
+            return true;
+        }
+        
+        // If coordinator has a submission AND they're NOT the assigned coordinator,
+        // they're acting as a teacher and should NOT see the button
+        if (submissionId) {
+            console.log("❌ [canSetReportToTeachers] Blocked: has submission and not assigned coordinator");
+            return false;
+        }
+        
+        // If there's an assigned coordinator and it's NOT the current user,
+        // then the current coordinator is acting as a teacher (recipient)
+        // and should NOT see the "Set as Report to Teachers" button
+        if (assignedCoordinatorId != null && !isAssignedCoordinator) {
+            console.log("❌ [canSetReportToTeachers] Blocked: different coordinator assigned");
+            return false;
+        }
+        
+        // Show button if coordinator IS the assigned coordinator for this report
+        // (checked by coordinator_user_id match OR grade level match as fallback)
+        console.log("✅ [canSetReportToTeachers] Allowed: isAssignedCoordinator = true (fallback)");
+        return isAssignedCoordinator;
+    }, [loading, isCoordinator, forceTeacherView, recipientsCount, assignedCoordinatorId, isAssignedCoordinator, submissionId, assignmentGradeLevelId, coordinatorGradeLevelId]);
+
+    // Debug logging - log after user and assignment data are loaded
+    useEffect(() => {
+        if (loading) return;
+        console.log("🔍 [LAEMPLInstruction] Full State Check:", {
+            user: user,
+            userId: user?.user_id,
+            role: role,
+            isCoordinator: isCoordinator,
+            forceTeacherView: forceTeacherView,
+            assignedCoordinatorId: assignedCoordinatorId,
+            assignmentGradeLevelId: assignmentGradeLevelId,
+            coordinatorGradeLevelId: coordinatorGradeLevelId,
+            isAssignedCoordinator: isAssignedCoordinator,
+            submissionId: submissionId,
+            recipientsCount: recipientsCount,
+            isGivenFlag: isGivenFlag,
+            canSetReportToTeachers: canSetReportToTeachers,
+            buttonShouldShow: canSetReportToTeachers
+        });
+    }, [loading, user, role, isCoordinator, forceTeacherView, assignedCoordinatorId, assignmentGradeLevelId, coordinatorGradeLevelId, isAssignedCoordinator, submissionId, recipientsCount, isGivenFlag, canSetReportToTeachers]);
+
     return (
         <>
         <Header userText={user ? user.name : "Guest"} />
@@ -171,7 +352,7 @@ function LAEMPLInstruction() {
                                 ) : (
                                     <>
                                         <button className="instruction-btn" onClick={onPrepare}>+ Prepare Report</button>
-                                        {!loading && isCoordinator && (
+                                        {canSetReportToTeachers && (
                                             <button className="instruction-btn" onClick={onSetAsReport}>Set as Report to Teachers</button>
                                         )}
                                     </>

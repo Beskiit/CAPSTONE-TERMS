@@ -45,7 +45,7 @@ function SidebarCoordinator({ activeLink, style }) {
                                             {openMenu === "reports" && (
                                                 <ul className="dropdown-menu">
                                                     <li><a href="/Accomplishment">Accomplishment Report</a></li>
-                                                    <li className={`${activeLink === 'LAEMPL & MPS' ? 'active' : ''}`}><a href="/LAEMPL">LAEMPL & MPS</a></li>
+                                                    <li className={`${activeLink === 'LAEMPL & MPS' ? 'active' : ''}`}><Link to="/LAEMPLMPSReports">LAEMPL & MPS</Link></li>
                                                 </ul>
                                             )}
                                     </li>

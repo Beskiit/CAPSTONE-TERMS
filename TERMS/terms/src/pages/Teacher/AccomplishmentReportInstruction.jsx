@@ -219,7 +219,7 @@ function AccomplishmentReportInstruction() {
                             <div style={{ marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid #ccc' }}>
                                 <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', fontWeight: 'bold' }}>Assignment</h3>
                                 <div style={{ marginBottom: '8px' }}>
-                                    <span style={{ fontWeight: '500' }}>Type:</span> <span>{state?.category_name || category_name || 'N/A'}</span>
+                                    <span style={{ fontWeight: '500' }}>Type:</span> <span>{state?.category_name || 'N/A'}</span>
                                 </div>
                             </div>
                             <div>
