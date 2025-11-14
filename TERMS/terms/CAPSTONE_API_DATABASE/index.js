@@ -3406,6 +3406,25 @@ app.put("/reports/assignment/:reportId", requireAuth, async (req, res) => {
         });
 
         for (const assigneeId of assigneesToAdd) {
+          // Check if submission already exists to prevent duplicates
+          const checkSubmissionQuery = `
+            SELECT submission_id FROM submission 
+            WHERE report_assignment_id = ? AND submitted_by = ?
+            LIMIT 1
+          `;
+          const existingSubmission = await new Promise((resolve, reject) => {
+            db.query(checkSubmissionQuery, [reportId, assigneeId], (err, results) => {
+              if (err) reject(err);
+              else resolve(results && results.length > 0 ? results[0] : null);
+            });
+          });
+
+          // Skip if submission already exists
+          if (existingSubmission) {
+            console.log('🔄 [DEBUG] Submission already exists for assignee:', assigneeId, 'assignment:', reportId, '- skipping');
+            continue;
+          }
+
           const insertSubmissionQuery = `
             INSERT INTO submission (report_assignment_id, category_id, submitted_by, status, number_of_submission, fields)
             VALUES (?, ?, ?, 1, ?, '{}')

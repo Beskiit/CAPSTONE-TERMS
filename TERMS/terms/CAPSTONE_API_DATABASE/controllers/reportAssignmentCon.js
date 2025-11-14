@@ -628,6 +628,25 @@ export const giveLAEMPLMPSReport = (req, res) => {
             const recipient = recipients[i];
             const nos = hasPerRecipientNos ? number_of_submissions[i] : (number_of_submission || 1);
 
+            // Check if submission already exists to prevent duplicates
+            const checkSubmissionQuery = `
+              SELECT submission_id FROM submission 
+              WHERE report_assignment_id = ? AND submitted_by = ?
+              LIMIT 1
+            `;
+            const existingSubmission = await new Promise((resolve, reject) => {
+              conn.query(checkSubmissionQuery, [report_assignment_id, recipient], (err, results) => {
+                if (err) reject(err);
+                else resolve(results && results.length > 0 ? results[0] : null);
+              });
+            });
+
+            // Skip if submission already exists
+            if (existingSubmission) {
+              console.log('[giveLAEMPLMPSReport] Submission already exists for recipient:', recipient, 'assignment:', report_assignment_id, '- skipping');
+              continue;
+            }
+
             const insertSubmissionSql = `
               INSERT INTO submission
                 (report_assignment_id, category_id, submitted_by, status, number_of_submission, value, fields)

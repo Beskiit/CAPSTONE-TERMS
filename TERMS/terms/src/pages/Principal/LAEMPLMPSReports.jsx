@@ -159,65 +159,123 @@ function LAEMPLMPSReports() {
     fetchSubmissions();
   }, [user, selectedYearId, selectedQuarter]);
 
-  // Group submissions by coordinator AND grade level
-  // Each coordinator-grade combination should show as a single row
-  const groupedByCoordinatorAndGrade = useMemo(() => {
-    const grouped = {};
-    submissions.forEach(submission => {
-      // Use coordinator_user_id from the assignment, or submitted_by as fallback
+  const gradeGroups = useMemo(() => {
+    const groupsMap = new Map();
+    const gradeOrder = ["1", "2", "3", "4", "5", "6"];
+
+    submissions.forEach((submission) => {
+      const gradeLevel = submission.grade_level != null ? String(submission.grade_level) : "Unknown";
       const coordinatorId = submission.coordinator_user_id || submission.submitted_by;
-      const coordinatorName = submission.coordinator_name || 'Unknown Coordinator';
-      const gradeLevel = submission.grade_level || 'Unknown';
-      
-      // Create a unique key combining coordinator ID and grade level
-      const groupKey = `${coordinatorId}_${gradeLevel}`;
-      
-      if (!grouped[groupKey]) {
-        grouped[groupKey] = {
-          coordinator_id: coordinatorId,
-          coordinator_name: coordinatorName,
+      const coordinatorName = submission.coordinator_name || "Unknown Coordinator";
+
+      if (!groupsMap.has(gradeLevel)) {
+        groupsMap.set(gradeLevel, {
           grade_level: gradeLevel,
-          submissions: [],
           category_name: submission.category_name,
           sub_category_name: submission.sub_category_name,
           school_year: submission.school_year,
-          quarter: submission.quarter
-        };
+          quarter: submission.quarter,
+          submissions: [],
+          coordinatorsMap: new Map(),
+        });
       }
-      // Only add submissions that match this coordinator AND grade level
-      if (submission.grade_level === gradeLevel) {
-        grouped[groupKey].submissions.push(submission);
+
+      const group = groupsMap.get(gradeLevel);
+      group.submissions.push(submission);
+
+      if (!group.coordinatorsMap.has(coordinatorId)) {
+        group.coordinatorsMap.set(coordinatorId, {
+          coordinator_id: coordinatorId,
+          coordinator_name: coordinatorName,
+          submissions: [],
+        });
+      }
+      group.coordinatorsMap.get(coordinatorId).submissions.push(submission);
+    });
+
+    // Ensure grades 1-6 appear even if empty
+    const orderedGroups = gradeOrder.map((grade) => {
+      if (!groupsMap.has(grade)) {
+        groupsMap.set(grade, {
+          grade_level: grade,
+          category_name: submissions[0]?.category_name || "Quarterly Achievement Test",
+          sub_category_name: submissions[0]?.sub_category_name || "LAEMPL & MPS",
+          school_year: submissions[0]?.school_year || selectedSchoolYear,
+          quarter: submissions[0]?.quarter || selectedQuarter,
+          submissions: [],
+          coordinatorsMap: new Map(),
+        });
+      }
+      const group = groupsMap.get(grade);
+      group.coordinators = Array.from(group.coordinatorsMap.values());
+      delete group.coordinatorsMap;
+      return group;
+    });
+
+    // Include any additional grades (e.g., "Unknown")
+    groupsMap.forEach((group, grade) => {
+      if (!gradeOrder.includes(grade)) {
+        group.coordinators = Array.from(group.coordinatorsMap.values());
+        delete group.coordinatorsMap;
+        orderedGroups.push(group);
       }
     });
-    return grouped;
-  }, [submissions]);
 
-  const handleCoordinatorClick = (coordinatorGroup) => {
-    // Navigate to a new view showing submissions from this coordinator for this specific grade level
+    return orderedGroups;
+  }, [submissions, selectedSchoolYear, selectedQuarter]);
+
+  const aggregatedRow = useMemo(() => {
+    if (gradeGroups.length === 0) return null;
+    // Find first grade that has actual submission data, fallback to first entry
+    const referenceGroup =
+      gradeGroups.find((group) => group.submissions.length > 0) || gradeGroups[0];
+
+    return {
+      category_name: referenceGroup.category_name,
+      sub_category_name: referenceGroup.sub_category_name,
+      school_year: referenceGroup.school_year,
+      quarter: referenceGroup.quarter,
+      grade_groups: gradeGroups,
+      submissions: gradeGroups.flatMap((group) => group.submissions),
+    };
+  }, [gradeGroups]);
+
+  const handleAggregatedClick = () => {
+    if (!aggregatedRow) return;
     navigate(`/ViewCoordinatorSubmissions`, {
       state: {
-        coordinatorId: coordinatorGroup.coordinator_id,
-        coordinatorName: coordinatorGroup.coordinator_name,
-        gradeLevel: coordinatorGroup.grade_level,
-        submissions: coordinatorGroup.submissions,
         schoolYear: selectedSchoolYear,
-        quarter: selectedQuarter
-      }
+        quarter: selectedQuarter,
+        submissions: aggregatedRow.submissions,
+        gradeGroups: aggregatedRow.grade_groups,
+        viewMode: "allGrades",
+      },
     });
   };
 
-  // Group by grade level for display
-  const groupedByGrade = useMemo(() => {
-    const grouped = {};
-    Object.values(groupedByCoordinatorAndGrade).forEach(coordinatorGroup => {
-      const grade = coordinatorGroup.grade_level || 'Unknown';
-      if (!grouped[grade]) {
-        grouped[grade] = [];
-      }
-      grouped[grade].push(coordinatorGroup);
-    });
-    return grouped;
-  }, [groupedByCoordinatorAndGrade]);
+  const renderCoordinatorSummary = (group) => {
+    if (!group) return null;
+
+    if (group.coordinators && group.coordinators.length > 0) {
+      return group.coordinators.map((coordinator) => (
+        <div key={`${group.grade_level}-${coordinator.coordinator_id}`} style={{ marginBottom: "4px" }}>
+          <strong>Grade {group.grade_level}:</strong>{" "}
+          {coordinator.coordinator_name || `Coordinator ${coordinator.coordinator_id}`}
+          <span style={{ color: "#6b7280" }}>
+            {" "}
+            ({coordinator.submissions.length || 0} submission
+            {coordinator.submissions.length === 1 ? "" : "s"})
+          </span>
+        </div>
+      ));
+    }
+
+    return (
+      <div key={`grade-empty-${group.grade_level}`} style={{ marginBottom: "4px", color: "#9ca3af" }}>
+        <strong>Grade {group.grade_level}:</strong> No coordinator submissions yet
+      </div>
+    );
+  };
 
   return (
     <>
@@ -273,52 +331,37 @@ function LAEMPLMPSReports() {
             
             {!loading && !error && selectedSchoolYear && selectedQuarter && (
               <>
-                {submissions.length === 0 ? (
+                {!aggregatedRow || submissions.length === 0 ? (
                   <div style={{ textAlign: 'center', padding: '40px' }}>
                     <p>No coordinator LAEMPL & MPS submissions found for the selected year and quarter.</p>
                   </div>
                 ) : (
-                  <div>
-                    {Object.keys(groupedByGrade).sort((a, b) => {
-                      const gradeA = parseInt(a) || 0;
-                      const gradeB = parseInt(b) || 0;
-                      return gradeA - gradeB;
-                    }).map(grade => (
-                      <div key={grade} style={{ marginBottom: '30px' }}>
-                        <table className="report-table">
-                          <thead>
-                            <tr>
-                              <th>Category</th>
-                              <th>Sub-Category</th>
-                              <th>School Year</th>
-                              <th>Quarter</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {groupedByGrade[grade].map((coordinatorGroup) => {
-                              // Get quarter name from quarters array
-                              const quarterObj = quarters.find(q => q.value.toString() === coordinatorGroup.quarter?.toString());
-                              const quarterName = quarterObj?.label || `Quarter ${coordinatorGroup.quarter || 'N/A'}`;
-                              
-                              return (
-                                <tr 
-                                  key={coordinatorGroup.coordinator_id} 
-                                  onClick={() => handleCoordinatorClick(coordinatorGroup)}
-                                  style={{ cursor: 'pointer' }}
-                                >
-                                  <td className="file-cell">
-                                    <span className="file-name">{coordinatorGroup.category_name || 'N/A'}</span>
-                                  </td>
-                                  <td>{coordinatorGroup.sub_category_name || 'N/A'}</td>
-                                  <td>{coordinatorGroup.school_year || 'N/A'}</td>
-                                  <td>{quarterName}</td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    ))}
+                  <div style={{ marginBottom: "30px" }}>
+                    <table className="report-table">
+                      <thead>
+                        <tr>
+                          <th>Category</th>
+                          <th>Sub-Category</th>
+                          <th>School Year</th>
+                          <th>Quarter</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr onClick={handleAggregatedClick} style={{ cursor: "pointer" }}>
+                          <td className="file-cell">
+                            <span className="file-name">{aggregatedRow.category_name || "N/A"}</span>
+                          </td>
+                          <td>{aggregatedRow.sub_category_name || "N/A"}</td>
+                          <td>{aggregatedRow.school_year || selectedSchoolYear || "N/A"}</td>
+                          <td>
+                            {quarters.find(
+                              (q) => q.value.toString() === aggregatedRow.quarter?.toString()
+                            )?.label ||
+                              `Quarter ${aggregatedRow.quarter || selectedQuarter || "N/A"}`}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </>
