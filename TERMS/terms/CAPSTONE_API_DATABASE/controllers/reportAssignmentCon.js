@@ -195,7 +195,10 @@ export const giveReport = (req, res) => {
 
     // attempts
     number_of_submission,
-    number_of_submissions
+    number_of_submissions,
+    
+    // parent linking
+    parent_report_assignment_id = null
   } = req.body || {};
 
   // Validation
@@ -250,8 +253,8 @@ export const giveReport = (req, res) => {
       // 1) Insert assignment
       const insertReportSql = `
         INSERT INTO report_assignment
-          (category_id, sub_category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (category_id, sub_category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title, parent_report_assignment_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
       const raVals = [
         category_id,
@@ -265,7 +268,8 @@ export const giveReport = (req, res) => {
         _is_given,
         _is_archived,
         _allow_late,
-        title
+        title,
+        parent_report_assignment_id ?? null
       ];
 
       conn.query(insertReportSql, raVals, (raErr, raRes) => {
@@ -738,7 +742,10 @@ export const giveLAEMPLReport = (req, res) => {
     grade = 1,
 
     number_of_submission,
-    number_of_submissions
+    number_of_submissions,
+    
+    // parent linking
+    parent_report_assignment_id = null
   } = req.body || {};
 
   if (category_id == null || quarter == null || year == null || !to_date) {
@@ -792,8 +799,8 @@ export const giveLAEMPLReport = (req, res) => {
 
       const insertReportSql = `
         INSERT INTO report_assignment
-          (category_id, sub_category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (category_id, sub_category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title, parent_report_assignment_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
       const raVals = [
         category_id,
@@ -807,7 +814,8 @@ export const giveLAEMPLReport = (req, res) => {
         _is_given,
         _is_archived,
         _allow_late,
-        title
+        title,
+        parent_report_assignment_id ?? null
       ];
 
       conn.query(insertReportSql, raVals, (raErr, raRes) => {

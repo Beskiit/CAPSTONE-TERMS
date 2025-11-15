@@ -3171,6 +3171,7 @@ app.get("/reports/assignment/:reportId", requireAuth, async (req, res) => {
         ra.allow_late,
         ra.grade_level_id,
         ra.coordinator_user_id,
+        ra.parent_report_assignment_id,
         c.category_name,
         sc.sub_category_name,
         sy.school_year,
