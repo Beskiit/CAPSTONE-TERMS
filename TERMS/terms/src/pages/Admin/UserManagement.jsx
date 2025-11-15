@@ -366,6 +366,7 @@ function UserManagement() {
     }
   };
 
+
   const fetchLaemplAssignments = async () => {
     try {
       const response = await fetch(`${API_BASE}/reports/laempl-mps/assignments`, { credentials: "include" });
@@ -424,6 +425,91 @@ function UserManagement() {
     laemplAssignments.find(
       (assignment) => Number(assignment.coordinator_user_id) === Number(coordinatorUserId)
     );
+
+  const updateAccomplishmentCoordinatorAssignment = async (options) => {
+    const {
+      coordinatorUserId
+    } = options || {};
+
+    if (!coordinatorUserId || !activeYearQuarter) {
+      console.warn("[UserManagement] Cannot create Accomplishment Report assignment: missing coordinatorUserId or activeYearQuarter");
+      return null;
+    }
+
+    try {
+      // Check if an Accomplishment Report assignment already exists for this coordinator
+      const checkResponse = await fetch(`${API_BASE}/reports`, {
+        credentials: "include"
+      });
+
+      if (!checkResponse.ok) {
+        console.warn("[UserManagement] Failed to check existing assignments");
+        return null;
+      }
+
+      const allAssignments = await checkResponse.json();
+      const existingAssignment = allAssignments.find(assignment => 
+        Number(assignment.category_id) === 0 &&
+        assignment.coordinator_user_id != null &&
+        Number(assignment.coordinator_user_id) === Number(coordinatorUserId) &&
+        Number(assignment.quarter) === Number(activeYearQuarter.quarter) &&
+        Number(assignment.year) === Number(activeYearQuarter.year)
+      );
+
+      if (existingAssignment) {
+        // Assignment already exists
+        return existingAssignment;
+      }
+
+      // Create a new Accomplishment Report assignment with coordinator_user_id
+      // NOTE: Do NOT include coordinator in assignees - they should only be the coordinator,
+      // not a recipient. They'll see this when they use "Set as Report to Teachers" button.
+      // The backend will skip creating submissions when assignees is empty and coordinator_user_id is set.
+      // Set a default to_date (30 days from now)
+      const defaultToDate = new Date();
+      defaultToDate.setDate(defaultToDate.getDate() + 30); // 30 days from now
+      const toDateString = defaultToDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+      
+      const payload = {
+        category_id: 0,
+        sub_category_id: null,
+        given_by: coordinatorUserId, // The coordinator themselves
+        assignees: [], // Empty - coordinator is not an assignee, only the coordinator_user_id
+        quarter: Number(activeYearQuarter.quarter),
+        year: Number(activeYearQuarter.year),
+        title: "Accomplishment Report",
+        instruction: "Accomplishment Report assignment",
+        is_given: 0, // Not given yet, coordinator will distribute to teachers
+        is_archived: 0,
+        allow_late: 0,
+        coordinator_user_id: Number(coordinatorUserId),
+        parent_report_assignment_id: null,
+        from_date: new Date().toISOString().split('T')[0], // Today's date
+        to_date: toDateString, // Required field
+        number_of_submission: null
+      };
+
+      const response = await fetch(`${API_BASE}/reports/accomplishment/give`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const responseData = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(responseData.error || responseData.message || "Failed to create Accomplishment Report assignment.");
+      }
+
+      return responseData.report_assignment || responseData;
+    } catch (err) {
+      console.error("[UserManagement] Error creating Accomplishment Report assignment:", err);
+      throw err;
+    }
+  };
 
   const updateLaemplCoordinatorAssignment = async (options) => {
     const {
@@ -533,6 +619,10 @@ function UserManagement() {
       String(assignmentDetails.category) === '1' &&
       String(assignmentDetails.subCategory) === '3';
 
+    const isAccomplishmentCoordinatorSelection =
+      selectedUser?.role === 'coordinator' &&
+      String(assignmentDetails.category) === '0';
+
     if (isLaemplCoordinatorSelection) {
       if (!assignmentDetails.laemplGradeLevelId) {
         toast.error('Select a grade level before assigning LAEMPL & MPS.');
@@ -556,6 +646,8 @@ function UserManagement() {
 
     try {
       let laemplAssignment = null;
+      let accomplishmentAssignment = null;
+      
       if (isLaemplCoordinatorSelection) {
         laemplAssignment = await updateLaemplCoordinatorAssignment({
           gradeLevelId: Number(assignmentDetails.laemplGradeLevelId),
@@ -587,6 +679,11 @@ function UserManagement() {
           : null;
         const gradeLevelDisplay = gradeLevelName ? `Grade ${gradeLevelName}` : 'Not assigned';
         console.log(`[UserManagement] Coordinator "${selectedUser.name}" (ID: ${selectedUser.user_id}) assigned/reassigned. Coordinator Grade Level (${gradeLevelSource}): ${gradeLevelDisplay} (grade_level_id: ${gradeLevelId || 'null'})`);
+      } else if (isAccomplishmentCoordinatorSelection) {
+        // Create Accomplishment Report assignment with coordinator_user_id
+        accomplishmentAssignment = await updateAccomplishmentCoordinatorAssignment({
+          coordinatorUserId: selectedUser.user_id
+        });
       }
 
       const response = await fetch(`${API_BASE}/admin/assign-user`, {
@@ -608,12 +705,14 @@ function UserManagement() {
       });
 
       if (!response.ok) {
+        // Rollback assignment creation if user assignment fails
         if (isLaemplCoordinatorSelection && laemplAssignment) {
           await updateLaemplCoordinatorAssignment({
             gradeLevelId: laemplAssignment.grade_level_id,
             coordinatorUserId: laemplAssignment.coordinator_user_id
           });
         }
+        // Note: Accomplishment Report assignment rollback would need to be implemented if needed
         const errorData = await response.json();
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
@@ -764,6 +863,9 @@ function UserManagement() {
         if (res.ok) {
           const data = await res.json();
           setUsers(data);
+          // After users are loaded, fetch Accomplishment Report coordinators
+          // (we need users data to get coordinator names)
+          // We'll call it in a separate useEffect that depends on users
         }
       } catch (err) {
         console.error("Failed to fetch users:", err);
@@ -775,6 +877,7 @@ function UserManagement() {
     fetchUser();
     fetchUsers();
   }, []);
+
 
   const selectedLaemplGradeAssignment = assignmentDetails.laemplGradeLevelId
     ? laemplAssignments.find(
@@ -1151,27 +1254,29 @@ function UserManagement() {
                       </select>
                     </div>
 
-                    <div className="form-group">
-                      <label htmlFor="subCategorySelect">Sub-Category:</label>
-                      <select
-                        id="subCategorySelect"
-                        value={assignmentDetails.subCategory}
-                        onChange={(e) => setAssignmentDetails(prev => ({
-                          ...prev,
-                          subCategory: e.target.value,
-                          laemplGradeLevelId: ''
-                        }))}
-                        className="form-input"
-                        disabled={!assignmentDetails.category}
-                      >
-                        <option value="">Select sub-category...</option>
-                        {subCategories.map(subCategory => (
-                          <option key={subCategory.sub_category_id} value={subCategory.sub_category_id}>
-                            {subCategory.sub_category_name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    {String(assignmentDetails.category) === '1' && (
+                      <div className="form-group">
+                        <label htmlFor="subCategorySelect">Sub-Category:</label>
+                        <select
+                          id="subCategorySelect"
+                          value={assignmentDetails.subCategory}
+                          onChange={(e) => setAssignmentDetails(prev => ({
+                            ...prev,
+                            subCategory: e.target.value,
+                            laemplGradeLevelId: ''
+                          }))}
+                          className="form-input"
+                          disabled={!assignmentDetails.category}
+                        >
+                          <option value="">Select sub-category...</option>
+                          {subCategories.map(subCategory => (
+                            <option key={subCategory.sub_category_id} value={subCategory.sub_category_id}>
+                              {subCategory.sub_category_name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
 
                     {String(assignmentDetails.category) === '1' && String(assignmentDetails.subCategory) === '3' && (
                       <>

@@ -1,7 +1,7 @@
 import "./DashboardCoordinator.css";
 import React from 'react'
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import Header from '../../components/shared/Header.jsx';
@@ -19,7 +19,16 @@ const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.
 
 function DashboardCoordinator() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [user, setUser] = useState(null);
+  
+  // Debug: Log when component mounts/unmounts
+  useEffect(() => {
+    console.log('🟢 [DashboardCoordinator] Component mounted');
+    return () => {
+      console.log('🔴 [DashboardCoordinator] Component unmounting');
+    };
+  }, []);
 
   // NEW: counts + deadlines
   const [counts, setCounts] = useState({

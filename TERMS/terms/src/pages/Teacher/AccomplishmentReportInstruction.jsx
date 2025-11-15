@@ -29,6 +29,7 @@ function AccomplishmentReportInstruction() {
     };
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [coordinatorUserIdFromAssignment, setCoordinatorUserIdFromAssignment] = useState(null);
     const { search, state } = useLocation();
 
     // ✅ always resolve the id, even on hard reloads
@@ -51,6 +52,21 @@ function AccomplishmentReportInstruction() {
     const recipientsCount = Number(state?.recipients_count || 0);
     const isGivenFlag = state?.is_given === 1 || state?.is_given === '1';
     const fromAssignedReport = state?.fromAssignedReport === true;
+    const coordinatorUserId = state?.coordinator_user_id || coordinatorUserIdFromAssignment; // coordinator_user_id from assignment or fetched
+    const isAssignedCoordinator = isCoordinatorSidebar && coordinatorUserId != null && 
+      Number(coordinatorUserId) === Number(user?.user_id);
+    
+    // Debug logging for button visibility
+    console.log("🔍 [AccomplishmentReportInstruction] Button visibility check:", {
+      isCoordinatorSidebar,
+      forceTeacherView,
+      recipientsCount,
+      isAssignedCoordinator,
+      coordinatorUserId,
+      currentUserId: user?.user_id,
+      state: state,
+      shouldShowButton: isCoordinatorSidebar && !forceTeacherView && recipientsCount < 2 && isAssignedCoordinator
+    });
 
 
     useEffect(() => {
@@ -68,6 +84,56 @@ function AccomplishmentReportInstruction() {
     };
     fetchUser();
   }, []);
+  
+  // Fetch assignment data if coordinator_user_id is not in state but we have report_assignment_id
+  useEffect(() => {
+    if (user && isCoordinatorSidebar && !state?.coordinator_user_id && reportAssignmentId) {
+      const fetchAssignment = async () => {
+        try {
+          const res = await fetch(`${API_BASE}/reports/assignment/${reportAssignmentId}`, {
+            credentials: "include"
+          });
+          if (res.ok) {
+            const assignment = await res.json();
+            const assignmentCoordinatorId = assignment?.coordinator_user_id;
+            console.log("🔍 [AccomplishmentReportInstruction] Fetched assignment data:", {
+              coordinator_user_id: assignmentCoordinatorId,
+              currentUserId: user?.user_id,
+              matches: assignmentCoordinatorId != null && 
+                Number(assignmentCoordinatorId) === Number(user?.user_id)
+            });
+            // Store coordinator_user_id in local state
+            if (assignmentCoordinatorId != null) {
+              setCoordinatorUserIdFromAssignment(Number(assignmentCoordinatorId));
+            }
+          }
+        } catch (err) {
+          console.warn("Failed to fetch assignment data:", err);
+        }
+      };
+      fetchAssignment();
+    }
+  }, [user, reportAssignmentId, isCoordinatorSidebar, state?.coordinator_user_id]);
+  
+  // Re-check button visibility when user loads or coordinator_user_id changes
+  useEffect(() => {
+    if (user) {
+      const coordinatorUserId = state?.coordinator_user_id || coordinatorUserIdFromAssignment;
+      const isAssignedCoord = isCoordinatorSidebar && coordinatorUserId != null && 
+        Number(coordinatorUserId) === Number(user?.user_id);
+      console.log("🔍 [AccomplishmentReportInstruction] User loaded, re-checking button visibility:", {
+        isCoordinatorSidebar,
+        forceTeacherView,
+        recipientsCount,
+        isAssignedCoord,
+        coordinatorUserId,
+        coordinatorUserIdFromState: state?.coordinator_user_id,
+        coordinatorUserIdFromFetched: coordinatorUserIdFromAssignment,
+        currentUserId: user?.user_id,
+        shouldShowButton: isCoordinatorSidebar && !forceTeacherView && recipientsCount < 2 && isAssignedCoord
+      });
+    }
+  }, [user, state?.coordinator_user_id, coordinatorUserIdFromAssignment, state?.recipients_count, state?.forceTeacherView]);
 
     const ensureAndOpenTemplate = async () => {
         try {
@@ -208,7 +274,7 @@ function AccomplishmentReportInstruction() {
                                 ) : (
                                     <>
                                         <button className="instruction-btn" onClick={ensureAndOpenTemplate}>+ Prepare Report</button>
-                                        {isCoordinatorSidebar && !forceTeacherView && recipientsCount < 2 && (
+                                        {isCoordinatorSidebar && !forceTeacherView && recipientsCount < 2 && isAssignedCoordinator && (
                                             <button className="instruction-btn" onClick={handleSetAsReport}>Set as Report to Teachers</button>
                                         )}
                                     </>

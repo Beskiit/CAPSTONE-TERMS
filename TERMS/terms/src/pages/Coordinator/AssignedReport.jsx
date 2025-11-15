@@ -4,7 +4,7 @@ import "./AssignedReport.css";
 import "../../components/shared/StatusBadges.css";
 import SidebarPrincipal from "../../components/shared/SidebarPrincipal";
 import { useState, useEffect } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import Header from "../../components/shared/Header";
 import Breadcrumb from "../../components/Breadcrumb";
 import YearQuarterFileManager from "../../components/YearQuarterFileManager";
@@ -14,7 +14,16 @@ const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives
 
 function AssignedReport() {
     const navigate = useNavigate();
+    const location = useLocation();
     const [searchParams] = useSearchParams();
+    
+    // Debug: Log when component mounts/unmounts
+    useEffect(() => {
+        console.log('🟢 [AssignedReport] Component mounted');
+        return () => {
+            console.log('🔴 [AssignedReport] Component unmounting');
+        };
+    }, []);
 
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -247,8 +256,67 @@ function AssignedReport() {
                     return;
                 }
                 
-                const allReports = await assignmentsRes.json();
-                console.log('🔍 [DEBUG] All reports fetched from API:', allReports);
+                const assignedReports = await assignmentsRes.json();
+                console.log('🔍 [DEBUG] Reports assigned by coordinator:', assignedReports);
+                
+                // Also fetch coordinator's own assignments (where coordinator is the assignee)
+                // These are assignments created by the coordinator for themselves
+                let coordinatorOwnReports = [];
+                try {
+                    const ownAssignmentsRes = await fetch(`${API_BASE}/reports/given_to/${user.user_id}`, {
+                        credentials: "include"
+                    });
+                    
+                    if (ownAssignmentsRes.ok) {
+                        const allOwnReports = await ownAssignmentsRes.json();
+                        console.log('🔍 [DEBUG] All reports given to coordinator:', allOwnReports);
+                        
+                        // For each report, fetch assignment details to check if it's coordinator's own assignment
+                        const assignmentChecks = await Promise.all(
+                            allOwnReports.map(async (report) => {
+                                try {
+                                    const assignmentRes = await fetch(`${API_BASE}/reports/assignment/${report.report_assignment_id}`, {
+                                        credentials: "include"
+                                    });
+                                    if (assignmentRes.ok) {
+                                        const assignmentData = await assignmentRes.json();
+                                        return {
+                                            report,
+                                            assignment: assignmentData
+                                        };
+                                    }
+                                } catch (err) {
+                                    console.warn(`Failed to fetch assignment ${report.report_assignment_id}:`, err);
+                                }
+                                return null;
+                            })
+                        );
+                        
+                        // Filter to only include assignments where:
+                        // 1. The coordinator created it (given_by = coordinator_id)
+                        // 2. It's the coordinator's own assignment (parent_report_assignment_id IS NULL)
+                        // 3. Category is Accomplishment Report (category_id = 0) or LAEMPL (category_id = 1, sub_category_id = 3)
+                        coordinatorOwnReports = assignmentChecks
+                            .filter(item => item && item.assignment)
+                            .filter(item => {
+                                const assignment = item.assignment;
+                                const isCoordinatorCreated = Number(assignment.given_by) === Number(user.user_id);
+                                const isOwnAssignment = !assignment.parent_report_assignment_id;
+                                const isAccomplishmentOrLAEMPL = Number(assignment.category_id) === 0 || 
+                                                                 (Number(assignment.category_id) === 1 && Number(assignment.sub_category_id) === 3);
+                                return isCoordinatorCreated && isOwnAssignment && isAccomplishmentOrLAEMPL;
+                            })
+                            .map(item => item.report);
+                        
+                        console.log('🔍 [DEBUG] Coordinator own assignments:', coordinatorOwnReports);
+                    }
+                } catch (err) {
+                    console.warn('Failed to fetch coordinator own assignments:', err);
+                }
+                
+                // Combine both sets of reports
+                const allReports = [...assignedReports, ...coordinatorOwnReports];
+                console.log('🔍 [DEBUG] All reports fetched from API (assigned + own):', allReports);
                 console.log('🔍 [DEBUG] Reports count:', allReports.length);
                 
                 // Debug: Check the structure of the first report
@@ -298,13 +366,22 @@ function AssignedReport() {
                     // Add this report to the assignment
                     const assignment = assignmentMap.get(assignmentId);
                     assignment.reports.push(report);
-                    // Exclude current user from total count (e.g., principal's own submission)
-                    if (Number(report.submitted_by) !== Number(user?.user_id)) {
+                    
+                    // For coordinator's own assignments, include coordinator in the count
+                    // For other assignments, exclude coordinator from total count
+                    const isCoordinatorOwnSubmission = Number(report.submitted_by) === Number(user?.user_id);
+                    const isCoordinatorOwnAssignment = coordinatorOwnReports.some(r => r.report_assignment_id === assignmentId);
+                    
+                    // Include coordinator in count for their own assignments
+                    // Exclude coordinator from count for assignments they gave to others
+                    if (isCoordinatorOwnAssignment || !isCoordinatorOwnSubmission) {
                         assignment.totalAssigned++;
                     }
                     
-                    // Count as submitted if status >= 2, excluding current user (coordinator) itself
-                    if (report.status >= 2 && Number(report.submitted_by) !== Number(user?.user_id)) {
+                    // Count as submitted if status >= 2
+                    // For coordinator's own assignments, include coordinator's submission
+                    // For other assignments, exclude coordinator's submission
+                    if (report.status >= 2 && (isCoordinatorOwnAssignment || !isCoordinatorOwnSubmission)) {
                         assignment.submittedCount++;
                     }
                 });

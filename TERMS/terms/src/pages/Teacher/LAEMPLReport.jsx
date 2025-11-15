@@ -1834,66 +1834,140 @@ function LAEMPLReport() {
                 <tbody>
                   {isCoordinatorView ? (
                     // Coordinator view: show all sections
-                    allSections.map((section, index) => (
-                      <tr key={section.section_id || index}>
-                        <th scope="row" className="row-head">{section.section_name}</th>
-                        {COLS_MPS.map(col => {
-                          // Fields that are synced from LAEMPL should be read-only
-                          const isSyncedField = ["m", "f", "total", "total_score", "mean", "hs", "ls", "total_items", "median", "pl", "mps", "sd", "target"].includes(col.key);
-                          return (
-                            <td key={col.key}>
-                              <input
-                                type="number"
-                                inputMode="numeric"
-                                min="0"
-                                step="any"
-                                value={mpsData[section.section_name]?.[col.key] ?? ""}
-                                onChange={(e) => handleMpsChange(section.section_name, col.key, e.target.value)}
-                                onKeyDown={handleMpsKeyDown}
-                                className="cell-input"
-                                disabled={mpsDisabled || isSyncedField}
-                                style={{
-                                  backgroundColor: isSyncedField ? "#f5f5f5" : "white",
-                                  cursor: isSyncedField ? "not-allowed" : "text"
-                                }}
-                                title={isSyncedField ? "This field is automatically calculated from LAEMPL data" : ""}
-                              />
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))
+                    <>
+                      {allSections.map((section, index) => (
+                        <tr key={section.section_id || index}>
+                          <th scope="row" className="row-head">{section.section_name}</th>
+                          {COLS_MPS.map(col => {
+                            // Fields that are synced from LAEMPL should be read-only
+                            const isSyncedField = ["m", "f", "total", "total_score", "mean", "hs", "ls", "total_items", "median", "pl", "mps", "sd", "target"].includes(col.key);
+                            return (
+                              <td key={col.key}>
+                                <input
+                                  type="number"
+                                  inputMode="numeric"
+                                  min="0"
+                                  step="any"
+                                  value={mpsData[section.section_name]?.[col.key] ?? ""}
+                                  onChange={(e) => handleMpsChange(section.section_name, col.key, e.target.value)}
+                                  onKeyDown={handleMpsKeyDown}
+                                  className="cell-input"
+                                  disabled={mpsDisabled || isSyncedField}
+                                  style={{
+                                    backgroundColor: isSyncedField ? "#f5f5f5" : "white",
+                                    cursor: isSyncedField ? "not-allowed" : "text"
+                                  }}
+                                  title={isSyncedField ? "This field is automatically calculated from LAEMPL data" : ""}
+                                />
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                      {/* Average row for coordinator view */}
+                      {(() => {
+                        const avgColumns = ['mean', 'median', 'pl', 'mps', 'sd', 'target'];
+                        const averages = {};
+                        avgColumns.forEach(colKey => {
+                          const values = allSections
+                            .map(section => {
+                              const val = mpsData[section.section_name]?.[colKey];
+                              const num = typeof val === 'number' ? val : parseFloat(val);
+                              return Number.isFinite(num) ? num : null;
+                            })
+                            .filter(v => v !== null);
+                          if (values.length > 0) {
+                            const sum = values.reduce((acc, val) => acc + val, 0);
+                            averages[colKey] = (sum / values.length).toFixed(2);
+                          } else {
+                            averages[colKey] = '';
+                          }
+                        });
+                        return (
+                          <tr style={{ fontWeight: 'bold', backgroundColor: '#f3f4f6' }}>
+                            <th scope="row" className="row-head">Average</th>
+                            {COLS_MPS.map(col => {
+                              if (avgColumns.includes(col.key)) {
+                                return (
+                                  <td key={col.key} style={{ textAlign: 'center' }}>
+                                    {averages[col.key]}
+                                  </td>
+                                );
+                              }
+                              return <td key={col.key}></td>;
+                            })}
+                          </tr>
+                        );
+                      })()}
+                    </>
                   ) : (
                     // Teacher view: show traits
-                    TRAITS.map(trait => (
-                      <tr key={trait}>
-                        <th scope="row" className="row-head">{trait}</th>
-                        {COLS_MPS.map(col => {
-                          // Fields that are synced from LAEMPL should be read-only
-                          const isSyncedField = ["m", "f", "total", "total_score", "mean", "hs", "ls", "total_items", "median", "pl", "mps", "sd", "target"].includes(col.key);
-                          return (
-                            <td key={col.key}>
-                              <input
-                                type="number"
-                                inputMode="numeric"
-                                min="0"
-                                step="any"
-                                value={mpsData[trait]?.[col.key] ?? ""}
-                                onChange={(e) => handleMpsChange(trait, col.key, e.target.value)}
-                                onKeyDown={handleMpsKeyDown}
-                                className="cell-input"
-                                disabled={mpsDisabled || isSyncedField}
-                                style={{
-                                  backgroundColor: isSyncedField ? "#f5f5f5" : "white",
-                                  cursor: isSyncedField ? "not-allowed" : "text"
-                                }}
-                                title={isSyncedField ? "This field is automatically calculated from LAEMPL data" : ""}
-                              />
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))
+                    <>
+                      {TRAITS.map(trait => (
+                        <tr key={trait}>
+                          <th scope="row" className="row-head">{trait}</th>
+                          {COLS_MPS.map(col => {
+                            // Fields that are synced from LAEMPL should be read-only
+                            const isSyncedField = ["m", "f", "total", "total_score", "mean", "hs", "ls", "total_items", "median", "pl", "mps", "sd", "target"].includes(col.key);
+                            return (
+                              <td key={col.key}>
+                                <input
+                                  type="number"
+                                  inputMode="numeric"
+                                  min="0"
+                                  step="any"
+                                  value={mpsData[trait]?.[col.key] ?? ""}
+                                  onChange={(e) => handleMpsChange(trait, col.key, e.target.value)}
+                                  onKeyDown={handleMpsKeyDown}
+                                  className="cell-input"
+                                  disabled={mpsDisabled || isSyncedField}
+                                  style={{
+                                    backgroundColor: isSyncedField ? "#f5f5f5" : "white",
+                                    cursor: isSyncedField ? "not-allowed" : "text"
+                                  }}
+                                  title={isSyncedField ? "This field is automatically calculated from LAEMPL data" : ""}
+                                />
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                      {/* Average row for teacher view */}
+                      {(() => {
+                        const avgColumns = ['mean', 'median', 'pl', 'mps', 'sd', 'target'];
+                        const averages = {};
+                        avgColumns.forEach(colKey => {
+                          const values = TRAITS
+                            .map(trait => {
+                              const val = mpsData[trait]?.[colKey];
+                              const num = typeof val === 'number' ? val : parseFloat(val);
+                              return Number.isFinite(num) ? num : null;
+                            })
+                            .filter(v => v !== null);
+                          if (values.length > 0) {
+                            const sum = values.reduce((acc, val) => acc + val, 0);
+                            averages[colKey] = (sum / values.length).toFixed(2);
+                          } else {
+                            averages[colKey] = '';
+                          }
+                        });
+                        return (
+                          <tr style={{ fontWeight: 'bold', backgroundColor: '#f3f4f6' }}>
+                            <th scope="row" className="row-head">Average</th>
+                            {COLS_MPS.map(col => {
+                              if (avgColumns.includes(col.key)) {
+                                return (
+                                  <td key={col.key} style={{ textAlign: 'center' }}>
+                                    {averages[col.key]}
+                                  </td>
+                                );
+                              }
+                              return <td key={col.key}></td>;
+                            })}
+                          </tr>
+                        );
+                      })()}
+                    </>
                   )}
                 </tbody>
               </table>

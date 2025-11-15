@@ -3249,6 +3249,7 @@ app.get("/reports/upcoming-deadlines/:userId", async (req, res) => {
         ra.is_archived,
         ra.quarter,
         ra.year,
+        ra.coordinator_user_id,
 
         c.category_name,
         sc.sub_category_name,
@@ -3256,7 +3257,10 @@ app.get("/reports/upcoming-deadlines/:userId", async (req, res) => {
 
         ud.name AS submitted_by_name,
         ud2.name AS given_by_name,
-        COALESCE(adc.recipients_count, sdc.sub_recipients, 0) AS recipients_count
+        CASE 
+          WHEN ra.coordinator_user_id IS NOT NULL THEN 0
+          ELSE COALESCE(adc.recipients_count, sdc.sub_recipients, 0)
+        END AS recipients_count
       FROM submission s
       JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
       JOIN category c ON ra.category_id = c.category_id
@@ -3270,9 +3274,13 @@ app.get("/reports/upcoming-deadlines/:userId", async (req, res) => {
         GROUP BY report_assignment_id
       ) adc ON adc.report_assignment_id = ra.report_assignment_id
       LEFT JOIN (
-        SELECT report_assignment_id, COUNT(DISTINCT submitted_by) AS sub_recipients
-        FROM submission
-        GROUP BY report_assignment_id
+        SELECT 
+          s.report_assignment_id, 
+          COUNT(DISTINCT s.submitted_by) AS sub_recipients
+        FROM submission s
+        INNER JOIN report_assignment ra2 ON ra2.report_assignment_id = s.report_assignment_id
+        WHERE ra2.coordinator_user_id IS NULL
+        GROUP BY s.report_assignment_id
       ) sdc ON sdc.report_assignment_id = ra.report_assignment_id
       WHERE s.submitted_by = ?
       AND ra.is_given = 0

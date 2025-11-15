@@ -911,6 +911,10 @@ function AssignedReportData() {
         console.log('🔍 [DEBUG] Narrative:', answers.narrative);
         console.log('🔍 [DEBUG] Images:', answers.images);
         
+        // Check if this is coordinator's own assignment
+        const isCoordinatorOwnSubmission = isCoordinator && submission && 
+            Number(submission.submitted_by) === Number(user?.user_id);
+        
         // Try different possible field names for title
         const title = answers.activityName || answers.title || answers.activity_title || answers.program_title || '';
         
@@ -962,7 +966,137 @@ function AssignedReportData() {
         console.log('🔍 [DEBUG] Final title:', title);
         console.log('🔍 [DEBUG] Final narrative:', narrative);
         console.log('🔍 [DEBUG] Final images:', images);
+        console.log('🔍 [DEBUG] Is coordinator own submission:', isCoordinatorOwnSubmission);
         
+        // Helper function to render image gallery
+        const renderImageGallery = () => {
+            if (!images || images.length === 0) return null;
+            
+            return (
+                <div className="form-row">
+                    <label>Picture/s:</label>
+                    <div className="image-gallery">
+                        {images.map((img, index) => {
+                            // Handle different image formats and construct proper URLs
+                            let imageUrl = '';
+                            
+                            if (typeof img === 'string') {
+                                // If it's a string, it might be a filename or full URL
+                                if (img.startsWith('http') || img.startsWith('blob:')) {
+                                    imageUrl = img;
+                                } else {
+                                    // Construct full URL for filename
+                                    imageUrl = `${API_BASE}/uploads/accomplishments/${img}`;
+                                }
+                            } else if (typeof img === 'object' && img !== null) {
+                                // Handle object format
+                                const rawUrl = img.url || img.src || img.path || img.filename;
+                                if (rawUrl) {
+                                    if (rawUrl.startsWith('http') || rawUrl.startsWith('blob:')) {
+                                        imageUrl = rawUrl;
+                                    } else {
+                                        imageUrl = `${API_BASE}/uploads/accomplishments/${rawUrl}`;
+                                    }
+                                }
+                            }
+                            
+                            console.log('🖼️ [DEBUG] Processing image:', { img, imageUrl, index });
+                            
+                            return (
+                                <div key={index} className="image-item">
+                                    <img 
+                                        src={imageUrl} 
+                                        alt={`Activity image ${index + 1}`}
+                                        style={{ maxWidth: '200px', maxHeight: '200px', objectFit: 'cover' }}
+                                        onError={(e) => {
+                                            console.error('❌ [DEBUG] Image failed to load:', imageUrl, e);
+                                            e.target.style.display = 'none';
+                                        }}
+                                        onLoad={() => {
+                                            console.log('✅ [DEBUG] Image loaded successfully:', imageUrl);
+                                        }}
+                                    />
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            );
+        };
+        
+        // Show full coordinator template if coordinator is viewing their own assignment
+        if (isCoordinatorOwnSubmission) {
+            return (
+                <div className="accomplishment-report-display">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                        <h4>Activity Completion Report</h4>
+                    </div>
+                    <div className="form-display">
+                        {/* Full Coordinator Template */}
+                        <div className="form-row">
+                            <label>Program/Activity Title:</label>
+                            <div className="readonly-field">{answers.activityName || title || 'No title provided'}</div>
+                        </div>
+                        
+                        <div className="form-row">
+                            <label>Facilitator/s:</label>
+                            <div className="readonly-field">{answers.facilitators || 'Not provided'}</div>
+                        </div>
+                        
+                        <div className="form-row">
+                            <label>Objectives:</label>
+                            <div className="readonly-field">{answers.objectives || 'Not provided'}</div>
+                        </div>
+                        
+                        <div className="form-row">
+                            <label>Program/Activity Design:</label>
+                            <div className="inner-form-row">
+                                <div className="form-row">
+                                    <label>Date:</label>
+                                    <div className="readonly-field">{answers.date || 'Not provided'}</div>
+                                </div>
+                                <div className="form-row">
+                                    <label>Time:</label>
+                                    <div className="readonly-field">{answers.time || 'Not provided'}</div>
+                                </div>
+                                <div className="form-row">
+                                    <label>Venue:</label>
+                                    <div className="readonly-field">{answers.venue || 'Not provided'}</div>
+                                </div>
+                                <div className="form-row">
+                                    <label>Key Results:</label>
+                                    <div className="readonly-field">{answers.keyResult || 'Not provided'}</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        {renderImageGallery()}
+                        
+                        <div className="form-row">
+                            <label>Person/s Involved:</label>
+                            <div className="readonly-field">{answers.personsInvolved || 'Not provided'}</div>
+                        </div>
+                        
+                        <div className="form-row">
+                            <label>Expenses:</label>
+                            <div className="readonly-field">{answers.expenses || 'Not provided'}</div>
+                        </div>
+                        
+                        <div className="form-row">
+                            <label>Lesson Learned:</label>
+                            <div className="readonly-field narrative-content">{answers.lessonLearned || 'Not provided'}</div>
+                        </div>
+                        
+                        <div className="form-row">
+                            <label>Narrative:</label>
+                            <div className="readonly-field narrative-content">{narrative || 'No narrative provided'}</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+        
+        // Simplified template for teacher submissions
         return (
             <div className="accomplishment-report-display">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
@@ -975,56 +1109,7 @@ function AssignedReportData() {
                         <div className="readonly-field">{title || 'No title provided'}</div>
                     </div>
                     
-                    {images && images.length > 0 && (
-                        <div className="form-row">
-                            <label>Picture/s:</label>
-                            <div className="image-gallery">
-                                {images.map((img, index) => {
-                                    // Handle different image formats and construct proper URLs
-                                    let imageUrl = '';
-                                    
-                                    if (typeof img === 'string') {
-                                        // If it's a string, it might be a filename or full URL
-                                        if (img.startsWith('http') || img.startsWith('blob:')) {
-                                            imageUrl = img;
-                                        } else {
-                                            // Construct full URL for filename
-                                            imageUrl = `${API_BASE}/uploads/accomplishments/${img}`;
-                                        }
-                                    } else if (typeof img === 'object' && img !== null) {
-                                        // Handle object format
-                                        const rawUrl = img.url || img.src || img.path || img.filename;
-                                        if (rawUrl) {
-                                            if (rawUrl.startsWith('http') || rawUrl.startsWith('blob:')) {
-                                                imageUrl = rawUrl;
-                                            } else {
-                                                imageUrl = `${API_BASE}/uploads/accomplishments/${rawUrl}`;
-                                            }
-                                        }
-                                    }
-                                    
-                                    console.log('🖼️ [DEBUG] Processing image:', { img, imageUrl, index });
-                                    
-                                    return (
-                                        <div key={index} className="image-item">
-                                            <img 
-                                                src={imageUrl} 
-                                                alt={`Activity image ${index + 1}`}
-                                                style={{ maxWidth: '200px', maxHeight: '200px', objectFit: 'cover' }}
-                                                onError={(e) => {
-                                                    console.error('❌ [DEBUG] Image failed to load:', imageUrl, e);
-                                                    e.target.style.display = 'none';
-                                                }}
-                                                onLoad={() => {
-                                                    console.log('✅ [DEBUG] Image loaded successfully:', imageUrl);
-                                                }}
-                                            />
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    )}
+                    {renderImageGallery()}
                     
                     <div className="form-row">
                         <label>Narrative:</label>
@@ -1201,6 +1286,31 @@ function AssignedReportData() {
         }
     };
 
+    // Helper function to calculate averages for MPS columns
+    const calculateMPSAverages = (rows, cols) => {
+        const avgColumns = ['mean', 'median', 'pl', 'mps', 'sd', 'target'];
+        const averages = {};
+        
+        avgColumns.forEach(colKey => {
+            const values = rows
+                .map(row => {
+                    const val = row[colKey] || row[`${colKey}`];
+                    const num = typeof val === 'number' ? val : parseFloat(val);
+                    return Number.isFinite(num) ? num : null;
+                })
+                .filter(v => v !== null);
+            
+            if (values.length > 0) {
+                const sum = values.reduce((acc, val) => acc + val, 0);
+                averages[colKey] = (sum / values.length).toFixed(2);
+            } else {
+                averages[colKey] = '';
+            }
+        });
+        
+        return averages;
+    };
+
     const renderMPSReport = (fields) => {
         const rows = fields.rows || [];
         
@@ -1252,6 +1362,9 @@ function AssignedReportData() {
             );
         }
 
+        // Calculate averages for the average row
+        const averages = calculateMPSAverages(rows, cols);
+
         if (isPrincipalView) {
             // Principal view: show the same structure as ForApprovalData (traits as rows)
             return (
@@ -1281,6 +1394,22 @@ function AssignedReportData() {
                                         </tr>
                                     );
                                 })}
+                                {/* Average row */}
+                                <tr style={{ fontWeight: 'bold', backgroundColor: '#f3f4f6' }}>
+                                    <td className="trait-cell">Average</td>
+                                    {cols.map(col => {
+                                        const avgColumns = ['mean', 'median', 'pl', 'mps', 'sd', 'target'];
+                                        const colKey = col.originalKey || col.key;
+                                        if (avgColumns.includes(colKey)) {
+                                            return (
+                                                <td key={col.key} className="data-cell">
+                                                    {averages[colKey]}
+                                                </td>
+                                            );
+                                        }
+                                        return <td key={col.key} className="data-cell"></td>;
+                                    })}
+                                </tr>
                             </tbody>
                         </table>
                     </div>
@@ -1288,7 +1417,6 @@ function AssignedReportData() {
             );
         } else {
             // Regular view: show single submission data
-            const rows = fields.rows || [];
             console.log('MPS Report - Rows:', rows);
 
             return (
@@ -1319,6 +1447,22 @@ function AssignedReportData() {
                                         </tr>
                                     );
                                 })}
+                                {/* Average row */}
+                                <tr style={{ fontWeight: 'bold', backgroundColor: '#f3f4f6' }}>
+                                    <td className="trait-cell">Average</td>
+                                    {cols.map(col => {
+                                        const avgColumns = ['mean', 'median', 'pl', 'mps', 'sd', 'target'];
+                                        const colKey = col.originalKey || col.key;
+                                        if (avgColumns.includes(colKey)) {
+                                            return (
+                                                <td key={col.key} className="data-cell">
+                                                    {averages[colKey]}
+                                                </td>
+                                            );
+                                        }
+                                        return <td key={col.key} className="data-cell"></td>;
+                                    })}
+                                </tr>
                             </tbody>
                         </table>
                     </div>
@@ -1487,6 +1631,30 @@ function AssignedReportData() {
                             <div style={{ flex: 1 }}>
                                 {submission.fields && (
                                     <div className="submission-content">
+                                        {/* Export button for Accomplishment Reports */}
+                                        {(submission.fields.type === 'ACCOMPLISHMENT' || submission.fields._answers) && (
+                                            <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+                                                <button
+                                                    onClick={() => exportToWord(submission)}
+                                                    style={{
+                                                        backgroundColor: '#3b82f6',
+                                                        color: 'white',
+                                                        border: 'none',
+                                                        padding: '10px 20px',
+                                                        borderRadius: '4px',
+                                                        cursor: 'pointer',
+                                                        fontSize: '14px',
+                                                        fontWeight: '500',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: '8px'
+                                                    }}
+                                                >
+                                                    <span>📄</span>
+                                                    Export to Word
+                                                </button>
+                                            </div>
+                                        )}
                                         <div className="content-section">
                                             {renderSubmissionContent(submission)}
                                         </div>

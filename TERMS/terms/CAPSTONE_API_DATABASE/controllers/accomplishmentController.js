@@ -33,6 +33,7 @@ export const giveAccomplishmentReport = (req, res) => {
     assignees,
     title, // e.g. "Activity Completion Report"
     parent_report_assignment_id, // for parent-child linking
+    coordinator_user_id, // for coordinator assignments
   } = req.body || {};
 
   if (category_id == null || quarter == null || year == null || !to_date) {
@@ -51,10 +52,12 @@ export const giveAccomplishmentReport = (req, res) => {
       ? [submitted_by]
       : [];
 
-  if (!recipients.length) {
+  // Allow empty recipients if coordinator_user_id is set (coordinator assignment without assignees)
+  // The coordinator will distribute to teachers later
+  if (!recipients.length && !coordinator_user_id) {
     return res
       .status(400)
-      .send("Provide submitted_by or a non-empty assignees array.");
+      .send("Provide submitted_by, a non-empty assignees array, or coordinator_user_id.");
   }
 
   const fromDateVal = from_date
@@ -143,8 +146,8 @@ export const giveAccomplishmentReport = (req, res) => {
 
         const insertReportSql = `
           INSERT INTO report_assignment
-            (category_id, sub_category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title, parent_report_assignment_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (category_id, sub_category_id, given_by, quarter, year, from_date, to_date, instruction, is_given, is_archived, allow_late, title, parent_report_assignment_id, coordinator_user_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
         const reportVals = [
           category_id,
@@ -160,6 +163,7 @@ export const giveAccomplishmentReport = (req, res) => {
           _allow_late,
           title,
           parent_report_assignment_id ?? null,
+          coordinator_user_id ?? null,
         ];
         conn.query(insertReportSql, reportVals, (insErr, insRes) => {
           if (insErr) {
@@ -167,6 +171,23 @@ export const giveAccomplishmentReport = (req, res) => {
           }
 
           const report_assignment_id = insRes.insertId;
+
+          // If no recipients but coordinator_user_id is set, skip creating submissions
+          // The coordinator will distribute to teachers later
+          if (recipients.length === 0 && coordinator_user_id) {
+            // Skip submission creation, just commit the assignment
+            conn.commit((commitErr) => {
+              if (commitErr) {
+                return conn.rollback(() => { conn.release(); res.status(500).send("Failed to commit: " + commitErr); });
+              }
+              conn.release();
+              res.json({
+                report_assignment_id,
+                message: "Accomplishment Report assignment created for coordinator (no submissions created yet)",
+              });
+            });
+            return;
+          }
 
           computeNextNums(recipients, report_assignment_id, (nErr, nextNums) => {
             if (nErr) {

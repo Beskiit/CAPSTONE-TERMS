@@ -84,6 +84,7 @@ function AccomplishmentReport() {
   // NEW: track submission status and alert visibility
   const [submissionStatus, setSubmissionStatus] = useState(null);
   const [reportAssignmentId, setReportAssignmentId] = useState(null); // <-- NEW
+  const [isFromPrincipalAssignment, setIsFromPrincipalAssignment] = useState(false); // Track if assignment is from principal
   const [showSubmittedAlert, setShowSubmittedAlert] = useState(true);
   const [showSubmitToast, setShowSubmitToast] = useState(false);
   const [showConsolidate, setShowConsolidate] = useState(false);
@@ -128,6 +129,9 @@ function AccomplishmentReport() {
 
   // --- Load submission data ---
   useEffect(() => {
+    // Wait for user to load before checking assignment source
+    if (loadingUser || !user) return;
+    
     let alive = true;
     (async () => {
       try {
@@ -181,6 +185,64 @@ function AccomplishmentReport() {
         setSubmissionStatus(statusFromApi);
         setReportAssignmentId(data?.report_assignment_id ?? null); // <-- NEW
 
+        // Check if this assignment is from a principal
+        // A report is from principal if:
+        // 1. It has parent_report_assignment_id (and it's not the coordinator's own assignment), OR
+        // 2. It has coordinator_user_id, OR
+        // 3. The given_by user is a principal (and given_by is NOT the current coordinator)
+        if (data?.report_assignment_id) {
+          try {
+            const assignmentRes = await fetch(`${API_BASE}/reports/assignment/${data.report_assignment_id}`, {
+              credentials: "include"
+            });
+            if (assignmentRes.ok) {
+              const assignmentData = await assignmentRes.json();
+              const hasParentAssignment = assignmentData?.parent_report_assignment_id != null;
+              const hasCoordinatorUserId = assignmentData?.coordinator_user_id != null;
+              
+              // Check if given_by is a principal (and not the current coordinator)
+              let givenByIsPrincipal = false;
+              const isGivenByCurrentCoordinator = assignmentData?.given_by && user?.user_id && 
+                Number(assignmentData.given_by) === Number(user.user_id);
+              
+              if (assignmentData?.given_by && !isGivenByCurrentCoordinator) {
+                try {
+                  const givenByRes = await fetch(`${API_BASE}/users/${assignmentData.given_by}`, {
+                    credentials: "include"
+                  });
+                  if (givenByRes.ok) {
+                    const givenByUser = await givenByRes.json();
+                    givenByIsPrincipal = givenByUser?.role?.toLowerCase() === 'principal';
+                  }
+                } catch (err) {
+                  console.warn('Failed to fetch given_by user:', err);
+                }
+              }
+              
+              // If coordinator created their own assignment (given_by is themselves), it's NOT from principal
+              // Also, if there's no parent_report_assignment_id and no coordinator_user_id, and given_by is coordinator, it's their own
+              const isCoordinatorOwnAssignment = isGivenByCurrentCoordinator || 
+                (!hasParentAssignment && !hasCoordinatorUserId && !givenByIsPrincipal && isCoordinatorSidebar);
+              
+              const isFromPrincipal = !isCoordinatorOwnAssignment && (hasParentAssignment || hasCoordinatorUserId || givenByIsPrincipal);
+              setIsFromPrincipalAssignment(isFromPrincipal);
+              console.log('Assignment source check:', {
+                report_assignment_id: data.report_assignment_id,
+                hasParentAssignment,
+                hasCoordinatorUserId,
+                givenByIsPrincipal,
+                given_by: assignmentData?.given_by,
+                current_user_id: user?.user_id,
+                isGivenByCurrentCoordinator,
+                isCoordinatorOwnAssignment,
+                isFromPrincipal
+              });
+            }
+          } catch (err) {
+            console.warn('Failed to fetch assignment data:', err);
+          }
+        }
+
         // Prefill coordinator fields from the _answers object
         const answers = data?.fields?._answers || {};
         console.log('Loading submission data:', {
@@ -222,7 +284,7 @@ function AccomplishmentReport() {
     return () => {
       alive = false;
     };
-  }, [submissionId]);
+  }, [submissionId, user, loadingUser, isCoordinatorSidebar]);
 
   // Auto-hide submit toast after a short delay
   useEffect(() => {
@@ -289,6 +351,20 @@ function AccomplishmentReport() {
       const fd = new FormData();
       fd.append("narrative", narrative);
       fd.append("title", title);
+      
+      // If coordinator is saving their own assignment (not from principal), include coordinator fields
+      if (isCoordinatorSidebar && !isFromPrincipalAssignment) {
+        fd.append("activityName", activity.activityName);
+        fd.append("facilitators", activity.facilitators);
+        fd.append("objectives", activity.objectives);
+        fd.append("date", activity.date);
+        fd.append("time", activity.time);
+        fd.append("venue", activity.venue);
+        fd.append("keyResult", activity.keyResult);
+        fd.append("personsInvolved", activity.personsInvolved);
+        fd.append("expenses", activity.expenses);
+        fd.append("lessonLearned", activity.lessonLearned);
+      }
       
       // Include existing images (including consolidated ones) in the submission
       if (existingImages.length > 0) {
@@ -472,10 +548,12 @@ function AccomplishmentReport() {
   };
 
   const handleCoordinatorConfirmation = () => {
+    console.log('handleCoordinatorConfirmation called, opening modal');
     setShowCoordinatorModal(true);
   };
 
   const handleCoordinatorSubmit = async () => {
+    console.log('handleCoordinatorSubmit called, submitting to coordinator');
     setShowCoordinatorModal(false);
     await onSubmitToCoordinator();
   };
@@ -935,7 +1013,22 @@ function AccomplishmentReport() {
               <>
                 <div className="buttons">
                   <button
-                    onClick={isCoordinatorActingAsTeacher ? onSubmitToPrincipalAsTeacher : handleCoordinatorConfirmation}
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      console.log('Submit button clicked', { 
+                        isCoordinatorActingAsTeacher, 
+                        saving, 
+                        submissionStatus,
+                        disabled: saving || (submissionStatus >= 2 && submissionStatus !== 4)
+                      });
+                      if (isCoordinatorActingAsTeacher) {
+                        onSubmitToPrincipalAsTeacher();
+                      } else {
+                        handleCoordinatorConfirmation();
+                      }
+                    }}
                     disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}
                     className="submit-button"
                   >
@@ -943,13 +1036,19 @@ function AccomplishmentReport() {
                   </button>
                 </div>
               </>
-            ) : isCoordinatorSidebar ? (
+            ) : (!isTeacher && isCoordinatorSidebar) ? (
               <>
                 <div className="buttons">
                   <button onClick={openConsolidate}>Consolidate</button>
-                  <button onClick={handlePrincipalConfirmation} disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}>
-                    {saving ? "Submitting…" : "Submit"}
-                  </button>
+                  {isFromPrincipalAssignment ? (
+                    <button onClick={handlePrincipalConfirmation} disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}>
+                      {saving ? "Submitting…" : "Submit"}
+                    </button>
+                  ) : (
+                    <button className="btn primary" onClick={onSubmit} disabled={saving}>
+                      {saving ? "Saving…" : "Save"}
+                    </button>
+                  )}
                 </div>
               </>
             ) : (
@@ -1225,9 +1324,9 @@ function AccomplishmentReport() {
                       />
                     </div>
                   </>
-                ) : (
+                ) : (!isTeacher && (isCoordinatorSidebar || isPrincipalSidebar)) ? (
                   <>
-                    {/* COORDINATOR VIEW */}
+                    {/* COORDINATOR/PRINCIPAL VIEW - Full template with all fields */}
                     <div className="form-row">
                       <label htmlFor="activityName">Program/Activity Title:</label>
                       <input
@@ -1443,6 +1542,11 @@ function AccomplishmentReport() {
                         disabled={submissionStatus >= 2 && submissionStatus !== 4}
                       />
                     </div>
+                  </>
+                ) : (
+                  <>
+                    {/* Fallback - should not happen */}
+                    <p>Unable to determine report type.</p>
                   </>
                 )}
               </form>

@@ -842,6 +842,31 @@ function ViewCoordinatorSubmissions() {
     return <LAEMPLReportDisplay fields={fields} gradeLevel={gradeLevel} submission={submission} />;
   };
 
+  // Helper function to calculate averages for MPS columns
+  const calculateMPSAverages = (rows, cols) => {
+    const avgColumns = ['mean', 'median', 'pl', 'mps', 'sd', 'target'];
+    const averages = {};
+    
+    avgColumns.forEach(colKey => {
+      const values = rows
+        .map(row => {
+          const val = row[colKey];
+          const num = typeof val === 'number' ? val : parseFloat(val);
+          return Number.isFinite(num) ? num : null;
+        })
+        .filter(v => v !== null);
+      
+      if (values.length > 0) {
+        const sum = values.reduce((acc, val) => acc + val, 0);
+        averages[colKey] = (sum / values.length).toFixed(2);
+      } else {
+        averages[colKey] = '';
+      }
+    });
+    
+    return averages;
+  };
+
   // Component to render MPS report with async trait fetching
   const MPSReportDisplay = ({ fields, gradeLevel, submission }) => {
     const rows = fields?.mps_rows || [];
@@ -890,6 +915,9 @@ function ViewCoordinatorSubmissions() {
                                   traits.length === 0 || 
                                   JSON.stringify(traits) === JSON.stringify(DEFAULT_TRAITS);
 
+    // Calculate averages for the average row
+    const averages = calculateMPSAverages(rows, cols);
+
     return (
       <div className="mps-report-display" style={{ marginTop: '2rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
@@ -931,6 +959,21 @@ function ViewCoordinatorSubmissions() {
                   </tr>
                 );
               })}
+              {/* Average row */}
+              <tr style={{ fontWeight: 'bold', backgroundColor: '#f3f4f6' }}>
+                <td className="trait-cell">Average</td>
+                {cols.map(col => {
+                  const avgColumns = ['mean', 'median', 'pl', 'mps', 'sd', 'target'];
+                  if (avgColumns.includes(col.key)) {
+                    return (
+                      <td key={col.key} className="data-cell">
+                        {averages[col.key]}
+                      </td>
+                    );
+                  }
+                  return <td key={col.key} className="data-cell"></td>;
+                })}
+              </tr>
             </tbody>
           </table>
         </div>
@@ -1624,6 +1667,26 @@ function ViewCoordinatorSubmissions() {
                         ))}
                       </tr>
                     ))}
+                    {/* Average row */}
+                    {(() => {
+                      const averages = calculateMPSAverages(subject.mpsRows, DEFAULT_COLS_MPS);
+                      return (
+                        <tr style={{ fontWeight: 'bold', backgroundColor: '#f3f4f6' }}>
+                          <td className="trait-cell">Average</td>
+                          {DEFAULT_COLS_MPS.map((col) => {
+                            const avgColumns = ['mean', 'median', 'pl', 'mps', 'sd', 'target'];
+                            if (avgColumns.includes(col.key)) {
+                              return (
+                                <td key={`${subjectName}-mps-avg-${col.key}`} className="data-cell">
+                                  {averages[col.key]}
+                                </td>
+                              );
+                            }
+                            return <td key={`${subjectName}-mps-avg-${col.key}`} className="data-cell"></td>;
+                          })}
+                        </tr>
+                      );
+                    })()}
                   </tbody>
                 </table>
               </div>
