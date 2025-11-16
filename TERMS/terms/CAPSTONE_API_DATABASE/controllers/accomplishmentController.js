@@ -531,8 +531,9 @@ export const getAccomplishmentPeers = (req, res) => {
   const { id } = req.params;
   const ra = req.query.ra; // optional report_assignment_id
   const pra = req.query.pra; // optional parent_report_assignment_id for strict separation
+  const includeConsolidated = req.query.includeConsolidated === 'true'; // Include consolidated items if requested
 
-  console.log("getAccomplishmentPeers:", { id, ra, pra });
+  console.log("getAccomplishmentPeers:", { id, ra, pra, includeConsolidated });
 
   const fetchSqlFromSubmission = `
     SELECT s2.submission_id, s2.report_assignment_id, s2.value AS title, s2.status, s2.fields
@@ -547,6 +548,11 @@ export const getAccomplishmentPeers = (req, res) => {
 
   // NOTE: exclude current submission when ra= is provided
   // Look for submitted peers from the specific report_assignment_id
+  // If includeConsolidated is true, don't filter out consolidated items
+  const consolidatedFilter = includeConsolidated 
+    ? '' 
+    : `AND (JSON_EXTRACT(s.fields, '$.meta.consolidatedInto') IS NULL OR JSON_EXTRACT(s.fields, '$.meta.consolidatedInto') = 'null')`;
+  
   const fetchSqlFromRA = `
     SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields
     FROM submission s
@@ -556,6 +562,7 @@ export const getAccomplishmentPeers = (req, res) => {
       AND s.status >= 2
       AND ${roleClause}
       AND s.report_assignment_id = ?
+      ${consolidatedFilter}
   `;
 
   // Parent-child query: get teacher submissions from child assignments of the parent
@@ -568,6 +575,7 @@ export const getAccomplishmentPeers = (req, res) => {
       AND s.status >= 2
       AND ${roleClause}
       AND ra_child.parent_report_assignment_id = ?
+      ${consolidatedFilter}
   `;
   
   console.log("=== DEBUGGING QUERY ===");
@@ -912,7 +920,29 @@ export const consolidateAccomplishmentByTitle = (req, res) => {
         matchesTarget: t === targetKey,
         imgsCandidates: imgsArr,
       });
-      if (t === targetKey) imgsArr.forEach((nm) => addImage(nm));
+      if (t === targetKey) {
+        imgsArr.forEach((nm) => addImage(nm));
+        // Mark this peer submission as consolidated into the current submission
+        const peerFields = fieldsObj || {};
+        const peerMeta = peerFields.meta || {};
+        const updatedPeerFields = {
+          ...peerFields,
+          meta: {
+            ...peerMeta,
+            consolidatedInto: id, // Mark which submission this was consolidated into
+            consolidatedAt: new Date().toISOString()
+          }
+        };
+        // Update the peer submission to mark it as consolidated
+        const updatePeerSql = `UPDATE submission SET fields = ? WHERE submission_id = ?`;
+        db.query(updatePeerSql, [JSON.stringify(updatedPeerFields), r.submission_id], (peerUpdErr) => {
+          if (peerUpdErr) {
+            console.error(`[Consolidate] Failed to mark peer submission ${r.submission_id} as consolidated:`, peerUpdErr);
+          } else {
+            console.log(`[Consolidate] Marked peer submission ${r.submission_id} as consolidated into ${id}`);
+          }
+        });
+      }
     }
 
   // Fallback: if no images matched by exact title (due to formatting/whitespace differences),
@@ -932,6 +962,26 @@ export const consolidateAccomplishmentByTitle = (req, res) => {
         ? fieldsObj.photos
         : [];
       imgsArr.forEach((nm) => addImage(nm));
+      // Mark this peer submission as consolidated into the current submission
+      const peerFields = fieldsObj || {};
+      const peerMeta = peerFields.meta || {};
+      const updatedPeerFields = {
+        ...peerFields,
+        meta: {
+          ...peerMeta,
+          consolidatedInto: id, // Mark which submission this was consolidated into
+          consolidatedAt: new Date().toISOString()
+        }
+      };
+      // Update the peer submission to mark it as consolidated
+      const updatePeerSql = `UPDATE submission SET fields = ? WHERE submission_id = ?`;
+      db.query(updatePeerSql, [JSON.stringify(updatedPeerFields), r.submission_id], (peerUpdErr) => {
+        if (peerUpdErr) {
+          console.error(`[Consolidate] Failed to mark peer submission ${r.submission_id} as consolidated:`, peerUpdErr);
+        } else {
+          console.log(`[Consolidate] Marked peer submission ${r.submission_id} as consolidated into ${id}`);
+        }
+      });
     }
   }
 
@@ -955,6 +1005,7 @@ export const consolidateAccomplishmentByTitle = (req, res) => {
         meta: {
           ...(current?.meta || {}),
           consolidatedAt: new Date().toISOString(),
+          consolidatedImagesCount: Array.from(combinedMap.values()).length, // Track how many images were consolidated
         },
       };
       const updSql = `UPDATE submission SET fields = ? WHERE submission_id = ?`;

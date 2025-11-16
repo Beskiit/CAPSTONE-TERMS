@@ -314,10 +314,36 @@ function AssignedReport() {
                     console.warn('Failed to fetch coordinator own assignments:', err);
                 }
                 
-                // Combine both sets of reports
-                const allReports = [...assignedReports, ...coordinatorOwnReports];
-                console.log('🔍 [DEBUG] All reports fetched from API (assigned + own):', allReports);
-                console.log('🔍 [DEBUG] Reports count:', allReports.length);
+                // Combine both sets of reports, but deduplicate by submission_id to avoid counting the same submission twice
+                // Coordinator's own assignments appear in both assignedReports (as given_by) and coordinatorOwnReports (as assignee)
+                const allReportsMap = new Map();
+                
+                // First, add all assigned reports
+                assignedReports.forEach(report => {
+                    const key = `${report.report_assignment_id}_${report.submission_id}`;
+                    if (!allReportsMap.has(key)) {
+                        allReportsMap.set(key, report);
+                    }
+                });
+                
+                // Then, add coordinator's own reports (will skip duplicates)
+                coordinatorOwnReports.forEach(report => {
+                    const key = `${report.report_assignment_id}_${report.submission_id}`;
+                    if (!allReportsMap.has(key)) {
+                        allReportsMap.set(key, report);
+                    } else {
+                        console.log('⚠️ [DEBUG] Duplicate submission skipped:', {
+                            assignmentId: report.report_assignment_id,
+                            submission_id: report.submission_id,
+                            source: 'coordinatorOwnReports'
+                        });
+                    }
+                });
+                
+                const allReports = Array.from(allReportsMap.values());
+                console.log('🔍 [DEBUG] All reports fetched from API (assigned + own, deduplicated):', allReports);
+                console.log('🔍 [DEBUG] Reports count (before dedup):', assignedReports.length + coordinatorOwnReports.length);
+                console.log('🔍 [DEBUG] Reports count (after dedup):', allReports.length);
                 
                 // Debug: Check the structure of the first report
                 if (allReports.length > 0) {
@@ -340,8 +366,113 @@ function AssignedReport() {
                 // Group reports by assignment_id and calculate submission counts
                 const assignmentMap = new Map();
                 
+                // First, fetch assignment details to check parent_report_assignment_id for all assignments
+                const assignmentDetailsMap = new Map();
+                const uniqueAssignmentIds = [...new Set(filteredReports.map(r => r.report_assignment_id))];
+                await Promise.all(
+                    uniqueAssignmentIds.map(async (assignmentId) => {
+                        try {
+                            const assignmentRes = await fetch(`${API_BASE}/reports/assignment/${assignmentId}`, {
+                                credentials: "include"
+                            });
+                            if (assignmentRes.ok) {
+                                const assignmentData = await assignmentRes.json();
+                                assignmentDetailsMap.set(assignmentId, assignmentData);
+                            }
+                        } catch (err) {
+                            console.warn(`Failed to fetch assignment ${assignmentId}:`, err);
+                        }
+                    })
+                );
+                
+                // Debug: Log all reports for coordinator's own assignments before filtering
+                const coordinatorOwnAssignmentIds = coordinatorOwnReports.map(r => r.report_assignment_id);
+                const reportsForCoordinatorOwn = filteredReports.filter(r => coordinatorOwnAssignmentIds.includes(r.report_assignment_id));
+                if (reportsForCoordinatorOwn.length > 0) {
+                    console.log('🔍 [DEBUG] ALL reports for coordinator own assignments BEFORE filtering:', reportsForCoordinatorOwn);
+                    
+                    // Group by assignment ID to see how many submissions per assignment
+                    const byAssignment = new Map();
+                    reportsForCoordinatorOwn.forEach(r => {
+                        if (!byAssignment.has(r.report_assignment_id)) {
+                            byAssignment.set(r.report_assignment_id, []);
+                        }
+                        byAssignment.get(r.report_assignment_id).push(r);
+                    });
+                    
+                    console.log('🔍 [DEBUG] Submissions per coordinator own assignment:');
+                    byAssignment.forEach((reports, assignmentId) => {
+                        console.log(`  Assignment ID ${assignmentId}: ${reports.length} submission(s)`);
+                        reports.forEach(r => {
+                            console.log(`    - Submission ID: ${r.submission_id}, Submitted by: ${r.submitted_by}, User ID: ${user?.user_id}, Status: ${r.status}, Is Coordinator: ${Number(r.submitted_by) === Number(user?.user_id)}`);
+                        });
+                    });
+                }
+                
                 filteredReports.forEach(report => {
                     const assignmentId = report.report_assignment_id;
+                    const assignmentDetails = assignmentDetailsMap.get(assignmentId);
+                    
+                    // Skip if this is a child assignment (has parent_report_assignment_id) when counting coordinator's own assignments
+                    // Coordinator's own assignment should have parent_report_assignment_id = null
+                    const isChildAssignment = assignmentDetails?.parent_report_assignment_id != null;
+                    const isCoordinatorOwnAssignment = coordinatorOwnReports.some(r => r.report_assignment_id === assignmentId);
+                    
+                    // Debug log for coordinator's own assignments
+                    if (isCoordinatorOwnAssignment) {
+                        console.log('🔍 [DEBUG] Processing coordinator own assignment:', {
+                            assignmentId,
+                            isChildAssignment,
+                            parent_report_assignment_id: assignmentDetails?.parent_report_assignment_id,
+                            submitted_by: report.submitted_by,
+                            user_id: user?.user_id,
+                            status: report.status,
+                            submission_id: report.submission_id
+                        });
+                    }
+                    
+                    // Only process if it's the coordinator's own assignment (not a child) OR it's not a coordinator's own assignment
+                    if (isCoordinatorOwnAssignment && isChildAssignment) {
+                        // This is a child assignment being incorrectly identified as coordinator's own, skip it
+                        console.log('⚠️ [DEBUG] Skipping child assignment incorrectly identified as coordinator own:', assignmentId);
+                        return;
+                    }
+                    
+                    // For coordinator's own assignments, ONLY count submissions from the coordinator
+                    // For other assignments, count all submissions except coordinator's
+                    const isCoordinatorOwnSubmission = Number(report.submitted_by) === Number(user?.user_id);
+                    
+                    if (isCoordinatorOwnAssignment) {
+                        // Coordinator's own assignment: ONLY count coordinator's submissions
+                        if (!isCoordinatorOwnSubmission) {
+                            // Skip teacher submissions in coordinator's own assignment
+                            console.log('⚠️ [DEBUG] SKIPPING non-coordinator submission in coordinator own assignment:', {
+                                assignmentId,
+                                submission_id: report.submission_id,
+                                submitted_by: report.submitted_by,
+                                user_id: user?.user_id,
+                                assignment_title: report.assignment_title
+                            });
+                            return;
+                        } else {
+                            console.log('✅ [DEBUG] INCLUDING coordinator submission in coordinator own assignment:', {
+                                assignmentId,
+                                submission_id: report.submission_id,
+                                submitted_by: report.submitted_by,
+                                status: report.status
+                            });
+                        }
+                    } else {
+                        // Other assignments: exclude coordinator's submissions
+                        if (isCoordinatorOwnSubmission) {
+                            // Skip coordinator's submissions in teacher assignments
+                            console.log('⚠️ [DEBUG] Skipping coordinator submission in teacher assignment:', {
+                                assignmentId,
+                                submitted_by: report.submitted_by
+                            });
+                            return;
+                        }
+                    }
                     
                     if (!assignmentMap.has(assignmentId)) {
                         // Initialize assignment with first report data
@@ -367,22 +498,50 @@ function AssignedReport() {
                     const assignment = assignmentMap.get(assignmentId);
                     assignment.reports.push(report);
                     
-                    // For coordinator's own assignments, include coordinator in the count
-                    // For other assignments, exclude coordinator from total count
-                    const isCoordinatorOwnSubmission = Number(report.submitted_by) === Number(user?.user_id);
-                    const isCoordinatorOwnAssignment = coordinatorOwnReports.some(r => r.report_assignment_id === assignmentId);
+                    // Count all submissions that passed the filter above
+                    assignment.totalAssigned++;
                     
-                    // Include coordinator in count for their own assignments
-                    // Exclude coordinator from count for assignments they gave to others
-                    if (isCoordinatorOwnAssignment || !isCoordinatorOwnSubmission) {
-                        assignment.totalAssigned++;
+                    // Debug: Log when counting for coordinator's own assignments
+                    if (isCoordinatorOwnAssignment) {
+                        console.log('📊 [DEBUG] Counting submission for coordinator own assignment:', {
+                            assignmentId,
+                            submission_id: report.submission_id,
+                            submitted_by: report.submitted_by,
+                            status: report.status,
+                            totalAssigned_after: assignment.totalAssigned,
+                            submittedCount_before: assignment.submittedCount
+                        });
                     }
                     
                     // Count as submitted if status >= 2
-                    // For coordinator's own assignments, include coordinator's submission
-                    // For other assignments, exclude coordinator's submission
-                    if (report.status >= 2 && (isCoordinatorOwnAssignment || !isCoordinatorOwnSubmission)) {
+                    if (report.status >= 2) {
                         assignment.submittedCount++;
+                        if (isCoordinatorOwnAssignment) {
+                            console.log('✅ [DEBUG] Marked as submitted. New submittedCount:', assignment.submittedCount);
+                        }
+                    } else {
+                        if (isCoordinatorOwnAssignment) {
+                            console.log('⏳ [DEBUG] Status < 2, not counted as submitted. Status:', report.status);
+                        }
+                    }
+                });
+                
+                // Debug: Log final counts for coordinator's own assignments
+                coordinatorOwnAssignmentIds.forEach(assignmentId => {
+                    const assignment = assignmentMap.get(assignmentId);
+                    if (assignment) {
+                        console.log('📈 [DEBUG] FINAL COUNT for coordinator own assignment:', {
+                            assignmentId,
+                            assignment_title: assignment.assignment_title,
+                            totalAssigned: assignment.totalAssigned,
+                            submittedCount: assignment.submittedCount,
+                            reports_count: assignment.reports.length,
+                            report_details: assignment.reports.map(r => ({
+                                submission_id: r.submission_id,
+                                submitted_by: r.submitted_by,
+                                status: r.status
+                            }))
+                        });
                     }
                 });
                 
@@ -405,6 +564,23 @@ function AssignedReport() {
                 
                 console.log('🔍 [DEBUG] Final grouped reports:', groupedData);
                 console.log('🔍 [DEBUG] Number of grouped reports:', groupedData.length);
+                
+                // Highlight coordinator's own assignments in console
+                const coordinatorOwnInGrouped = groupedData.filter(g => 
+                    coordinatorOwnReports.some(r => r.report_assignment_id === g.report_assignment_id)
+                );
+                if (coordinatorOwnInGrouped.length > 0) {
+                    console.log('═══════════════════════════════════════════════════════════');
+                    console.log('🎯 COORDINATOR OWN ASSIGNMENTS - SUBMISSION COUNTS:');
+                    coordinatorOwnInGrouped.forEach(assignment => {
+                        console.log(`  Assignment ID: ${assignment.report_assignment_id}`);
+                        console.log(`  Title: ${assignment.assignment_title}`);
+                        console.log(`  Submitted: ${assignment.submitted}/${assignment.total}`);
+                        console.log(`  Status: ${assignment.status}`);
+                        console.log('  ───────────────────────────────────────────────────────');
+                    });
+                    console.log('═══════════════════════════════════════════════════════════');
+                }
                 setGroupedReports(groupedData);
             } catch (err) {
                 console.error("Error fetching grouped reports:", err);

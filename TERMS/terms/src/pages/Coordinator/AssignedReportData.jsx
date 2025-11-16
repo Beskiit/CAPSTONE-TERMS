@@ -11,6 +11,7 @@ import { ConfirmationModal } from "../../components/ConfirmationModal";
 import toast from "react-hot-toast";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle, ImageRun } from "docx";
 import { saveAs } from "file-saver";
+import { getImageUrl } from "../../utils/imageUtils";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
 
@@ -922,42 +923,43 @@ function AssignedReportData() {
         const narrative = answers.narrative || answers.description || answers.summary || '';
         
         // Handle images - check different possible structures
+        // IMPORTANT: Backend stores images in fields.images directly (not in _answers)
         let images = [];
         
-        // Check multiple possible image field names and structures
+        // First, check the main fields object (where backend stores images)
         const possibleImageFields = ['images', 'pictures', 'photos', 'attachments', 'files'];
-        const possibleImagePaths = [
-            answers.images,
-            answers.pictures, 
-            answers.photos,
-            answers.attachments,
-            answers.files,
-            // Also check if images are in a nested structure
-            answers._images,
-            answers._pictures,
-            answers._photos
-        ];
+        console.log('🔍 [DEBUG] Checking for images in fields:', fields);
+        console.log('🔍 [DEBUG] fields.images:', fields.images);
         
-        console.log('🔍 [DEBUG] Checking for images in answers:', answers);
-        console.log('🔍 [DEBUG] Possible image paths:', possibleImagePaths);
-        
-        for (const imageField of possibleImagePaths) {
-            if (imageField && Array.isArray(imageField) && imageField.length > 0) {
-                console.log('🔍 [DEBUG] Found images in field:', imageField);
-                images = imageField;
+        for (const fieldName of possibleImageFields) {
+            if (fields[fieldName] && Array.isArray(fields[fieldName]) && fields[fieldName].length > 0) {
+                console.log('🔍 [DEBUG] Found images in main fields:', fieldName, fields[fieldName]);
+                images = fields[fieldName];
                 break;
             }
         }
         
-        // If no images found in answers, check the main fields object
+        // If no images found in main fields, check _answers (for legacy data)
         if (images.length === 0) {
-            console.log('🔍 [DEBUG] No images in answers, checking main fields object');
-            console.log('🔍 [DEBUG] Main fields object:', fields);
+            console.log('🔍 [DEBUG] No images in main fields, checking _answers');
+            console.log('🔍 [DEBUG] Checking for images in answers:', answers);
             
-            for (const fieldName of possibleImageFields) {
-                if (fields[fieldName] && Array.isArray(fields[fieldName]) && fields[fieldName].length > 0) {
-                    console.log('🔍 [DEBUG] Found images in main fields:', fieldName, fields[fieldName]);
-                    images = fields[fieldName];
+            const possibleImagePaths = [
+                answers.images,
+                answers.pictures, 
+                answers.photos,
+                answers.attachments,
+                answers.files,
+                // Also check if images are in a nested structure
+                answers._images,
+                answers._pictures,
+                answers._photos
+            ];
+            
+            for (const imageField of possibleImagePaths) {
+                if (imageField && Array.isArray(imageField) && imageField.length > 0) {
+                    console.log('🔍 [DEBUG] Found images in answers field:', imageField);
+                    images = imageField;
                     break;
                 }
             }
@@ -976,49 +978,36 @@ function AssignedReportData() {
                 <div className="form-row">
                     <label>Picture/s:</label>
                     <div className="image-gallery">
-                        {images.map((img, index) => {
-                            // Handle different image formats and construct proper URLs
-                            let imageUrl = '';
-                            
-                            if (typeof img === 'string') {
-                                // If it's a string, it might be a filename or full URL
-                                if (img.startsWith('http') || img.startsWith('blob:')) {
-                                    imageUrl = img;
-                                } else {
-                                    // Construct full URL for filename
-                                    imageUrl = `${API_BASE}/uploads/accomplishments/${img}`;
+                        {images
+                            .map((img, index) => {
+                                // Use utility function to get proper image URL
+                                const imageUrl = getImageUrl(img);
+                                
+                                console.log('🖼️ [DEBUG] Processing image:', { img, imageUrl, index });
+                                
+                                if (!imageUrl) {
+                                    console.warn('⚠️ [DEBUG] No valid image URL found for:', img);
+                                    return null;
                                 }
-                            } else if (typeof img === 'object' && img !== null) {
-                                // Handle object format
-                                const rawUrl = img.url || img.src || img.path || img.filename;
-                                if (rawUrl) {
-                                    if (rawUrl.startsWith('http') || rawUrl.startsWith('blob:')) {
-                                        imageUrl = rawUrl;
-                                    } else {
-                                        imageUrl = `${API_BASE}/uploads/accomplishments/${rawUrl}`;
-                                    }
-                                }
-                            }
-                            
-                            console.log('🖼️ [DEBUG] Processing image:', { img, imageUrl, index });
-                            
-                            return (
-                                <div key={index} className="image-item">
-                                    <img 
-                                        src={imageUrl} 
-                                        alt={`Activity image ${index + 1}`}
-                                        style={{ maxWidth: '200px', maxHeight: '200px', objectFit: 'cover' }}
-                                        onError={(e) => {
-                                            console.error('❌ [DEBUG] Image failed to load:', imageUrl, e);
-                                            e.target.style.display = 'none';
-                                        }}
-                                        onLoad={() => {
-                                            console.log('✅ [DEBUG] Image loaded successfully:', imageUrl);
-                                        }}
-                                    />
-                                </div>
-                            );
-                        })}
+                                
+                                return (
+                                    <div key={index} className="image-item">
+                                        <img 
+                                            src={imageUrl} 
+                                            alt={`Activity image ${index + 1}`}
+                                            style={{ maxWidth: '200px', maxHeight: '200px', objectFit: 'cover' }}
+                                            onError={(e) => {
+                                                console.error('❌ [DEBUG] Image failed to load:', imageUrl, e);
+                                                e.target.style.display = 'none';
+                                            }}
+                                            onLoad={() => {
+                                                console.log('✅ [DEBUG] Image loaded successfully:', imageUrl);
+                                            }}
+                                        />
+                                    </div>
+                                );
+                            })
+                            .filter(Boolean)}
                     </div>
                 </div>
             );

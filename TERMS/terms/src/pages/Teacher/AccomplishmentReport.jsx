@@ -61,6 +61,10 @@ function AccomplishmentReport() {
   const [newFiles, setNewFiles] = useState([]); // File[]
   const [imagesConsolidated, setImagesConsolidated] = useState(false); // Track if images were consolidated
   const [rejectionReason, setRejectionReason] = useState(""); // Store rejection reason
+  
+  // Consolidation flagging: prevent re-consolidation
+  const [hasUnsavedConsolidation, setHasUnsavedConsolidation] = useState(false); // Temporary flag (frontend only)
+  const [isAlreadyConsolidated, setIsAlreadyConsolidated] = useState(false); // Permanent flag (from backend)
 
   // Coordinator-only fields (not required for save here)
   const [activity, setActivity] = useState({
@@ -85,6 +89,7 @@ function AccomplishmentReport() {
   const [submissionStatus, setSubmissionStatus] = useState(null);
   const [reportAssignmentId, setReportAssignmentId] = useState(null); // <-- NEW
   const [isFromPrincipalAssignment, setIsFromPrincipalAssignment] = useState(false); // Track if assignment is from principal
+  const [assignmentDetails, setAssignmentDetails] = useState(null); // Store assignment details (title, start_date, due_date, report_type)
   const [showSubmittedAlert, setShowSubmittedAlert] = useState(true);
   const [showSubmitToast, setShowSubmitToast] = useState(false);
   const [showConsolidate, setShowConsolidate] = useState(false);
@@ -124,6 +129,37 @@ function AccomplishmentReport() {
   useEffect(() => {
     if (navState && navState.report_assignment_id) {
       setReportAssignmentId(navState.report_assignment_id);
+      
+      // Fetch assignment details if available
+      (async () => {
+        try {
+          const assignmentRes = await fetch(`${API_BASE}/reports/assignment/${navState.report_assignment_id}`, {
+            credentials: "include"
+          });
+          if (assignmentRes.ok) {
+            const assignmentData = await assignmentRes.json();
+            // API returns: title, from_date, to_date, category_name, sub_category_name
+            const reportType = assignmentData?.category_name 
+              ? (assignmentData?.sub_category_name 
+                  ? `${assignmentData.category_name} - ${assignmentData.sub_category_name}`
+                  : assignmentData.category_name)
+              : "Accomplishment Report";
+            
+            setAssignmentDetails({
+              title: assignmentData?.title || "",
+              start_date: assignmentData?.from_date || "",
+              due_date: assignmentData?.to_date || "",
+              report_type: reportType
+            });
+            // Set title from assignment
+            if (assignmentData?.title) {
+              setTitle(assignmentData.title);
+            }
+          }
+        } catch (err) {
+          console.warn('Failed to fetch assignment data from navState:', err);
+        }
+      })();
     }
   }, [navState]);
 
@@ -182,6 +218,37 @@ function AccomplishmentReport() {
           setExistingImages(normalizedImgs);
         }
         
+        // Check consolidation flag: verify if consolidation was actually saved
+        const consolidatedAt = data?.fields?.meta?.consolidatedAt;
+        const consolidatedImagesCount = data?.fields?.meta?.consolidatedImagesCount || 0;
+        const currentImagesCount = imgs.length;
+        
+        // Only mark as consolidated if:
+        // 1. Flag exists in backend AND
+        // 2. Current images count matches or exceeds consolidated count (consolidation was saved)
+        const isConsolidatedAndSaved = consolidatedAt && 
+          (currentImagesCount >= consolidatedImagesCount || consolidatedImagesCount > 0);
+        
+        // If flag exists but no images were saved → clear flag (allow re-consolidation)
+        if (consolidatedAt && currentImagesCount === 0 && consolidatedImagesCount === 0) {
+          console.log('🔄 [DEBUG] Consolidation flag exists but no images saved - allowing re-consolidation');
+          setIsAlreadyConsolidated(false);
+          setHasUnsavedConsolidation(false);
+        } else {
+          setIsAlreadyConsolidated(isConsolidatedAndSaved);
+          // If permanently consolidated, clear temporary flag
+          if (isConsolidatedAndSaved) {
+            setHasUnsavedConsolidation(false);
+          }
+        }
+        
+        console.log('🔄 [DEBUG] Consolidation check:', {
+          consolidatedAt,
+          consolidatedImagesCount,
+          currentImagesCount,
+          isConsolidatedAndSaved
+        });
+        
         setSubmissionStatus(statusFromApi);
         setReportAssignmentId(data?.report_assignment_id ?? null); // <-- NEW
 
@@ -197,6 +264,27 @@ function AccomplishmentReport() {
             });
             if (assignmentRes.ok) {
               const assignmentData = await assignmentRes.json();
+              
+              // Store assignment details for display
+              // API returns: title, from_date, to_date, category_name, sub_category_name
+              const reportType = assignmentData?.category_name 
+                ? (assignmentData?.sub_category_name 
+                    ? `${assignmentData.category_name} - ${assignmentData.sub_category_name}`
+                    : assignmentData.category_name)
+                : "Accomplishment Report";
+              
+              setAssignmentDetails({
+                title: assignmentData?.title || "",
+                start_date: assignmentData?.from_date || "",
+                due_date: assignmentData?.to_date || "",
+                report_type: reportType
+              });
+              
+              // Set title from assignment if not already set
+              if (assignmentData?.title) {
+                setTitle(assignmentData.title);
+              }
+              
               const hasParentAssignment = assignmentData?.parent_report_assignment_id != null;
               const hasCoordinatorUserId = assignmentData?.coordinator_user_id != null;
               
@@ -424,6 +512,17 @@ function AccomplishmentReport() {
             console.log('🔄 [DEBUG] Normalized reloaded images:', normalizedImgs);
             setExistingImages(normalizedImgs);
           }
+          
+          // Check if consolidation was saved: if hasUnsavedConsolidation and images exist, flag is now permanent
+          if (hasUnsavedConsolidation && imgs.length > 0) {
+            const consolidatedAt = reloadData?.fields?.meta?.consolidatedAt;
+            if (consolidatedAt) {
+              // Consolidation was saved - flag is now permanent
+              console.log('🔄 [DEBUG] Consolidation saved - flag is now permanent');
+              // Keep isAlreadyConsolidated as true (it's now permanent)
+              // hasUnsavedConsolidation can stay true (doesn't matter, flag is permanent now)
+            }
+          }
         }
       } catch (reloadError) {
         console.error('Failed to reload submission data:', reloadError);
@@ -515,6 +614,16 @@ function AccomplishmentReport() {
             const normalizedImgs = normalizeImages(imgs);
             console.log('🔄 [DEBUG] Normalized reloaded images:', normalizedImgs);
             setExistingImages(normalizedImgs);
+          }
+          
+          // Check if consolidation was saved: if hasUnsavedConsolidation and images exist, flag is now permanent
+          if (hasUnsavedConsolidation && imgs.length > 0) {
+            const consolidatedAt = reloadData?.fields?.meta?.consolidatedAt;
+            if (consolidatedAt) {
+              // Consolidation was saved - flag is now permanent
+              console.log('🔄 [DEBUG] Consolidation saved - flag is now permanent');
+              // Keep isAlreadyConsolidated as true (it's now permanent)
+            }
           }
         }
       } catch (reloadError) {
@@ -636,6 +745,16 @@ function AccomplishmentReport() {
             const normalizedImgs = normalizeImages(imgs);
             console.log('🔄 [DEBUG] Normalized reloaded images:', normalizedImgs);
             setExistingImages(normalizedImgs);
+          }
+          
+          // Check if consolidation was saved: if hasUnsavedConsolidation and images exist, flag is now permanent
+          if (hasUnsavedConsolidation && imgs.length > 0) {
+            const consolidatedAt = reloadData?.fields?.meta?.consolidatedAt;
+            if (consolidatedAt) {
+              // Consolidation was saved - flag is now permanent
+              console.log('🔄 [DEBUG] Consolidation saved - flag is now permanent');
+              // Keep isAlreadyConsolidated as true (it's now permanent)
+            }
           }
         }
       } catch (reloadError) {
@@ -776,9 +895,14 @@ function AccomplishmentReport() {
       // PRINCIPAL: use 'ra' (same assignment) because single-assignment flow has all peers under the same report_assignment_id
       // COORDINATOR (parent/child flow): use 'pra' (parent assignment)
       const isPrincipal = isPrincipalSidebar === true;
-      const buildUrl = (key) => reportAssignmentId
-        ? `${API_BASE}/reports/accomplishment/${submissionId}/peers?${key}=${encodeURIComponent(reportAssignmentId)}`
-        : `${API_BASE}/reports/accomplishment/${submissionId}/peers`;
+      const buildUrl = (key) => {
+        const baseUrl = reportAssignmentId
+          ? `${API_BASE}/reports/accomplishment/${submissionId}/peers?${key}=${encodeURIComponent(reportAssignmentId)}`
+          : `${API_BASE}/reports/accomplishment/${submissionId}/peers`;
+        // Add parameter to include consolidated items so they can still be used for AI summary
+        const separator = baseUrl.includes('?') ? '&' : '?';
+        return `${baseUrl}${separator}includeConsolidated=true`;
+      };
 
       // Try RA first for principal/teacher; if empty, retry PRA (child linking)
       let firstKey = (isTeacher || isPrincipal) ? 'ra' : 'pra';
@@ -804,6 +928,50 @@ function AccomplishmentReport() {
         console.log("[Consolidate] peers response:", data);
         console.log("[Consolidate] peers response (pretty):\n" + JSON.stringify(data, null, 2));
         console.log("[Consolidate] response length:", Array.isArray(data) ? data.length : "not an array");
+        
+        // Keep all submissions (including consolidated ones) but mark them
+        // This allows users to still generate AI summaries even if already consolidated
+        if (Array.isArray(data)) {
+          console.log("[Consolidate] Processing groups, total:", data.length);
+          data = data.map(group => {
+            // Keep all submissions, but mark which ones are consolidated
+            const submissionsWithStatus = (group.submissions || []).map(submission => {
+              try {
+                const f = parseFields(submission);
+                const consolidatedInto = f?.meta?.consolidatedInto;
+                const isConsolidated = consolidatedInto != null && consolidatedInto !== '' && consolidatedInto !== 'null';
+                return {
+                  ...submission,
+                  _isConsolidated: isConsolidated,
+                  _consolidatedInto: consolidatedInto
+                };
+              } catch (err) {
+                console.warn("[Consolidate] Error parsing fields for submission:", err);
+                // If parsing fails, assume not consolidated
+                return {
+                  ...submission,
+                  _isConsolidated: false,
+                  _consolidatedInto: null
+                };
+              }
+            });
+            
+            console.log("[Consolidate] Group:", group.title, "Submissions:", submissionsWithStatus.length, "Consolidated:", submissionsWithStatus.filter(s => s._isConsolidated).length);
+            
+            return {
+              ...group,
+              submissions: submissionsWithStatus
+            };
+          }).filter(group => {
+            // Keep groups that have submissions (even if all are consolidated)
+            const hasSubmissions = group.submissions && group.submissions.length > 0;
+            if (!hasSubmissions) {
+              console.log("[Consolidate] Filtering out group with no submissions:", group.title);
+            }
+            return hasSubmissions;
+          });
+          console.log("[Consolidate] Groups after filtering:", data.length);
+        }
       } catch (_) { /* noop */ }
       
       // Prefer groups that match the current submission title
@@ -918,6 +1086,11 @@ function AccomplishmentReport() {
       const normalizedImages = normalizeImages(out.images || []);
       setExistingImages(normalizedImages);
       setImagesConsolidated(true); // Mark that images were consolidated
+      
+      // Set temporary flag: prevents re-consolidation during this editing session
+      setHasUnsavedConsolidation(true);
+      setIsAlreadyConsolidated(true); // Block consolidation in this session
+      
       console.log('Set existingImages to:', normalizedImages);
       setSuccess(`Consolidated ${out.count || (out.images||[]).length} images into this report.`);
       setShowConsolidate(false);
@@ -1039,7 +1212,12 @@ function AccomplishmentReport() {
             ) : (!isTeacher && isCoordinatorSidebar) ? (
               <>
                 <div className="buttons">
-                  <button onClick={openConsolidate}>Consolidate</button>
+                  <button 
+                    onClick={openConsolidate}
+                    title="Consolidate images from peer submissions"
+                  >
+                    Consolidate
+                  </button>
                   {isFromPrincipalAssignment ? (
                     <button onClick={handlePrincipalConfirmation} disabled={saving || (submissionStatus >= 2 && submissionStatus !== 4)}>
                       {saving ? "Submitting…" : "Submit"}
@@ -1054,7 +1232,12 @@ function AccomplishmentReport() {
             ) : (
               <>
                 <div className="buttons">
-                  <button onClick={openConsolidate}>Consolidate</button>
+                  <button 
+                    onClick={openConsolidate}
+                    title="Consolidate images from peer submissions"
+                  >
+                    Consolidate
+                  </button>
                   <button className="btn primary" onClick={onPrincipalSave} disabled={saving}>
                     {saving ? "Saving…" : "Save"}
                   </button>
@@ -1062,8 +1245,9 @@ function AccomplishmentReport() {
               </>
             )}
 
-            <div className="accomplishment-report-container">
-              <h3>Activity Completion Report</h3>
+            <div className="accomplishment-report-wrapper">
+              <div className="accomplishment-report-container">
+                <h3>Activity Completion Report</h3>
 
               {isTeacher && submissionStatus === 4 && showSubmittedAlert && (
                 <div
@@ -1248,7 +1432,9 @@ function AccomplishmentReport() {
                         value={title}
                         onChange={(e) => setTitle(e.target.value)}
                         required 
-                        disabled={submissionStatus >= 2 && submissionStatus !== 4} 
+                        disabled={true}
+                        readOnly
+                        style={{ backgroundColor: '#f3f4f6', cursor: 'not-allowed' }}
                       />
                     </div>
                     <div className="form-row">
@@ -1311,16 +1497,17 @@ function AccomplishmentReport() {
                       </div>
                     )}
 
-                    <div className="form-row">
-                      <label htmlFor="teacherNarrative">Narrative:</label>
+                    <div className="form-row" style={{ width: '100%' }}>
+                      <label htmlFor="teacherNarrative" style={{ flex: '0 0 80px', minWidth: '80px' }}>Narrative:</label>
                       <textarea
                         id="teacherNarrative"
                         name="teacherNarrative"
-                        rows="6"
+                        rows="8"
                         value={narrative}
                         onChange={(e) => setNarrative(e.target.value)}
                         required
                         disabled={submissionStatus >= 2 && submissionStatus !== 4}
+                        style={{ flex: '1 1 0', minWidth: '0', width: '100%', minHeight: '160px', resize: 'vertical' }}
                       />
                     </div>
                   </>
@@ -1342,27 +1529,29 @@ function AccomplishmentReport() {
 
                     <div className="form-row">
                       <label htmlFor="facilitators">Facilitator/s:</label>
-                      <input
-                        type="text"
+                      <textarea
                         id="facilitators"
                         name="facilitators"
+                        rows="3"
                         value={activity.facilitators}
                         onChange={(e) => setActivity((p) => ({ ...p, facilitators: e.target.value }))}
                         required
                         disabled={submissionStatus >= 2 && submissionStatus !== 4}
+                        style={{ width: '100%', minHeight: '80px', resize: 'vertical' }}
                       />
                     </div>
 
                     <div className="form-row">
                       <label htmlFor="objectives">Objectives:</label>
-                      <input
-                        type="text"
+                      <textarea
                         id="objectives"
                         name="objectives"
+                        rows="3"
                         value={activity.objectives}
                         onChange={(e) => setActivity((p) => ({ ...p, objectives: e.target.value }))}
                         required
                         disabled={submissionStatus >= 2 && submissionStatus !== 4}
+                        style={{ width: '100%', minHeight: '80px', resize: 'vertical' }}
                       />
                     </div>
 
@@ -1451,12 +1640,13 @@ function AccomplishmentReport() {
                       <textarea
                         id="lessonLearned"
                         name="lessonLearned"
-                        rows="4"
+                        rows="6"
                         value={activity.lessonLearned}
                         onChange={(e) => setActivity((p) => ({ ...p, lessonLearned: e.target.value }))}
                         required
                         disabled={submissionStatus >= 2 && submissionStatus !== 4}
                         placeholder="Enter lessons learned and recommendations from this activity"
+                        style={{ width: '100%', minHeight: '120px', resize: 'vertical' }}
                       />
                     </div>
 
@@ -1530,16 +1720,17 @@ function AccomplishmentReport() {
                       </div>
                     )}
 
-                    <div className="form-row">
-                      <label htmlFor="narrative">Narrative:</label>
+                    <div className="form-row" style={{ width: '100%' }}>
+                      <label htmlFor="narrative" style={{ flex: '0 0 80px', minWidth: '80px' }}>Narrative:</label>
                       <textarea
                         id="narrative"
                         name="narrative"
-                        rows="6"
+                        rows="8"
                         value={narrative}
                         onChange={(e) => setNarrative(e.target.value)}
                         required
                         disabled={submissionStatus >= 2 && submissionStatus !== 4}
+                        style={{ flex: '1 1 0', minWidth: '0', width: '100%', minHeight: '160px', resize: 'vertical' }}
                       />
                     </div>
                   </>
@@ -1550,6 +1741,31 @@ function AccomplishmentReport() {
                   </>
                 )}
               </form>
+              </div>
+              
+              {assignmentDetails && (
+                <div className="assignment-details-card">
+                  <div className="assignment-section">
+                    <h4>Assignment</h4>
+                    <div className="assignment-field">
+                      <strong>Type:</strong> {assignmentDetails.report_type || "Accomplishment Report"}
+                    </div>
+                  </div>
+                  <div className="assignment-divider"></div>
+                  <div className="assignment-section">
+                    <h4>Details</h4>
+                    <div className="assignment-field">
+                      <strong>Title:</strong> {assignmentDetails.title || "N/A"}
+                    </div>
+                    <div className="assignment-field">
+                      <strong>Start Date:</strong> {assignmentDetails.start_date ? new Date(assignmentDetails.start_date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }) : "N/A"}
+                    </div>
+                    <div className="assignment-field">
+                      <strong>Due Date:</strong> {assignmentDetails.due_date ? new Date(assignmentDetails.due_date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }) : "N/A"}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1598,6 +1814,33 @@ function AccomplishmentReport() {
                         return String(t).trim();
                       };
 
+                      // Check if all submissions in this group are already consolidated
+                      const allConsolidated = (g?.submissions || []).every(s => s._isConsolidated === true);
+                      const consolidatedCount = (g?.submissions || []).filter(s => s._isConsolidated === true).length;
+                      const consolidatedIntoId = (g?.submissions || []).find(s => s._isConsolidated)?._consolidatedInto;
+                      
+                      // Check if AI summary has been generated for this group
+                      // Check if current submission's narrative contains AI-generated content
+                      // We'll check if the narrative has substantial content that might indicate AI summary was generated
+                      const narrativeText = narrative || "";
+                      const hasAiSummary = (() => {
+                        // Check if narrative has content that suggests an AI summary was generated
+                        // This is a heuristic - in production, you'd track this in meta fields per group
+                        if (!narrativeText || narrativeText.trim().length < 100) return false;
+                        
+                        // Check if narrative contains patterns typical of AI-generated summaries
+                        // AI summaries often have structured content, bullet points, or key phrases
+                        const hasStructuredContent = 
+                          (narrativeText.includes('•') || 
+                           narrativeText.includes('Key') ||
+                           narrativeText.includes('Summary') ||
+                           narrativeText.includes('The following') ||
+                           narrativeText.split('\n\n').length > 2) &&
+                          narrativeText.trim().length > 100;
+                        
+                        return hasStructuredContent;
+                      })();
+
                       const hasNarr = (g?.submissions || []).some(s => !!extractNarrative(s));
 
                       const narrativeCount = (g?.submissions || []).reduce((count, s) => {
@@ -1626,6 +1869,16 @@ function AccomplishmentReport() {
                             <div style={{ opacity: 0.7, fontSize: 12 }}>
                               {(g.submissions?.length || 0)} submission(s)
                               {narrativeCount ? ` \u2022 ${narrativeCount} narrative(s)` : ""}
+                              {allConsolidated && (
+                                <span style={{ marginLeft: 8, fontSize: 11, color: '#dc2626', fontStyle: 'italic' }}>
+                                  (All Consolidated{consolidatedIntoId ? ` into submission #${consolidatedIntoId}` : ''})
+                                </span>
+                              )}
+                              {!allConsolidated && consolidatedCount > 0 && (
+                                <span style={{ marginLeft: 8, fontSize: 11, color: '#f59e0b', fontStyle: 'italic' }}>
+                                  ({consolidatedCount} already consolidated)
+                                </span>
+                              )}
                             </div>
                             {narrativePreviews.length > 0 && (
                               <div style={{ marginTop: 6, maxHeight: 96, overflowY: 'auto', paddingRight: 4 }}>
@@ -1660,7 +1913,13 @@ function AccomplishmentReport() {
                                       key={`${sIdx}-${imgIdx}`} 
                                       src={imageUrl} 
                                       alt={`Image ${imgIdx + 1}`} 
-                                      style={{ width: 100, height: 75, objectFit: "cover", borderRadius: 4, border: "1px solid #e5e7eb" }}
+                                      style={{ 
+                                        width: 100, 
+                                        height: 75, 
+                                        objectFit: "cover", 
+                                        borderRadius: 4, 
+                                        border: "1px solid #e5e7eb"
+                                      }}
                                       onError={(e) => {
                                         console.error('Image failed to load:', imageUrl);
                                         debugImageUrl(img, `Peer Group ${sIdx}-${imgIdx}`);
@@ -1673,16 +1932,42 @@ function AccomplishmentReport() {
                             </div>
                           </td>
                           <td style={{ padding: 8, width: 260, textAlign: "right", display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                            <button className="btn" onClick={() => generateConsolidationSummary(g.title, { images: g.submissions?.flatMap(s => {
-                              const f = parseFields(s) || {};
-                              const answers = f._answers || {};
-                              return (answers.images || []).filter(img => {
-                                if (typeof img === 'string' && img.startsWith('blob:')) return false;
-                                if (typeof img === 'object' && img.url && img.url.startsWith('blob:')) return false;
-                                return true;
-                              });
-                            }) || [] }) } disabled={isGeneratingConsolidationSummary} title="Generate AI summary from teacher narratives">{isGeneratingConsolidationSummary ? 'Generating…' : 'AI Summary'}</button>
-                            <button className="btn primary" onClick={() => consolidateByTitle(g.title)}>Consolidate Images ({imageCount})</button>
+                            <button 
+                              className="btn" 
+                              onClick={() => generateConsolidationSummary(g.title, { images: g.submissions?.flatMap(s => {
+                                const f = parseFields(s) || {};
+                                const answers = f._answers || {};
+                                return (answers.images || []).filter(img => {
+                                  if (typeof img === 'string' && img.startsWith('blob:')) return false;
+                                  if (typeof img === 'object' && img.url && img.url.startsWith('blob:')) return false;
+                                  return true;
+                                });
+                              }) || [] }) } 
+                              disabled={isGeneratingConsolidationSummary || hasAiSummary}
+                              style={hasAiSummary ? { 
+                                opacity: 0.5, 
+                                cursor: 'not-allowed',
+                                backgroundColor: '#9ca3af',
+                                borderColor: '#9ca3af'
+                              } : {}}
+                              title={hasAiSummary ? "AI summary has already been generated for this group" : "Generate AI summary from teacher narratives"}
+                            >
+                              {isGeneratingConsolidationSummary ? 'Generating…' : 'AI Summary'}
+                            </button>
+                            <button 
+                              className="btn primary" 
+                              onClick={() => consolidateByTitle(g.title)}
+                              disabled={allConsolidated}
+                              style={allConsolidated ? { 
+                                opacity: 0.5, 
+                                cursor: 'not-allowed',
+                                backgroundColor: '#9ca3af',
+                                borderColor: '#9ca3af'
+                              } : {}}
+                              title={allConsolidated ? "All images in this group have already been consolidated" : `Consolidate ${imageCount} images`}
+                            >
+                              Consolidate Images ({imageCount})
+                            </button>
                           </td>
                         </tr>
                       );

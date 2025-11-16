@@ -937,85 +937,116 @@ function SetReport() {
       const yearId = selectedYearData ? selectedYearData.year_id : (activeYearQuarter.year || 1);
       const quarterId = selectedQuarter ? Number(selectedQuarter) : (activeYearQuarter.quarter || 1);
 
-      // Special handling for reports from principal (with coordinator_user_id or parent_report_assignment_id)
-      // When coordinator distributes to teachers/coordinators, create a SINGLE assignment with ALL recipients
-      // The API will automatically create one submission per recipient
-      // This ensures parent linking works even when categories differ
-      const isFromPrincipalWithCoordinator = isFromPrincipalAssignment && isCoordinator && 
-        (originalReportData?.coordinator_user_id != null || originalReportData?.parent_report_assignment_id != null);
+      // NOTE: When updating an existing report, we should UPDATE it, not create new assignments.
+      // The "distributing from principal" logic only applies when CREATING new assignments,
+      // not when editing existing ones. This function is called for UPDATES, so we skip that logic here.
       
-      console.log('🔄 [DEBUG] Checking if should create child assignments:', {
-        isFromPrincipalAssignment,
-        isCoordinator,
-        hasCoordinatorUserId: originalReportData?.coordinator_user_id != null,
-        hasParentAssignment: originalReportData?.parent_report_assignment_id != null,
-        isFromPrincipalWithCoordinator,
-        editingReportId,
-        originalReportData: originalReportData ? {
-          category_id: originalReportData.category_id,
-          coordinator_user_id: originalReportData.coordinator_user_id,
-          parent_report_assignment_id: originalReportData.parent_report_assignment_id
-        } : null
-      });
-      
-      if (isFromPrincipalWithCoordinator) {
-        console.log('🔄 [DEBUG] Coordinator distributing report from principal to recipients (updateExistingReport)', {
-          originalCategory: originalReportData?.category_id,
-          newCategory: selectedCategory,
-          reportType,
-          editingReportId,
-          recipientsCount: recipients.length,
-          recipients
+      // Special handling for coordinator's own assignment (not from principal)
+      // For coordinator's own assignment:
+      // - Coordinator's assignment: only coordinator as assignee
+      // - Teacher assignment (child): teachers as assignees
+      const isCoordinatorOwnAssignment = isCoordinator && !isFromPrincipalAssignment && !isPrincipalReportParam;
+      if (isCoordinatorOwnAssignment && (reportType === "accomplishment" || reportType === "laempl") && user?.user_id) {
+        const coordinatorUserId = Number(user.user_id);
+        const coordinatorUserIdStr = String(user.user_id);
+        
+        // Separate teachers from coordinator
+        const teacherRecipients = recipients
+          .filter(id => String(id) !== coordinatorUserIdStr)
+          .map(id => Number(id));
+        
+        console.log('🔄 [DEBUG] Coordinator own assignment update:', {
+          coordinatorUserId,
+          teacherRecipients,
+          originalRecipients: recipients
         });
         
-        // Keep coordinator's assignment unchanged (with coordinator_user_id and empty assignees)
-        // Create a SINGLE assignment with ALL recipients in assignees array
-        // The API will automatically create one submission per recipient
+        // Step 1: Update coordinator's assignment (coordinator only)
+        const coordinatorUpdateData = {
+          title: title || (reportType === "accomplishment" ? "Accomplishment Report" : 
+                          reportType === "laempl" ? "LAEMPL Report" : 
+                          reportType === "mps" ? "MPS Report" : "Report"),
+          quarter: quarterId,
+          year: yearId,
+          from_date: startDate || null,
+          to_date: dueDate,
+          instruction,
+          is_given: 1,
+          allow_late: allowLate ? 1 : 0,
+          number_of_submission: numberValue,
+          assignees: [coordinatorUserId] // Coordinator only
+        };
         
-        if (recipients.length > 0) {
-          const isLAEMPLMPS = reportType === "laempl" && selectedSubCategory === "3" && selectedGradeLevel && selectedSubjects.length > 0;
-          
-          let endpoint = "";
-          let body = {};
-          
-          if (isLAEMPLMPS) {
-            // LAEMPL & MPS with subjects: creates one assignment per subject, each with all recipients
-            endpoint = `${API_BASE}/reports/laempl-mps`;
-            const subjectIds = selectedSubjects.map(id => Number(id));
-            body = {
-              category_id: Number(selectedCategory),
-              sub_category_id: Number(selectedSubCategory),
-              given_by: Number(user?.user_id),
-              assignees: recipients.map(id => Number(id)), // All recipients in one array
+        const coordinatorRes = await fetch(`${API_BASE}/reports/assignment/${editingReportId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(coordinatorUpdateData)
+        });
+        
+        if (!coordinatorRes.ok) {
+          const errText = await coordinatorRes.text();
+          toast.error("Failed to update coordinator assignment: " + errText);
+          setSubmitting(false);
+          return;
+        }
+        
+        // Step 2: Find or create teacher assignment (child assignment)
+        // First, try to find existing child assignment
+        let teacherAssignmentId = null;
+        try {
+          const findChildRes = await fetch(`${API_BASE}/reports/assignment/${editingReportId}/child`, {
+            credentials: "include"
+          });
+          if (findChildRes.ok) {
+            const childData = await findChildRes.json();
+            teacherAssignmentId = childData?.report_assignment_id || null;
+            console.log('🔄 [DEBUG] Found existing child assignment:', teacherAssignmentId);
+          }
+        } catch (err) {
+          console.warn('No existing child assignment found, will create new one:', err);
+        }
+        
+        // Step 3: Update or create teacher assignment
+        if (teacherRecipients.length > 0) {
+          if (teacherAssignmentId) {
+            // Update existing teacher assignment
+            const teacherUpdateData = {
+              title: title || (reportType === "accomplishment" ? "Accomplishment Report" : 
+                              reportType === "laempl" ? "LAEMPL Report" : 
+                              reportType === "mps" ? "MPS Report" : "Report"),
               quarter: quarterId,
               year: yearId,
               from_date: startDate || null,
               to_date: dueDate,
-              instruction: instruction || "LAEMPL Report assignment",
+              instruction,
               is_given: 1,
-              is_archived: 0,
               allow_late: allowLate ? 1 : 0,
-              title: title || "LAEMPL Report",
-              parent_report_assignment_id: Number(editingReportId), // Link to principal's assignment
               number_of_submission: numberValue,
-              grade_level_id: Number(selectedGradeLevel),
-              subject_ids: subjectIds
+              assignees: teacherRecipients
             };
-          } else {
-            // For other report types: create single assignment with all recipients
-            if (reportType === "accomplishment") {
-              endpoint = `${API_BASE}/reports/accomplishment/give`;
-            } else if (reportType === "laempl") {
-              endpoint = `${API_BASE}/reports/laempl`;
-            } else {
-              endpoint = `${API_BASE}/reports/give`;
+            
+            const teacherRes = await fetch(`${API_BASE}/reports/assignment/${teacherAssignmentId}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify(teacherUpdateData)
+            });
+            
+            if (!teacherRes.ok) {
+              const errText = await teacherRes.text();
+              toast.error("Failed to update teacher assignment: " + errText);
+              setSubmitting(false);
+              return;
             }
             
-            body = {
+            console.log('🔄 [DEBUG] Updated teacher assignment:', teacherAssignmentId);
+          } else {
+            // Create new teacher assignment
+            const base = {
               category_id: Number(selectedCategory),
               sub_category_id: reportType === "accomplishment" ? null : Number(selectedSubCategory),
-              given_by: Number(user?.user_id),
-              assignees: recipients.map(id => Number(id)), // All recipients in one array
+              given_by: coordinatorUserId,
               quarter: quarterId,
               year: yearId,
               from_date: startDate || null,
@@ -1024,77 +1055,105 @@ function SetReport() {
               is_given: 1,
               is_archived: 0,
               allow_late: allowLate ? 1 : 0,
-              title: title || (reportType === "accomplishment" ? "Accomplishment Report" : 
-                              reportType === "laempl" ? "LAEMPL Report" : 
-                              reportType === "mps" ? "MPS Report" : "Report"),
-              parent_report_assignment_id: Number(editingReportId), // Link to principal's assignment
               number_of_submission: numberValue
             };
             
-            // Add category-specific fields
-            if (reportType === "laempl") {
-              body.grade = 1;
-            } else if (reportType !== "accomplishment") {
-              body.field_definitions = [];
+            const fallbackTitle = title || (reportType === "accomplishment" ? "Accomplishment Report" : 
+                                           reportType === "laempl" ? "LAEMPL Report" : 
+                                           reportType === "mps" ? "MPS Report" : "Report");
+            
+            let endpoint = "";
+            let body = {};
+            
+            if (reportType === "accomplishment") {
+              endpoint = `${API_BASE}/reports/accomplishment/give`;
+              body = {
+                ...base,
+                assignees: teacherRecipients,
+                title: fallbackTitle,
+                parent_report_assignment_id: editingReportId
+              };
+            } else if (reportType === "laempl") {
+              endpoint = `${API_BASE}/reports/laempl`;
+              body = {
+                ...base,
+                assignees: teacherRecipients,
+                title: fallbackTitle,
+                parent_report_assignment_id: editingReportId,
+                grade: 1
+              };
+            } else {
+              endpoint = `${API_BASE}/reports/give`;
+              body = {
+                ...base,
+                assignees: teacherRecipients,
+                title: fallbackTitle,
+                parent_report_assignment_id: editingReportId,
+                field_definitions: []
+              };
             }
-          }
-          
-          console.log('🔄 [DEBUG] Creating single assignment with parent link (updateExistingReport):', {
-            endpoint,
-            parent_report_assignment_id: body.parent_report_assignment_id,
-            category_id: body.category_id,
-            assigneesCount: body.assignees.length,
-            assignees: body.assignees
-          });
-          
-          const response = await fetch(endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify(body)
-          });
-          
-          if (!response.ok) {
-            const errText = await response.text();
-            toast.error("Failed to create assignment: " + errText);
-            setSubmitting(false);
-            return;
-          }
-          
-          const data = await response.json();
-          toast.success(`Successfully created assignment with ${recipients.length} recipient(s)!`);
-          
-          // Mark coordinator's assignment as given
-          try {
-            const markGivenResponse = await fetch(`${API_BASE}/reports/assignment/${editingReportId}/mark-given`, {
+            
+            const createRes = await fetch(endpoint, {
               method: "POST",
-              credentials: "include"
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify(body)
             });
-            if (markGivenResponse.ok) {
-              console.log("Marked coordinator assignment as given");
+            
+            if (!createRes.ok) {
+              const errText = await createRes.text();
+              toast.error("Failed to create teacher assignment: " + errText);
+              setSubmitting(false);
+              return;
             }
-          } catch (error) {
-            console.error("Failed to mark coordinator assignment as given:", error);
+            
+            console.log('🔄 [DEBUG] Created new teacher assignment');
           }
-          
-          // Redirect to Assigned Reports
-          const redirectUrl = `/AssignedReport?year=${yearId}&quarter=${quarterId}`;
-          navigate(redirectUrl);
-          setSubmitting(false);
-          return;
+        } else {
+          // No teachers, update child assignment to have empty assignees (removes all submissions)
+          if (teacherAssignmentId) {
+            const teacherUpdateData = {
+              title: title || (reportType === "accomplishment" ? "Accomplishment Report" : 
+                              reportType === "laempl" ? "LAEMPL Report" : 
+                              reportType === "mps" ? "MPS Report" : "Report"),
+              quarter: quarterId,
+              year: yearId,
+              from_date: startDate || null,
+              to_date: dueDate,
+              instruction,
+              is_given: 1,
+              allow_late: allowLate ? 1 : 0,
+              number_of_submission: numberValue,
+              assignees: [] // Empty array removes all submissions
+            };
+            
+            try {
+              const teacherRes = await fetch(`${API_BASE}/reports/assignment/${teacherAssignmentId}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify(teacherUpdateData)
+              });
+              
+              if (teacherRes.ok) {
+                console.log('🔄 [DEBUG] Updated child assignment to have no assignees (no teachers)');
+              } else {
+                console.warn('Failed to update child assignment:', await teacherRes.text());
+              }
+            } catch (err) {
+              console.warn('Failed to update child assignment:', err);
+            }
+          }
         }
-      }
-      
-      // If coordinator is updating their own assignment (not from principal), add coordinator to assignees
-      // for LAEMPL and Accomplishment Report
-      const isCoordinatorOwnAssignment = isCoordinator && !isFromPrincipalAssignment && !isPrincipalReportParam;
-      if (isCoordinatorOwnAssignment && (reportType === "accomplishment" || reportType === "laempl") && user?.user_id) {
-        const coordinatorUserId = String(user.user_id);
-        if (!recipients.includes(coordinatorUserId)) {
-          recipients = [...recipients, coordinatorUserId];
-        }
+        
+        toast.success(`Report schedule updated successfully!`);
+        const redirectUrl = `/AssignedReport?year=${yearId}&quarter=${quarterId}`;
+        navigate(redirectUrl);
+        setSubmitting(false);
+        return;
       }
 
+      // For non-coordinator-own assignments, use normal update flow
       const updateData = {
         title: title || (reportType === "accomplishment" ? "Accomplishment Report" : 
                         reportType === "laempl" ? "LAEMPL Report" : 
@@ -1429,29 +1488,40 @@ function SetReport() {
       }
 
       // Handle editing existing report - UPDATE instead of CREATE
-      // BUT: If coordinator is assigning to teachers or other coordinators (acting as teachers), create NEW assignments
-      // Only update if:
-      // 1. Principal is editing, OR
-      // 2. Coordinator is editing their own assignment details (not assigning to others)
+      // If editingReportId exists, we should ALWAYS UPDATE the existing assignment
+      // EXCEPT when:
+      // 1. forceCreateAssignments is true (explicitly forcing creation)
+      // 
+      // Note: The "distributing from principal" logic only applies when creating NEW assignments,
+      // not when editing existing ones. When editing, we always update the existing assignment.
       const fromAssignedReport = location.state?.fromAssignedReport || location.state?.prefillData || forceCreateAssignments;
       
-      // Special case: If coordinator is distributing from a principal's assignment, create NEW assignments
-      // instead of updating the existing one. The new assignments should have parent_report_assignment_id
-      // pointing to the principal's assignment (editingReportId).
-      // This applies regardless of whether recipients are teachers or coordinators (acting as teachers)
-      const isCoordinatorDistributingFromPrincipal = isCoordinator && isFromPrincipalAssignment && 
-        (originalReportData?.coordinator_user_id != null || originalReportData?.parent_report_assignment_id != null) &&
-        editingReportId;
+      // Check if this is a coordinator's own assignment (not from principal)
+      // For coordinator's own assignments, we should always update (handled in updateExistingReport)
+      // Note: isCoordinatorOwnAssignment is already declared earlier in this function (line 1554)
       
-      const shouldUpdate = editingReportId && !forceCreateAssignments && !isCoordinatorDistributingFromPrincipal && (
-        (isPrincipal && (fromAssignedReport || isEditingPrincipalReport)) ||
-        (isCoordinator && fromAssignedReport && !hasCoordinatorRecipients) // Only update if editing own assignment, not assigning to others
-      );
+      // If editingReportId exists, always update (unless explicitly forcing creation)
+      const shouldUpdate = editingReportId && !forceCreateAssignments;
+      
+      console.log('🔄 [DEBUG] Update vs Create decision:', {
+        editingReportId,
+        forceCreateAssignments,
+        isPrincipal,
+        fromAssignedReport,
+        isEditingPrincipalReport,
+        isCoordinator,
+        isCoordinatorOwnAssignment,
+        hasCoordinatorRecipients,
+        shouldUpdate
+      });
       
       if (shouldUpdate) {
+        console.log('🔄 [DEBUG] Calling updateExistingReport()');
         await updateExistingReport();
         return;
       }
+      
+      console.log('🔄 [DEBUG] Will create new assignment instead of updating');
       
       // If coordinator is distributing from principal, we'll create new assignments in handleConfirmSubmit
       // with parent_report_assignment_id set to editingReportId
@@ -1759,33 +1829,27 @@ function SetReport() {
           const coordinatorAssignmentId = coordinatorData.report_assignment_id;
           console.log('Created coordinator assignment:', coordinatorAssignmentId);
           
-          // Step 2: Create teacher assignments (one per teacher, linked to coordinator's assignment)
+          // Step 2: Create a SINGLE teacher assignment with ALL teachers (linked to coordinator's assignment)
           if (teacherRecipients.length > 0) {
-            const teacherAssignmentPromises = teacherRecipients.map(teacherId => {
-              const teacherBody = {
-                ...base,
-                assignees: [Number(teacherId)], // One teacher per assignment
-                title: fallbackTitle,
-                parent_report_assignment_id: coordinatorAssignmentId, // Link to coordinator's assignment
-              };
-              
-              return fetch(`${API_BASE}/reports/accomplishment/give`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                credentials: "include",
-                body: JSON.stringify(teacherBody),
-              });
+            const teacherBody = {
+              ...base,
+              assignees: teacherRecipients.map(id => Number(id)), // All teachers in one assignment
+              title: fallbackTitle,
+              parent_report_assignment_id: coordinatorAssignmentId, // Link to coordinator's assignment
+            };
+            
+            const teacherRes = await fetch(`${API_BASE}/reports/accomplishment/give`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify(teacherBody),
             });
             
-            const teacherResults = await Promise.allSettled(teacherAssignmentPromises);
-            const successful = teacherResults.filter(r => r.status === 'fulfilled' && r.value.ok).length;
-            const failed = teacherResults.filter(r => r.status === 'rejected' || !r.value?.ok).length;
-            
-            if (failed > 0) {
-              console.warn(`Failed to create ${failed} teacher assignment(s)`);
-              toast.warning(`Created coordinator assignment, but ${failed} teacher assignment(s) failed.`);
+            if (!teacherRes.ok) {
+              const errText = await teacherRes.text();
+              toast.error(`Created coordinator assignment, but failed to create teacher assignment: ${errText}`);
             } else {
-              toast.success(`Successfully created coordinator assignment and ${successful} teacher assignment(s)!`);
+              toast.success(`Successfully created coordinator assignment and teacher assignment with ${teacherRecipients.length} recipient(s)!`);
             }
           } else {
             // Only coordinator, no teachers

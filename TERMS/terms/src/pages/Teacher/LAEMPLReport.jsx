@@ -48,7 +48,6 @@ const clampVal = (k, v, colRules = COL_RULES) => {
 const LOCK_STATUSES = new Set([1]); // e.g., 1=submitted
 
 function LAEMPLReport() {
-  console.log("LAEMPLReport component rendering...");
   const [openPopup, setOpenPopup] = useState(false);
 
   // Teacher's section state
@@ -70,6 +69,15 @@ function LAEMPLReport() {
   const [peerData, setPeerData] = useState([]);
   const [consolidateError, setConsolidateError] = useState("");
   const [consolidateSuccess, setConsolidateSuccess] = useState("");
+  
+  // Consolidation flagging: prevent re-consolidation
+  const [hasUnsavedConsolidation, setHasUnsavedConsolidation] = useState(false); // Temporary flag (frontend only)
+  const [isAlreadyConsolidated, setIsAlreadyConsolidated] = useState(false); // Permanent flag (from backend)
+  
+  // Track flag changes
+  useEffect(() => {
+    console.log('[Consolidation Flag] isAlreadyConsolidated changed to:', isAlreadyConsolidated);
+  }, [isAlreadyConsolidated]);
   const [dynamicCols, setDynamicCols] = useState([
     { key: "m", label: "M" },
     { key: "f", label: "F" },
@@ -90,8 +98,6 @@ function LAEMPLReport() {
 
   // Get submission ID from URL parameters
   const SUBMISSION_ID = new URLSearchParams(window.location.search).get("id");
-  console.log("SUBMISSION_ID from URL:", SUBMISSION_ID);
-  console.log("Current URL:", window.location.href);
 
   // Dynamic traits based on teacher's section
   const [TRAITS, setTRAITS] = useState(DEFAULT_TRAITS);
@@ -118,18 +124,48 @@ function LAEMPLReport() {
 
   // Reinitialize data when dynamicCols changes
   useEffect(() => {
+    // Don't reinitialize if we're still loading or if data was just loaded
+    if (loading) {
+      return;
+    }
+    
     setData(prevData => {
-      const newData = {};
-      TRAITS.forEach(trait => {
-        newData[trait] = {};
-        dynamicCols.forEach(col => {
-          // Preserve existing value or use empty string for new columns
-          newData[trait][col.key] = prevData[trait]?.[col.key] || "";
-        });
+      // Check if prevData has actual values (not all empty)
+      const hasValues = Object.keys(prevData).some(key => {
+        const sectionData = prevData[key];
+        if (!sectionData || typeof sectionData !== 'object') return false;
+        return Object.values(sectionData).some(val => val !== "" && val !== null && val !== undefined);
       });
-      return newData;
+      
+      if (hasValues) {
+        // Preserve existing data, only add missing columns
+        const newData = { ...prevData };
+        TRAITS.forEach(trait => {
+          if (!newData[trait]) {
+            newData[trait] = {};
+          }
+          dynamicCols.forEach(col => {
+            // Only set if missing, preserve existing value
+            if (!(col.key in newData[trait])) {
+              newData[trait][col.key] = "";
+            }
+          });
+        });
+        return newData;
+      } else {
+        // Data is empty, safe to reinitialize
+        const newData = {};
+        TRAITS.forEach(trait => {
+          newData[trait] = {};
+          dynamicCols.forEach(col => {
+            // Preserve existing value or use empty string for new columns
+            newData[trait][col.key] = prevData[trait]?.[col.key] || "";
+          });
+        });
+        return newData;
+      }
     });
-  }, [dynamicCols, TRAITS]);
+  }, [dynamicCols, TRAITS, loading]);
 
   // Sync MPS data with LAEMPL data
   useEffect(() => {
@@ -187,13 +223,8 @@ function LAEMPLReport() {
         // Calculate Target (MPS x 0.06) + MPS
         const target = (Number(mps) * 0.06 + Number(mps)).toFixed(2);
         newMpsData[trait]["target"] = target;
-        
-        console.log(`Calculated for ${trait}:`, {
-          hs, ls, totalItems, mean, median, pl, mps, sd, target
-        });
       });
       
-      console.log("MPS data synced with LAEMPL:", newMpsData);
       return newMpsData;
     });
   }, [data, TRAITS]);
@@ -208,9 +239,6 @@ function LAEMPLReport() {
   // single flag to disable inputs/actions
   // Temporarily disable locking to test editability
   const isDisabled = false; // locked && !editOverride;
-  
-  // Debug logging
-  console.log("Debug - isDisabled:", isDisabled, "locked:", locked, "editOverride:", editOverride, "status:", status);
 
   // prevent late hydration from overwriting local edits/clears
   const touchedRef = useRef(false);
@@ -256,7 +284,6 @@ function LAEMPLReport() {
           setTRAITS(DEFAULT_TRAITS);
         }
       } catch (error) {
-        console.error("Error fetching teacher section:", error);
         // Fallback to default traits if error
         setTRAITS(DEFAULT_TRAITS);
       } finally {
@@ -271,17 +298,18 @@ function LAEMPLReport() {
   useEffect(() => {
     const fetchSubmissionData = async () => {
       try {
-        console.log("Fetching submission data from:", `${API_BASE}/submissions/${SUBMISSION_ID}`);
         const res = await fetch(`${API_BASE}/submissions/${SUBMISSION_ID}`, {
           credentials: "include"
         });
-        console.log("Response status:", res.status, "OK:", res.ok);
         if (!res.ok) {
-          console.error("Failed to fetch submission data. Status:", res.status);
           return;
         }
         const data = await res.json();
         setSubmissionData(data);
+        
+        // NOTE: Consolidation flag check is now done in the data loading useEffect
+        // (where rows are actually loaded into the data state) to ensure we check
+        // the actual loaded data, not just the raw rows from submissionData
         
         // Store report assignment IDs for parent-child linking
         setReportAssignmentId(data?.report_assignment_id ?? null);
@@ -300,7 +328,6 @@ function LAEMPLReport() {
                   currentUser = await userRes.json();
                 }
               } catch (err) {
-                console.warn("Failed to fetch user data:", err);
               }
             }
             
@@ -310,31 +337,24 @@ function LAEMPLReport() {
             if (raRes.ok) {
               raData = await raRes.json();
               assignmentGradeLevelId = raData?.grade_level_id;
-              console.log("[LAEMPLReport] Assignment grade level:", assignmentGradeLevelId);
               
               // For coordinator submissions, the coordinator's report_assignment_id IS the parent
               // Determine if this is a coordinator submission based on submission type only
               // Don't check user role - submission type is the source of truth
               const isCoordinatorSubmission = data.fields && data.fields.type === "LAEMPL_COORDINATOR";
-              console.log("[LAEMPLReport] Setting parent assignment - isCoordinatorSubmission:", isCoordinatorSubmission, "user role:", currentUser?.role, "submission type:", data.fields?.type);
               if (isCoordinatorSubmission) {
                 // Coordinator's own assignment is the parent - use it to find child assignments
-                console.log("[LAEMPLReport] Setting parentAssignmentId to coordinator's report_assignment_id:", data.report_assignment_id);
                 setParentAssignmentId(data.report_assignment_id);
               } else {
                 // For teacher submissions, use the parent_report_assignment_id from the report assignment
-                console.log("[LAEMPLReport] Setting parentAssignmentId from report assignment:", raData?.parent_report_assignment_id);
                 setParentAssignmentId(raData?.parent_report_assignment_id ?? null);
               }
             }
           } catch (err) {
-            console.warn("Failed to fetch assignment data:", err);
           }
         }
         
         // Extract subjects from the submission fields
-        console.log("Submission data:", data);
-        console.log("Fields data:", data.fields);
         
         // Determine view type based on whether coordinator is the assigned coordinator for this assignment
         // If coordinator is NOT the assigned coordinator, they're acting as a teacher → teacher view
@@ -349,7 +369,6 @@ function LAEMPLReport() {
                 currentUser = await userRes.json();
               }
             } catch (err) {
-              console.warn("Failed to fetch user data:", err);
             }
           }
           
@@ -363,7 +382,6 @@ function LAEMPLReport() {
           if (isCoordinatorSubmission) {
             // Explicit coordinator submission type
             shouldUseCoordinatorView = true;
-            console.log("[LAEMPLReport] Coordinator view - explicit submission type: LAEMPL_COORDINATOR");
             // Ensure parent assignment points to this coordinator assignment
             setParentAssignmentId((prev) => prev ?? data.report_assignment_id);
           } else if (isCoordinatorUser && raData) {
@@ -371,27 +389,20 @@ function LAEMPLReport() {
             const assignmentCoordinatorId = raData?.coordinator_user_id;
             const currentUserId = currentUser?.user_id;
             
-            console.log("[LAEMPLReport] Assignment coordinator_user_id:", assignmentCoordinatorId, "Current user ID:", currentUserId);
-            
             // If coordinator is the assigned coordinator for this assignment, use coordinator view
             // Otherwise, they're acting as a teacher (recipient) → use teacher view
             if (assignmentCoordinatorId != null && Number(assignmentCoordinatorId) === Number(currentUserId)) {
               shouldUseCoordinatorView = true;
-              console.log("[LAEMPLReport] Coordinator view - user is the assigned coordinator for this assignment");
               // Coordinator's assignment is the parent for child teacher submissions
               setParentAssignmentId((prev) => prev ?? data.report_assignment_id);
-            } else {
-              console.log("[LAEMPLReport] Teacher view - coordinator is acting as a teacher (not the assigned coordinator)");
             }
           }
           
           if (shouldUseCoordinatorView) {
-            console.log("[LAEMPLReport] Using coordinator view");
             setIsCoordinatorView(true);
           
             // Use grade level from assignment or submission fields or default to 2
             const gradeLevelId = assignmentGradeLevelId || (data.fields && data.fields.grade) || 2;
-            console.log("Using grade level:", gradeLevelId);
             
             // Fetch sections dynamically from database based on grade level
             const fetchSectionsForGrade = async () => {
@@ -402,7 +413,6 @@ function LAEMPLReport() {
               
               if (sectionsRes.ok) {
                 const sectionsData = await sectionsRes.json();
-                console.log("Fetched sections for grade", gradeLevelId, ":", sectionsData);
                 
                 if (sectionsData && sectionsData.length > 0) {
                   // Map the database format to our expected format
@@ -410,22 +420,18 @@ function LAEMPLReport() {
                     section_name: s.section_name || s.section,
                     section_id: s.section_id
                   }));
-                  console.log("Using fetched sections for Grade", gradeLevelId, ":", sections);
                   setAllSections(sections);
                   return sections;
                 } else {
-                  console.warn("No sections found for grade", gradeLevelId, ", using fallback");
                   // Fallback to empty array or default sections
                   setAllSections([]);
                   return [];
                 }
               } else {
-                console.warn("Failed to fetch sections, status:", sectionsRes.status);
                 setAllSections([]);
                 return [];
               }
             } catch (err) {
-              console.error("Error fetching sections:", err);
               setAllSections([]);
               return [];
             }
@@ -434,24 +440,49 @@ function LAEMPLReport() {
             // Fetch sections and then initialize data
             fetchSectionsForGrade().then(sections => {
               if (sections.length > 0) {
-                // Initialize data for all sections
-                const newData = {};
-                sections.forEach(section => {
-                newData[section.section_name] = {};
-                dynamicCols.forEach(col => {
-                  newData[section.section_name][col.key] = "";
+                // Only initialize empty data if data is currently empty
+                // Don't overwrite loaded data
+                setData(prevData => {
+                  // Check if prevData is empty
+                  const isEmpty = Object.keys(prevData).length === 0 || 
+                    Object.keys(prevData).every(key => {
+                      const sectionData = prevData[key];
+                      if (!sectionData || typeof sectionData !== 'object') return true;
+                      return Object.values(sectionData).every(val => val === "" || val === null || val === undefined);
+                    });
+                  
+                  if (isEmpty) {
+                    // Initialize data for all sections
+                    const newData = {};
+                    sections.forEach(section => {
+                      newData[section.section_name] = {};
+                      dynamicCols.forEach(col => {
+                        newData[section.section_name][col.key] = "";
+                      });
+                    });
+                    return newData;
+                  } else {
+                    // Preserve existing data, only add missing sections
+                    const newData = { ...prevData };
+                    sections.forEach(section => {
+                      if (!newData[section.section_name]) {
+                        newData[section.section_name] = {};
+                        dynamicCols.forEach(col => {
+                          newData[section.section_name][col.key] = "";
+                        });
+                      }
+                    });
+                    return newData;
+                  }
                 });
-              });
-              setData(newData);
-              setTRAITS(sections.map(s => s.section_name));
-            }
-          });
+                setTRAITS(sections.map(s => s.section_name));
+              }
+            });
           
           // Set a temporary empty array while fetching
           setAllSections([]);
         } else {
           // Teacher view - not coordinator view
-          console.log("[LAEMPLReport] Using teacher view");
         }
       };
       
@@ -475,7 +506,6 @@ function LAEMPLReport() {
             if (firstSubject && firstSubject.subjects && firstSubject.subjects.length > 0) {
               const subjectName = firstSubject.subjects[0];
               newCols.push({ key: "subject", label: `${subjectName} (15 - 25 points)` });
-              console.log("DEBUG: Added subject column for coordinator:", subjectName);
             }
           }
           
@@ -508,7 +538,6 @@ function LAEMPLReport() {
         } else if (data.fields && (data.fields.subject_id || data.fields.subject_name)) {
           const subjectId = data.fields.subject_id;
           const subjectName = data.fields.subject_name;
-          console.log("Found subject:", subjectName, "with ID:", subjectId);
           
           // Create dynamic columns with the assigned subject, total score, HS, LS, and total items
           const newCols = [
@@ -522,7 +551,6 @@ function LAEMPLReport() {
           ];
           
           setDynamicCols(newCols);
-          console.log("DEBUG: Set dynamic columns:", newCols);
           
           // Update COL_RULES for the new subject column, total score, HS, LS, and total items
           const newRules = {
@@ -539,7 +567,6 @@ function LAEMPLReport() {
           // For teacher view, use the teacher's section name as the trait, not the subject name
           const sectionName = teacherSection?.section || "Default Section";
           setTRAITS([sectionName]);
-          console.log("Updated TRAITS to teacher section:", [sectionName]);
           
           // Initialize data with the teacher's section name as the trait
           const newData = {};
@@ -549,38 +576,26 @@ function LAEMPLReport() {
           });
           setData(newData);
           
-          console.log("Dynamic columns updated, data initialized with teacher section as trait");
-          console.log("New data structure:", newData);
-          console.log("New TRAITS:", [sectionName]);
         } else {
-          console.log("No subject data found in fields");
-          console.log("Available fields keys:", data.fields ? Object.keys(data.fields) : "No fields");
           
           // Fallback: try to find subject data in other possible locations
           if (data.fields && data.fields.type === "LAEMPL") {
-            console.log("Found LAEMPL type, checking for subject data in other fields");
             // Check if subject data is in a different structure
             const possibleSubjectKeys = ['subject', 'subjectName', 'subjectId', 'subject_name', 'subject_id'];
             possibleSubjectKeys.forEach(key => {
               if (data.fields[key]) {
-                console.log(`Found ${key}:`, data.fields[key]);
               }
             });
           }
         }
       } catch (error) {
-        console.error("Error fetching submission data:", error);
       }
     };
     
-    console.log("SUBMISSION_ID value:", SUBMISSION_ID, "Type:", typeof SUBMISSION_ID);
     
     if (SUBMISSION_ID && SUBMISSION_ID !== "null" && SUBMISSION_ID !== "undefined" && SUBMISSION_ID !== "") {
-      console.log("Fetching submission data for ID:", SUBMISSION_ID);
       fetchSubmissionData();
     } else {
-      console.log("No valid submission ID provided. Using default columns.");
-      console.log("SUBMISSION_ID details:", { value: SUBMISSION_ID, type: typeof SUBMISSION_ID });
     }
   }, [teacherSection]);
 
@@ -614,23 +629,19 @@ function LAEMPLReport() {
   }, {});
 
   const toRows = (obj) => {
-    console.log("toRows called with:", { obj, submissionData, isCoordinatorView, TRAITS });
     
     // For teacher submissions, use the teacher's section name as the trait
     if (teacherSection?.section && !isCoordinatorView) {
       const sectionName = teacherSection.section;
-      console.log("Using teacher section as trait:", sectionName);
       const row = { trait: sectionName };
       dynamicCols.forEach(col => {
         const value = obj[sectionName]?.[col.key];
         row[col.key] = value === "" ? null : Number(value) || 0;
       });
-      console.log("Generated row for teacher:", row);
       return [row];
     }
     
     // For coordinator view or fallback, use TRAITS
-    console.log("Using TRAITS for rows:", TRAITS);
     return TRAITS.map((trait) => {
       const row = { trait };
       dynamicCols.forEach(col => {
@@ -687,16 +698,6 @@ function LAEMPLReport() {
       const gradeLevel = submissionData?.fields?.grade || teacherSection?.grade_level || 2;
       
       const rows = toRows(data);
-      console.log("=== FRONTEND SUBMIT DEBUG ===");
-      console.log("Generated rows for submission:", rows);
-      console.log("Current data state:", data);
-      console.log("Current TRAITS:", TRAITS);
-      console.log("Current submissionData:", submissionData);
-      console.log("Current dynamicCols:", dynamicCols);
-      console.log("Current isCoordinatorView:", isCoordinatorView);
-      console.log("Current user role:", user?.role);
-      console.log("Current grade level:", gradeLevel);
-      console.log("Current totals:", totals);
       
       const payload = {
         status: 2, // status 2 = submitted
@@ -710,8 +711,6 @@ function LAEMPLReport() {
         mps_totals: mpsToTotals(),
       };
       
-      console.log("Final payload:", payload);
-      console.log("=== END FRONTEND SUBMIT DEBUG ===");
       const res = await fetch(
         `${API_BASE}/submissions/laempl/${SUBMISSION_ID}`,
         {
@@ -746,6 +745,31 @@ function LAEMPLReport() {
         setData(next);
       }
 
+      // If consolidation was done and data was saved, set permanent flag
+      if (hasUnsavedConsolidation && json?.fields?.rows && Array.isArray(json.fields.rows) && json.fields.rows.length > 0) {
+        // Update submission with permanent consolidation flag
+        const updatedFields = {
+          ...json.fields,
+          meta: {
+            ...json.fields?.meta,
+            consolidatedAt: new Date().toISOString(),
+            isConsolidated: true
+          }
+        };
+        
+        // Save flag to backend
+        try {
+          await fetch(`${API_BASE}/submissions/${SUBMISSION_ID}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ fields: updatedFields })
+          });
+          // Keep isAlreadyConsolidated as true (it's now permanent)
+        } catch (flagError) {
+        }
+      }
+
       setEditOverride(false); // re-lock after save
     } catch (e) {
       toast.error("Failed to submit LAEMPL report. Please try again.");
@@ -756,8 +780,11 @@ function LAEMPLReport() {
 
   // Prefill from backend
   useEffect(() => {
+    
     const load = async () => {
-      if (!SUBMISSION_ID) return;
+      if (!SUBMISSION_ID) {
+        return;
+      }
       setLoading(true);
       try {
         const tryUrls = [
@@ -775,26 +802,295 @@ function LAEMPLReport() {
 
         if (typeof json?.status !== "undefined") setStatus(json.status);
 
+        
         const rows = json?.fields?.rows;
-        if (Array.isArray(rows)) {
+        
+        // Check consolidation flag AFTER loading data
+        const isConsolidated = json?.fields?.meta?.isConsolidated;
+        const consolidatedAt = json?.fields?.meta?.consolidatedAt;
+        
+        console.log('[Consolidation Flag] Initial check from backend:', { isConsolidated, consolidatedAt });
+        
+        if (Array.isArray(rows) && rows.length > 0) {
           if (touchedRef.current) return; // don't overwrite local edits
 
-          const next = Object.fromEntries(
-            TRAITS.map((t) => [
-              t,
-              Object.fromEntries(dynamicCols.map((c) => [c.key, ""])),
-            ])
-          );
-          rows.forEach((r) => {
-            if (!r?.trait || !next[r.trait]) return;
-            dynamicCols.forEach((c) => {
-              next[r.trait][c.key] = (r[c.key] ?? "").toString();
+          // FIRST: Extract all traits from rows to determine the data structure
+          const rowTraits = rows.map(r => r?.trait).filter(Boolean);
+          
+          // Check if row traits are section names (not default traits)
+          // This works even if isCoordinatorView is false or allSections is empty
+          const hasSectionNames = rowTraits.length > 0 && 
+            rowTraits.some(t => !DEFAULT_TRAITS.includes(t));
+          
+          // Determine which traits to use
+          let traitsToUse = [];
+          if (hasSectionNames) {
+            // Rows have section names (not default traits)
+            // Use row traits directly, or match with allSections if available
+            if (allSections.length > 0) {
+              // Use section names from allSections, but verify rows match
+              const sectionNames = allSections.map(s => s.section_name);
+              const rowTraitsSet = new Set(rowTraits);
+              const sectionNamesSet = new Set(sectionNames);
+              
+              // If all row traits are in section names, use section names
+              // Otherwise, use row traits directly
+              if ([...rowTraitsSet].every(t => sectionNamesSet.has(t))) {
+                traitsToUse = sectionNames;
+              } else {
+                traitsToUse = rowTraits;
+              }
+            } else {
+              // No allSections loaded, use row traits directly
+              traitsToUse = rowTraits;
+            }
+            
+            // Update TRAITS to match BEFORE loading data
+            const traitsMatchCurrent = JSON.stringify([...TRAITS].sort()) === JSON.stringify([...traitsToUse].sort());
+            if (!traitsMatchCurrent) {
+              setTRAITS(traitsToUse);
+            }
+            
+            // Create data structure using the determined traits
+            const next = Object.fromEntries(
+              traitsToUse.map((t) => [
+                t,
+                Object.fromEntries(dynamicCols.map((c) => [c.key, ""])),
+              ])
+            );
+            
+            // Load rows into the data structure
+            let loadedRowsCount = 0;
+            
+            rows.forEach((r) => {
+              if (!r?.trait) {
+                return;
+              }
+              if (!next[r.trait]) {
+                // Add the trait if it's not in our list
+                next[r.trait] = Object.fromEntries(dynamicCols.map((c) => [c.key, ""]));
+                traitsToUse.push(r.trait);
+              }
+              
+              dynamicCols.forEach((c) => {
+                const value = r[c.key];
+                
+                // Convert null/undefined to empty string, but preserve 0 values
+                let stringValue;
+                if (value === null || value === undefined) {
+                  stringValue = "";
+                } else if (value === 0) {
+                  stringValue = "0"; // Preserve 0 as "0", not empty string
+                } else {
+                  stringValue = value.toString();
+                }
+                next[r.trait][c.key] = stringValue;
+              });
+              loadedRowsCount++;
             });
-          });
-          setData(next);
+            
+            
+            // Check if rows were successfully loaded
+            const hasLoadedRows = rows && Array.isArray(rows) && rows.length > 0;
+            const hasDataStructure = traitsToUse.length > 0 && Object.keys(next).length > 0;
+            
+            // Check if all values are empty/zero (data was cleared)
+            // This checks all numeric columns across all traits/sections
+            const hasAnyNonZeroValues = traitsToUse.some(trait => {
+              const traitData = next[trait];
+              if (!traitData) return false;
+              // Check all keys except non-numeric fields
+              return Object.keys(traitData).some(key => {
+                if (key === 'subjects') return false; // Skip non-numeric fields
+                const val = traitData[key];
+                // Check if value is a non-empty, non-zero number
+                if (val === null || val === undefined || val === '') return false;
+                const numVal = Number(val);
+                return !isNaN(numVal) && numVal !== 0;
+              });
+            });
+            
+            
+            // Check consolidation flag AFTER data is loaded
+            // Clear flag if: no rows loaded OR all values are empty/zero (data was cleared)
+            console.log('[Consolidation Flag] Checking conditions:', { isConsolidated, hasLoadedRows, hasDataStructure, hasAnyNonZeroValues });
+            if (isConsolidated && (!hasLoadedRows || !hasDataStructure || !hasAnyNonZeroValues)) {
+              console.log('[Consolidation Flag] Setting isAlreadyConsolidated to false - Backend data check: no rows or all empty/zero');
+              console.log('[Consolidation Flag] Reason:', { 
+                noRows: !hasLoadedRows, 
+                noStructure: !hasDataStructure, 
+                noValues: !hasAnyNonZeroValues 
+              });
+              setIsAlreadyConsolidated(false);
+              setHasUnsavedConsolidation(false);
+              
+              // Clear the flag from backend
+              try {
+                const currentFields = json?.fields || {};
+                const updatedFields = {
+                  ...currentFields,
+                  meta: {
+                    ...currentFields?.meta,
+                    isConsolidated: false,
+                    consolidatedAt: null
+                  }
+                };
+                
+                await fetch(`${API_BASE}/submissions/${SUBMISSION_ID}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  credentials: "include",
+                  body: JSON.stringify({ fields: updatedFields })
+                });
+              } catch (clearError) {
+              }
+            } else if (isConsolidated && hasLoadedRows && hasDataStructure && hasAnyNonZeroValues) {
+              console.log('[Consolidation Flag] Setting isAlreadyConsolidated to true - Coordinator view: Backend has consolidated data with values');
+              console.log('[Consolidation Flag] Check details:', { isConsolidated, hasLoadedRows, hasDataStructure, hasAnyNonZeroValues });
+              setIsAlreadyConsolidated(true);
+              setHasUnsavedConsolidation(false);
+            } else {
+              console.log('[Consolidation Flag] Not setting flag - Conditions:', { isConsolidated, hasLoadedRows, hasDataStructure, hasAnyNonZeroValues });
+            }
+            
+            
+            // Check if next has any non-empty values
+            const hasNonEmptyValues = Object.keys(next).some(key => {
+              const sectionData = next[key];
+              if (!sectionData || typeof sectionData !== 'object') return false;
+              return Object.values(sectionData).some(val => {
+                const numVal = Number(val);
+                return val !== "" && val !== null && val !== undefined && !isNaN(numVal) && numVal !== 0;
+              });
+            });
+            
+            // IMPORTANT: Always use loaded data if it has values, don't merge with empty state
+            setData(prevData => {
+              // Check if prevData is empty (all values are empty strings or 0)
+              const prevIsEmpty = Object.keys(prevData).length === 0 || 
+                Object.keys(prevData).every(key => {
+                  const sectionData = prevData[key];
+                  if (!sectionData || typeof sectionData !== 'object') return true;
+                  return Object.values(sectionData).every(val => {
+                    const numVal = Number(val);
+                    return val === "" || val === null || val === undefined || (numVal === 0 && val !== "0");
+                  });
+                });
+              
+              // If we have loaded data with values, always use it (don't merge with empty state)
+              if (hasNonEmptyValues || prevIsEmpty) {
+                return next;
+              } else {
+                // Merge: use loaded data for keys that exist in next, preserve existing for others
+                const merged = { ...prevData };
+                Object.keys(next).forEach(key => {
+                  merged[key] = { ...merged[key], ...next[key] };
+                });
+                return merged;
+              }
+            });
+          } else {
+            // Teacher view or default - use TRAITS
+            const next = Object.fromEntries(
+              TRAITS.map((t) => [
+                t,
+                Object.fromEntries(dynamicCols.map((c) => [c.key, ""])),
+              ])
+            );
+            rows.forEach((r) => {
+              if (!r?.trait || !next[r.trait]) {
+                return;
+              }
+              dynamicCols.forEach((c) => {
+                next[r.trait][c.key] = (r[c.key] ?? "").toString();
+              });
+            });
+            
+            // Check if rows were successfully loaded
+            const hasLoadedRows = rows && Array.isArray(rows) && rows.length > 0;
+            const hasDataStructure = TRAITS.length > 0 && Object.keys(next).length > 0;
+            
+            // Check if all values are empty/zero (data was cleared)
+            // This checks all numeric columns across all traits
+            const hasAnyNonZeroValues = TRAITS.some(trait => {
+              const traitData = next[trait];
+              if (!traitData) return false;
+              // Check all keys except non-numeric fields
+              return Object.keys(traitData).some(key => {
+                if (key === 'subjects') return false; // Skip non-numeric fields
+                const val = traitData[key];
+                // Check if value is a non-empty, non-zero number
+                if (val === null || val === undefined || val === '') return false;
+                const numVal = Number(val);
+                return !isNaN(numVal) && numVal !== 0;
+              });
+            });
+            
+            
+            // Clear flag if: no rows loaded OR all values are empty/zero (data was cleared)
+            if (isConsolidated && (!hasLoadedRows || !hasDataStructure || !hasAnyNonZeroValues)) {
+              console.log('[Consolidation Flag] Setting isAlreadyConsolidated to false - Teacher view: no rows or all empty/zero');
+              setIsAlreadyConsolidated(false);
+              setHasUnsavedConsolidation(false);
+              
+              // Clear the flag from backend
+              try {
+                const currentFields = json?.fields || {};
+                const updatedFields = {
+                  ...currentFields,
+                  meta: {
+                    ...currentFields?.meta,
+                    isConsolidated: false,
+                    consolidatedAt: null
+                  }
+                };
+                
+                await fetch(`${API_BASE}/submissions/${SUBMISSION_ID}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  credentials: "include",
+                  body: JSON.stringify({ fields: updatedFields })
+                });
+              } catch (clearError) {
+              }
+            } else if (isConsolidated && hasLoadedRows && hasDataStructure && hasAnyNonZeroValues) {
+              console.log('[Consolidation Flag] Setting isAlreadyConsolidated to true - Teacher view: Backend has consolidated data with values');
+              setIsAlreadyConsolidated(true);
+              setHasUnsavedConsolidation(false);
+            }
+            
+            setData(next);
+          }
+        } else {
+          // No rows or empty rows array - check if consolidation flag should be cleared
+          if (isConsolidated) {
+            console.log('[Consolidation Flag] Setting isAlreadyConsolidated to false - No rows found in backend');
+            setIsAlreadyConsolidated(false);
+            setHasUnsavedConsolidation(false);
+            
+            // Clear the flag from backend
+            try {
+              const currentFields = json?.fields || {};
+              const updatedFields = {
+                ...currentFields,
+                meta: {
+                  ...currentFields?.meta,
+                  isConsolidated: false,
+                  consolidatedAt: null
+                }
+              };
+              
+              await fetch(`${API_BASE}/submissions/${SUBMISSION_ID}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({ fields: updatedFields })
+              });
+            } catch (clearError) {
+            }
+          }
         }
-      } catch {
-        /* ignore */
+      } catch (error) {
       } finally {
         setLoading(false);
       }
@@ -802,10 +1098,135 @@ function LAEMPLReport() {
     load();
   }, []);
 
+  // Check frontend state to determine if consolidation flag should be cleared
+  // This checks what the user actually sees in the UI, not just backend data
+  useEffect(() => {
+    // Only check if we have a submission ID and the component is not loading
+    if (!SUBMISSION_ID || loading) {
+      return;
+    }
+
+    // Check if all sections in the frontend state are empty/blank
+    const checkFrontendData = () => {
+      console.log('[Consolidation Flag] Frontend check running:', { isCoordinatorView, allSectionsCount: allSections.length, isAlreadyConsolidated, dataKeys: Object.keys(data) });
+      
+      // For coordinator view, check all sections
+      if (isCoordinatorView && allSections.length > 0) {
+        const allSectionsEmpty = allSections.every(section => {
+          const sectionData = data[section.section_name];
+          if (!sectionData || typeof sectionData !== 'object') return true;
+          
+          // Check if all numeric columns are empty/zero
+          return dynamicCols.every(col => {
+            const val = sectionData[col.key];
+            if (val === null || val === undefined || val === '') return true;
+            const numVal = Number(val);
+            return isNaN(numVal) || numVal === 0;
+          });
+        });
+
+        console.log('[Consolidation Flag] Frontend check result:', { allSectionsEmpty, isAlreadyConsolidated });
+
+        // If all sections are empty and flag is set, clear it
+        if (allSectionsEmpty && isAlreadyConsolidated) {
+          console.log('[Consolidation Flag] Setting isAlreadyConsolidated to false - Frontend check: All sections are blank/empty');
+          setIsAlreadyConsolidated(false);
+          setHasUnsavedConsolidation(false);
+
+          // Clear the flag from backend
+          (async () => {
+            try {
+              const res = await fetch(`${API_BASE}/submissions/${SUBMISSION_ID}`, {
+                credentials: "include"
+              });
+              if (!res.ok) return;
+              const json = await res.json();
+              
+              const currentFields = json?.fields || {};
+              const updatedFields = {
+                ...currentFields,
+                meta: {
+                  ...currentFields?.meta,
+                  isConsolidated: false,
+                  consolidatedAt: null
+                }
+              };
+
+              await fetch(`${API_BASE}/submissions/${SUBMISSION_ID}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({ fields: updatedFields })
+              });
+            } catch (error) {
+            }
+          })();
+        }
+      } else if (!isCoordinatorView && TRAITS.length > 0) {
+        // For teacher view, check all traits
+        const allTraitsEmpty = TRAITS.every(trait => {
+          const traitData = data[trait];
+          if (!traitData || typeof traitData !== 'object') return true;
+          
+          // Check if all numeric columns are empty/zero
+          return dynamicCols.every(col => {
+            const val = traitData[col.key];
+            if (val === null || val === undefined || val === '') return true;
+            const numVal = Number(val);
+            return isNaN(numVal) || numVal === 0;
+          });
+        });
+
+        console.log('[Consolidation Flag] Frontend check result (teacher view):', { allTraitsEmpty, isAlreadyConsolidated });
+
+        // If all traits are empty and flag is set, clear it
+        if (allTraitsEmpty && isAlreadyConsolidated) {
+          console.log('[Consolidation Flag] Setting isAlreadyConsolidated to false - Frontend check: All traits are blank/empty');
+          setIsAlreadyConsolidated(false);
+          setHasUnsavedConsolidation(false);
+
+          // Clear the flag from backend
+          (async () => {
+            try {
+              const res = await fetch(`${API_BASE}/submissions/${SUBMISSION_ID}`, {
+                credentials: "include"
+              });
+              if (!res.ok) return;
+              const json = await res.json();
+              
+              const currentFields = json?.fields || {};
+              const updatedFields = {
+                ...currentFields,
+                meta: {
+                  ...currentFields?.meta,
+                  isConsolidated: false,
+                  consolidatedAt: null
+                }
+              };
+
+              await fetch(`${API_BASE}/submissions/${SUBMISSION_ID}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({ fields: updatedFields })
+              });
+            } catch (error) {
+            }
+          })();
+        }
+      }
+    };
+
+    // Only check after a short delay to avoid checking during initial load
+    const timeoutId = setTimeout(() => {
+      checkFrontendData();
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [data, isCoordinatorView, allSections, TRAITS, dynamicCols, isAlreadyConsolidated, SUBMISSION_ID, loading]);
+
   // Export CSV with both LAEMPL and MPS data
   const toCSV = () => {
-    console.log("Exporting LAEMPL data:", { dynamicCols, data, totals });
-    console.log("Exporting MPS data:", { mpsData, mpsTotals });
     
     const lines = [];
     
@@ -947,7 +1368,6 @@ function LAEMPLReport() {
         const data = await res.json();
         setUser(data);
       } catch (err) {
-        console.error("Failed to fetch user:", err);
       }
     };
     fetchUser();
@@ -1014,7 +1434,6 @@ function LAEMPLReport() {
     // Prevent changes to synced fields
     const syncedFields = ["m", "f", "total", "total_score", "mean", "hs", "ls", "total_items", "median", "pl", "mps", "sd", "target"];
     if (syncedFields.includes(key)) {
-      console.log("Cannot edit synced field:", key);
       return;
     }
     
@@ -1051,7 +1470,6 @@ function LAEMPLReport() {
   // Prefill MPS
   useEffect(() => {
     if (!SUBMISSION_ID || SUBMISSION_ID === "null" || SUBMISSION_ID === "undefined" || SUBMISSION_ID === null) {
-      console.log("Skipping MPS fetch - no valid submission ID");
       return;
     }
     
@@ -1112,7 +1530,6 @@ function LAEMPLReport() {
 
   const onSubmitMps = async () => {
     if (!SUBMISSION_ID || SUBMISSION_ID === "null" || SUBMISSION_ID === "undefined" || SUBMISSION_ID === null) {
-      console.log("Cannot save MPS - no valid submission ID");
       setMpsErr("No valid submission ID");
       return;
     }
@@ -1277,15 +1694,9 @@ function LAEMPLReport() {
   // Open consolidate modal and fetch peer data
   const handleConsolidate = async () => {
     if (!isCoordinatorView) {
-      console.warn("[Consolidate] Not coordinator view, cannot consolidate");
       return;
     }
     
-    console.log("[Consolidate] Starting consolidation...");
-    console.log("[Consolidate] SUBMISSION_ID:", SUBMISSION_ID);
-    console.log("[Consolidate] parentAssignmentId:", parentAssignmentId);
-    console.log("[Consolidate] reportAssignmentId:", reportAssignmentId);
-    console.log("[Consolidate] submissionData:", submissionData);
     
     setConsolidateError("");
     setConsolidateSuccess("");
@@ -1298,31 +1709,128 @@ function LAEMPLReport() {
       
       if (isCoordinatorView && parentAssignmentId) {
         url += `?pra=${encodeURIComponent(parentAssignmentId)}`;
-        console.log("[Consolidate] Using parent assignment ID:", parentAssignmentId);
       } else if (reportAssignmentId) {
         url += `?ra=${encodeURIComponent(reportAssignmentId)}`;
-        console.log("[Consolidate] Using report assignment ID:", reportAssignmentId);
       } else {
-        console.warn("[Consolidate] No parentAssignmentId or reportAssignmentId available!");
       }
       
-      console.log("[Consolidate] Fetching from URL:", url);
       const res = await fetch(url, { credentials: "include" });
       
       if (!res.ok) {
         const txt = await res.text().catch(() => "");
-        console.error("[Consolidate] Request failed:", res.status, txt);
         throw new Error(`Failed to load peer data: ${res.status} ${txt}`);
       }
       
-      const peerData = await res.json();
-      console.log("[Consolidate] Received peer data:", peerData);
-      console.log("[Consolidate] Peer count:", Array.isArray(peerData) ? peerData.length : "not an array");
+      const responseText = await res.text();
       
-      setPeerData(Array.isArray(peerData) ? peerData : []);
+      let peerData;
+      try {
+        peerData = JSON.parse(responseText);
+      } catch (parseErr) {
+        throw new Error("Invalid JSON response from server");
+      }
+      
+      
+      // Handle case where response might be wrapped in an object
+      if (peerData && !Array.isArray(peerData)) {
+        if (peerData.data && Array.isArray(peerData.data)) {
+          peerData = peerData.data;
+        } else if (peerData.peers && Array.isArray(peerData.peers)) {
+          peerData = peerData.peers;
+        } else {
+          peerData = [];
+        }
+      }
+      
+      // Automatically unconsolidate peers whose sections are missing or have empty rows
+      if (Array.isArray(peerData) && allSections.length > 0) {
+        const currentSectionNames = new Set(allSections.map(s => s.section_name));
+        
+        // Helper function to check if a section row is empty
+        const isSectionRowEmpty = (sectionName) => {
+          const sectionData = data[sectionName];
+          if (!sectionData || typeof sectionData !== 'object') return true;
+          
+          // Check if all numeric columns are empty/zero
+          return dynamicCols.every(col => {
+            const val = sectionData[col.key];
+            if (val === null || val === undefined || val === '') return true;
+            const numVal = Number(val);
+            return isNaN(numVal) || numVal === 0;
+          });
+        };
+        
+        // Process each peer to check if their section exists or is empty
+        const unconsolidatePromises = peerData.map(async (peer) => {
+          try {
+            const fields = typeof peer.fields === 'string' ? JSON.parse(peer.fields) : (peer.fields || {});
+            const consolidatedInto = fields?.meta?.consolidatedInto;
+            const isConsolidated = consolidatedInto != null && consolidatedInto !== '' && consolidatedInto !== 'null';
+            
+            // If peer is consolidated, check if their section is missing or empty
+            if (isConsolidated && peer.section_name) {
+              const sectionMissing = !currentSectionNames.has(peer.section_name);
+              const sectionEmpty = currentSectionNames.has(peer.section_name) && isSectionRowEmpty(peer.section_name);
+              
+              if (sectionMissing || sectionEmpty) {
+                // Section is missing or empty - automatically unconsolidate
+                const updatedFields = {
+                  ...fields,
+                  meta: {
+                    ...fields?.meta,
+                    consolidatedInto: null,
+                    consolidatedAt: null
+                  }
+                };
+                
+                // Update the peer submission silently
+                try {
+                  await fetch(`${API_BASE}/submissions/${peer.submission_id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "include",
+                    body: JSON.stringify({ fields: updatedFields })
+                  });
+                } catch (updateError) {
+                  // Silently fail - don't block the UI
+                }
+              }
+            }
+          } catch (parseError) {
+            // Silently continue
+          }
+        });
+        
+        // Wait for all unconsolidation operations to complete
+        await Promise.all(unconsolidatePromises);
+        
+        // Reload peer data to reflect the changes
+        const refreshRes = await fetch(url, { credentials: "include" });
+        if (refreshRes.ok) {
+          const refreshText = await refreshRes.text();
+          try {
+            let refreshedData = JSON.parse(refreshText);
+            if (refreshedData && !Array.isArray(refreshedData)) {
+              if (refreshedData.data && Array.isArray(refreshedData.data)) {
+                refreshedData = refreshedData.data;
+              } else if (refreshedData.peers && Array.isArray(refreshedData.peers)) {
+                refreshedData = refreshedData.peers;
+              } else {
+                refreshedData = [];
+              }
+            }
+            peerData = Array.isArray(refreshedData) ? refreshedData : [];
+          } catch (parseErr) {
+            // Keep original peerData if refresh fails
+          }
+        }
+      }
+      
+      const finalPeerData = Array.isArray(peerData) ? peerData : [];
+      
+      setPeerData(finalPeerData);
       setShowConsolidate(true);
     } catch (error) {
-      console.error("[Consolidate] Error:", error);
       setConsolidateError(error.message || "Failed to load peer data");
     }
   };
@@ -1332,24 +1840,51 @@ function LAEMPLReport() {
     try {
       setConsolidateError("");
       
-      console.log("Consolidating data from selected peers:", selectedPeers);
       
-      // Initialize consolidated data for each section
+      // Initialize consolidated data with existing data (preserve current values)
+      // Store reference to existing consolidatedData state before creating new local variable
+      const existingConsolidatedDataState = consolidatedData;
       const consolidatedData = {};
       allSections.forEach(section => {
-        consolidatedData[section.section_name] = {};
+        const sectionName = section.section_name;
+        consolidatedData[sectionName] = {};
+        
+        // Start with existing data if it exists, otherwise initialize to 0
+        const existingSectionData = data[sectionName] || {};
+        const existingConsolidatedSection = existingConsolidatedDataState[sectionName] || {};
+        
         dynamicCols.forEach(col => {
-          consolidatedData[section.section_name][col.key] = 0;
+          const existingValue = existingSectionData[col.key];
+          if (existingValue !== null && existingValue !== undefined && existingValue !== '') {
+            consolidatedData[sectionName][col.key] = Number(existingValue) || 0;
+          } else {
+            consolidatedData[sectionName][col.key] = 0;
+          }
         });
+        
+        // Preserve existing subject-specific columns
+        Object.keys(existingSectionData).forEach(key => {
+          if (key.startsWith('subject_') && key !== 'subjects') {
+            const existingValue = existingSectionData[key];
+            if (existingValue !== null && existingValue !== undefined && existingValue !== '') {
+              consolidatedData[sectionName][key] = Number(existingValue) || 0;
+            } else {
+              consolidatedData[sectionName][key] = 0;
+            }
+          }
+        });
+        
+        // Preserve existing _subjectMap from consolidatedData state if it exists
+        if (existingConsolidatedSection && existingConsolidatedSection._subjectMap) {
+          consolidatedData[sectionName]._subjectMap = { ...existingConsolidatedSection._subjectMap };
+        }
       });
       
-      // Process each selected peer
+      // Process each selected peer - ADD their data to existing values
       selectedPeers.forEach(peer => {
-        console.log("Processing peer:", peer);
         
         try {
           const fields = typeof peer.fields === 'string' ? JSON.parse(peer.fields) : peer.fields;
-          console.log("Parsed fields:", fields);
           
           // Get the section name from the peer data - ensure it matches our loaded sections
           let sectionName = peer.section_name || (allSections.length > 0 ? allSections[0].section_name : "Unknown");
@@ -1360,9 +1895,7 @@ function LAEMPLReport() {
             // If the peer section doesn't match our loaded sections, use the first available section
             if (allSections.length > 0) {
               sectionName = allSections[0].section_name;
-              console.log("Peer section", peer.section_name, "not in loaded sections, mapping to", sectionName);
             } else {
-              console.warn("No sections loaded, cannot map peer section:", peer.section_name);
               return; // Skip this peer if we can't map it (use return instead of continue in forEach)
             }
           }
@@ -1376,11 +1909,10 @@ function LAEMPLReport() {
             subjectName = fields.subject_name;
           }
           
-          console.log("Section:", sectionName, "Subject:", subjectName);
           
           // Only process if the section is in our loaded sections
           if (loadedSectionNames.includes(sectionName)) {
-            // If this section doesn't exist in our consolidated data, create it
+            // Ensure this section exists in consolidated data
             if (!consolidatedData[sectionName]) {
               consolidatedData[sectionName] = {};
               dynamicCols.forEach(col => {
@@ -1388,30 +1920,58 @@ function LAEMPLReport() {
               });
             }
             
-            // Process the peer's data
+            // Get subject_id from fields if available
+            let subjectId = fields?.subject_id || null;
+            if (!subjectId && peer.report_title) {
+              // Try to extract from report title or other sources if needed
+            }
+            
+            // Process the peer's data - ADD to existing values
             if (fields?.rows && Array.isArray(fields.rows)) {
-              // Sum up data from all rows in this peer's submission
+              // Sum up data from all rows in this peer's submission and add to existing values
               fields.rows.forEach(row => {
                 dynamicCols.forEach(col => {
                   const value = Number(row[col.key]) || 0;
-                  consolidatedData[sectionName][col.key] += value;
+                  // Add to existing value, don't replace
+                  consolidatedData[sectionName][col.key] = (consolidatedData[sectionName][col.key] || 0) + value;
                 });
                 
-                // Also extract subject-specific scores
+                // Also extract subject-specific scores and add to existing values
                 Object.keys(row).forEach(key => {
                   if (key.startsWith('subject_') && row[key] !== null && row[key] !== '') {
                     const subjectScore = Number(row[key]) || 0;
                     const subjectKey = key; // Use the original key like 'subject_10'
                     
-                    if (!consolidatedData[sectionName][subjectKey]) {
-                      consolidatedData[sectionName][subjectKey] = 0;
+                    // Add to existing value, don't replace
+                    consolidatedData[sectionName][subjectKey] = (consolidatedData[sectionName][subjectKey] || 0) + subjectScore;
+                    
+                    // Store subject name mapping for this subject key
+                    if (subjectName && subjectId) {
+                      if (!consolidatedData[sectionName]._subjectMap) {
+                        consolidatedData[sectionName]._subjectMap = {};
+                      }
+                      consolidatedData[sectionName]._subjectMap[subjectKey] = {
+                        name: subjectName,
+                        id: subjectId
+                      };
                     }
-                    consolidatedData[sectionName][subjectKey] += subjectScore;
-                    console.log("DEBUG: Added subject score for", sectionName, key, ":", subjectScore, "Total:", consolidatedData[sectionName][subjectKey]);
                   }
                 });
               });
             }
+            
+            // Also check if subject info is in fields directly (not in rows)
+            if (subjectId && subjectName) {
+              const subjectKey = `subject_${subjectId}`;
+              if (!consolidatedData[sectionName]._subjectMap) {
+                consolidatedData[sectionName]._subjectMap = {};
+              }
+              consolidatedData[sectionName]._subjectMap[subjectKey] = {
+                name: subjectName,
+                id: subjectId
+              };
+            }
+            
             // Add subject information to the consolidated data
             if (subjectName) {
               // Store subject info in a special field for display
@@ -1423,25 +1983,22 @@ function LAEMPLReport() {
               }
             }
           } else {
-            console.log("Skipping peer data for non-predefined section:", sectionName);
             return; // Skip this peer
           }
           
         } catch (parseError) {
-          console.error("Error parsing peer fields:", parseError);
         }
       });
       
-      console.log("Consolidated data:", consolidatedData);
-      
-      // Update the current data with consolidated values
+      // Update the current data with consolidated values (preserving all sections)
       const newData = { ...data };
       allSections.forEach(section => {
         const sectionName = section.section_name;
         if (consolidatedData[sectionName]) {
           if (!newData[sectionName]) newData[sectionName] = {};
           dynamicCols.forEach(col => {
-            newData[sectionName][col.key] = consolidatedData[sectionName][col.key].toString();
+            const consolidatedValue = consolidatedData[sectionName][col.key];
+            newData[sectionName][col.key] = consolidatedValue.toString();
           });
           
           // Copy all subject scores that exist in consolidated data
@@ -1449,7 +2006,6 @@ function LAEMPLReport() {
             if (key.startsWith('subject_') && key !== 'subjects') {
               const subjectScore = consolidatedData[sectionName][key] || 0;
               newData[sectionName][key] = subjectScore.toString();
-              console.log("DEBUG: Copied subject score for", sectionName, key, ":", subjectScore);
             }
           });
         }
@@ -1474,7 +2030,6 @@ function LAEMPLReport() {
           });
         });
         
-        console.log("DEBUG: Found unique subject keys:", Array.from(allSubjectKeys));
         
         // Create columns for each subject key
         const updatedCols = [
@@ -1482,32 +2037,76 @@ function LAEMPLReport() {
           { key: "f", label: "F" }
         ];
         
-        // Add a column for each unique subject key
-        Array.from(allSubjectKeys).forEach(subjectKey => {
-          // Try to find the actual subject name from selected peers
-          let subjectName = subjectKey.replace('subject_', 'Subject ');
-          
-          // Look through selected peers to find the actual subject name for this key
-          selectedPeers.forEach(peer => {
-            try {
-              const fields = typeof peer.fields === 'string' ? JSON.parse(peer.fields) : peer.fields;
-              if (fields && fields.subject_name && fields.subject_id) {
-                const peerSubjectKey = `subject_${fields.subject_id}`;
-                if (peerSubjectKey === subjectKey) {
-                  subjectName = fields.subject_name;
-                  console.log("DEBUG: Found subject name for", subjectKey, ":", subjectName);
+        // Create a map of subject keys to subject names from all sources
+        const subjectKeyToNameMap = new Map();
+        
+        // First, check new consolidatedData for subject mappings
+        Object.values(consolidatedData).forEach(section => {
+          if (section && section._subjectMap) {
+            Object.entries(section._subjectMap).forEach(([key, info]) => {
+              if (!subjectKeyToNameMap.has(key)) {
+                subjectKeyToNameMap.set(key, info.name);
+              }
+            });
+          }
+        });
+        
+        // Also check existing data for subject columns
+        Object.values(data).forEach(sectionData => {
+          if (sectionData && typeof sectionData === 'object') {
+            Object.keys(sectionData).forEach(key => {
+              if (key.startsWith('subject_') && !subjectKeyToNameMap.has(key)) {
+                // Try to find subject name from existing dynamicCols
+                const existingCol = dynamicCols.find(col => col.key === key);
+                if (existingCol && existingCol.label) {
+                  // Extract subject name from label like "TLE (15 - 25 points)"
+                  const match = existingCol.label.match(/^(.+?)\s*\(/);
+                  if (match) {
+                    subjectKeyToNameMap.set(key, match[1].trim());
+                  }
                 }
               }
-            } catch (e) {
-              console.log("DEBUG: Error parsing peer fields:", e);
+            });
+          }
+        });
+        
+        // Check selected peers for subject information
+        selectedPeers.forEach(peer => {
+          try {
+            const fields = typeof peer.fields === 'string' ? JSON.parse(peer.fields) : peer.fields;
+            if (fields && fields.subject_name && fields.subject_id) {
+              const peerSubjectKey = `subject_${fields.subject_id}`;
+              if (!subjectKeyToNameMap.has(peerSubjectKey)) {
+                subjectKeyToNameMap.set(peerSubjectKey, fields.subject_name);
+              }
             }
-          });
+          } catch (e) {
+          }
+        });
+        
+        // Add a column for each unique subject key
+        Array.from(allSubjectKeys).forEach(subjectKey => {
+          // Get subject name from map, or use fallback
+          let subjectName = subjectKeyToNameMap.get(subjectKey);
+          if (!subjectName) {
+            // Try to extract from existing columns
+            const existingCol = dynamicCols.find(col => col.key === subjectKey);
+            if (existingCol && existingCol.label) {
+              const match = existingCol.label.match(/^(.+?)\s*\(/);
+              if (match) {
+                subjectName = match[1].trim();
+              }
+            }
+            // Final fallback
+            if (!subjectName) {
+              subjectName = subjectKey.replace('subject_', 'Subject ');
+            }
+          }
           
           updatedCols.push({ 
             key: subjectKey, 
             label: `${subjectName} (15 - 25 points)` 
           });
-          console.log("DEBUG: Adding subject column:", subjectKey, "with label:", subjectName);
         });
         
         // Add remaining columns
@@ -1599,6 +2198,47 @@ function LAEMPLReport() {
       setMpsData(newMpsData);
       setShowConsolidate(false);
       
+      // Set temporary flag: prevents re-consolidation during this editing session
+      setHasUnsavedConsolidation(true);
+      setIsAlreadyConsolidated(true); // Block consolidation in this session
+      
+      // Mark each selected peer submission as consolidated into this submission
+      // Convert SUBMISSION_ID to number for consistency
+      const currentSubmissionId = Number(SUBMISSION_ID);
+      for (const peer of selectedPeers) {
+        try {
+          // Double-check: skip if already consolidated
+          const peerFields = typeof peer.fields === 'string' ? JSON.parse(peer.fields) : peer.fields;
+          if (peerFields?.meta?.consolidatedInto) {
+            continue;
+          }
+          
+          const updatedPeerFields = {
+            ...peerFields,
+            meta: {
+              ...peerFields?.meta,
+              consolidatedInto: currentSubmissionId, // Mark which submission this was consolidated into (use number)
+              consolidatedAt: new Date().toISOString()
+            }
+          };
+          
+          // Update the peer submission to mark it as consolidated
+          const markResponse = await fetch(`${API_BASE}/submissions/${peer.submission_id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ fields: updatedPeerFields })
+          });
+          
+          if (!markResponse.ok) {
+            throw new Error(`Failed to mark peer: ${markResponse.status}`);
+          }
+          
+        } catch (peerError) {
+          // Don't throw - continue with other peers
+        }
+      }
+      
       // Create success message with subject information
       const subjectsList = selectedPeers.map(peer => {
         const titleParts = peer.report_title ? peer.report_title.split(" - ") : [];
@@ -1607,11 +2247,187 @@ function LAEMPLReport() {
       
       setConsolidateSuccess(`Successfully consolidated data from ${selectedPeers.length} peer submissions. Subjects: ${subjectsList}`);
       
+      // Immediately save the consolidated data to the backend so it persists after page refresh
+      try {
+        const gradeLevel = submissionData?.fields?.grade || teacherSection?.grade_level || 2;
+        
+        // Wait a bit for state to update, then use the updated data state
+        // Use newData directly since it has the consolidated values
+        
+        // For coordinator view, ensure TRAITS matches section names
+        // This is important because toRows uses TRAITS to generate rows
+        if (isCoordinatorView && allSections.length > 0) {
+          const sectionNames = allSections.map(s => s.section_name);
+          // Only update if TRAITS doesn't match section names
+          if (JSON.stringify(TRAITS.sort()) !== JSON.stringify(sectionNames.sort())) {
+            setTRAITS(sectionNames);
+            // Wait a tick for state to update, but we'll use sectionNames directly
+            const rows = sectionNames.map((sectionName) => {
+              const row = { trait: sectionName };
+              const sectionData = newData[sectionName];
+              dynamicCols.forEach(col => {
+                const value = sectionData?.[col.key];
+                // Convert to number, but preserve 0 values (don't use || 0 which would convert null/undefined to 0)
+                if (value === "" || value === null || value === undefined) {
+                  row[col.key] = null;
+                } else {
+                  const numValue = Number(value);
+                  row[col.key] = isNaN(numValue) ? null : numValue;
+                }
+              });
+              return row;
+            });
+            
+            // Calculate totals using section names
+            const consolidatedTotals = dynamicCols.reduce((acc, c) => {
+              acc[c.key] = sectionNames.reduce(
+                (sum, sectionName) => sum + (Number(newData[sectionName]?.[c.key]) || 0),
+                0
+              );
+              return acc;
+            }, {});
+            
+            const savePayload = {
+              status: submissionData?.status || 1,
+              grade: gradeLevel,
+              rows: rows,
+              totals: consolidatedTotals,
+              subject_id: submissionData?.fields?.subject_id,
+              subject_name: submissionData?.fields?.subject_name,
+              mps_rows: mpsToRows(),
+              mps_totals: mpsToTotals(),
+            };
+            
+            const saveResponse = await fetch(
+              `${API_BASE}/submissions/laempl/${SUBMISSION_ID}`,
+              {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify(savePayload),
+              }
+            );
+            
+            if (!saveResponse.ok) {
+              const errorText = await saveResponse.text();
+              throw new Error(errorText || `HTTP ${saveResponse.status}`);
+            }
+            
+            const saveJson = await saveResponse.json();
+            
+            // Update the consolidation flag in meta to mark it as saved
+            if (saveJson?.fields) {
+              const updatedFields = {
+                ...saveJson.fields,
+                meta: {
+                  ...saveJson.fields?.meta,
+                  consolidatedAt: new Date().toISOString(),
+                  isConsolidated: true
+                }
+              };
+              
+              const flagResponse = await fetch(`${API_BASE}/submissions/${SUBMISSION_ID}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({ fields: updatedFields })
+              });
+              
+              if (!flagResponse.ok) {
+              }
+            }
+            
+            // Clear the temporary flag since data is now saved
+            setHasUnsavedConsolidation(false);
+            // Keep isAlreadyConsolidated as true since data is now permanently saved
+            
+            toast.success('Consolidated data saved successfully!');
+            return; // Exit early since we've handled the save
+          }
+        }
+        
+        // Convert consolidated data to rows format (for non-coordinator view or if TRAITS already matches)
+        const rows = toRows(newData);
+        
+        // Calculate totals from the consolidated data
+        // Use TRAITS (which should be section names for coordinator view) or allSections
+        const traitsToUse = isCoordinatorView && allSections.length > 0 
+          ? allSections.map(s => s.section_name) 
+          : TRAITS;
+        
+        const consolidatedTotals = dynamicCols.reduce((acc, c) => {
+          acc[c.key] = traitsToUse.reduce(
+            (sum, t) => sum + (Number(newData[t]?.[c.key]) || 0),
+            0
+          );
+          return acc;
+        }, {});
+        
+        const savePayload = {
+          status: submissionData?.status || 1, // Keep current status, don't change to submitted
+          grade: gradeLevel,
+          rows: rows,
+          totals: consolidatedTotals,
+          subject_id: submissionData?.fields?.subject_id,
+          subject_name: submissionData?.fields?.subject_name,
+          mps_rows: mpsToRows(),
+          mps_totals: mpsToTotals(),
+        };
+        
+        const saveResponse = await fetch(
+          `${API_BASE}/submissions/laempl/${SUBMISSION_ID}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify(savePayload),
+          }
+        );
+        
+        if (!saveResponse.ok) {
+          const errorText = await saveResponse.text();
+          throw new Error(errorText || `HTTP ${saveResponse.status}`);
+        }
+        
+        const saveJson = await saveResponse.json();
+        
+        // Update the consolidation flag in meta to mark it as saved
+        if (saveJson?.fields) {
+          const updatedFields = {
+            ...saveJson.fields,
+            meta: {
+              ...saveJson.fields?.meta,
+              consolidatedAt: new Date().toISOString(),
+              isConsolidated: true
+            }
+          };
+          
+          const flagResponse = await fetch(`${API_BASE}/submissions/${SUBMISSION_ID}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ fields: updatedFields })
+          });
+          
+          if (!flagResponse.ok) {
+          }
+        }
+        
+        // Clear the temporary flag since data is now saved
+        setHasUnsavedConsolidation(false);
+        // Keep isAlreadyConsolidated as true since data is now permanently saved
+        
+        toast.success('Consolidated data saved successfully!');
+      } catch (saveError) {
+        toast.error(`Failed to save consolidated data: ${saveError.message}. Please try saving manually.`);
+        // Don't throw - the consolidation still worked in the UI, just not persisted
+        // The user can still save manually later
+      }
+      
       // TODO: Generate AI Summary after successful consolidation (if needed)
       // await generateAISummary(selectedPeers, consolidatedData);
       
     } catch (error) {
-      console.error("[Consolidate] Error consolidating:", error);
       setConsolidateError(error.message || "Failed to consolidate data");
     }
   };
@@ -1712,7 +2528,12 @@ function LAEMPLReport() {
               <button onClick={handleClear}>Clear Table</button>
               {/* Consolidate button for coordinator view */}
               {isCoordinatorView && (
-                <button onClick={handleConsolidate}>Consolidate</button>
+                <button 
+                  onClick={handleConsolidate}
+                  title="Consolidate data from peer submissions"
+                >
+                  Consolidate
+                </button>
               )}
               {/* Submit button */}
               <button
@@ -1749,10 +2570,14 @@ function LAEMPLReport() {
                 <tbody>
                   {isCoordinatorView ? (
                     // Coordinator view: show all sections
-                    allSections.map((section, index) => (
+                    allSections.map((section, index) => {
+                      const sectionData = data[section.section_name];
+                      return (
                       <tr key={section.section_id || index}>
                         <th scope="row" className="row-head">{section.section_name}</th>
-                        {dynamicCols.map((col) => (
+                        {dynamicCols.map((col) => {
+                          const cellValue = sectionData?.[col.key] || "";
+                          return (
                           <td key={col.key}>
                             <input
                               type="number"
@@ -1760,7 +2585,7 @@ function LAEMPLReport() {
                               min="0"
                               max={dynamicColRules[col.key]?.[1]}
                               step="1"
-                              value={String(data[section.section_name]?.[col.key] || "")}
+                              value={String(cellValue)}
                               onChange={(e) => {
                                 handleChange(section.section_name, col.key, e.target.value);
                               }}
@@ -1769,9 +2594,9 @@ function LAEMPLReport() {
                               disabled={false}
                             />
                           </td>
-                        ))}
+                        )})}
                       </tr>
-                    ))
+                    )})
                   ) : (
                     // Teacher view: show traits
                     TRAITS.map((trait) => (
@@ -1787,7 +2612,6 @@ function LAEMPLReport() {
                               step="1"
                               value={String(data[trait]?.[col.key] || "")}
                               onChange={(e) => {
-                                console.log("Input changed:", trait, col.key, e.target.value);
                                 handleChange(trait, col.key, e.target.value);
                               }}
                               onKeyDown={handleKeyDown}
@@ -2016,20 +2840,42 @@ function LAEMPLReport() {
                       </tr>
                     </thead>
                     <tbody>
-                      {peerData.map((peer, index) => (
-                        <tr key={peer.submission_id || index}>
+                      {peerData.map((peer, index) => {
+                        // Check if this peer is already consolidated
+                        let isAlreadyConsolidated = false;
+                        let consolidatedIntoSubmissionId = null;
+                        try {
+                          const fields = typeof peer.fields === 'string' ? JSON.parse(peer.fields) : (peer.fields || {});
+                          const consolidatedInto = fields?.meta?.consolidatedInto;
+                          // Check both string and number formats, and exclude empty/null values
+                          isAlreadyConsolidated = consolidatedInto != null && consolidatedInto !== '' && consolidatedInto !== 'null';
+                          consolidatedIntoSubmissionId = consolidatedInto;
+                        } catch (parseError) {
+                        }
+                        
+                        return (
+                        <tr key={peer.submission_id || index} style={isAlreadyConsolidated ? { opacity: 0.5, backgroundColor: '#f3f4f6' } : {}}>
                           <td style={{ padding: 12, border: "1px solid #ddd", textAlign: "center" }}>
                             <input 
                               type="checkbox" 
                               id={`peer-${index}`}
+                              disabled={isAlreadyConsolidated}
+                              title={isAlreadyConsolidated ? "This submission has already been consolidated" : "Select to consolidate"}
                               onChange={(e) => {
-                                // Handle selection logic here
-                                console.log("Selected peer:", peer, e.target.checked);
+                                if (isAlreadyConsolidated) {
+                                  e.target.checked = false; // Prevent checking if already consolidated
+                                  return;
+                                }
                               }}
                             />
                           </td>
                           <td style={{ padding: 12, border: "1px solid #ddd" }}>
-                            {peer.teacher_name || "Unknown Teacher"}
+                            {peer.name || peer.teacher_name || "Unknown Teacher"}
+                            {isAlreadyConsolidated && (
+                              <span style={{ marginLeft: 8, fontSize: 11, color: '#dc2626', fontStyle: 'italic' }}>
+                                (Already Consolidated{consolidatedIntoSubmissionId ? ` into submission #${consolidatedIntoSubmissionId}` : ''})
+                              </span>
+                            )}
                           </td>
                           <td style={{ padding: 12, border: "1px solid #ddd" }}>
                             Grade {peer.grade_level || "Unknown"}
@@ -2082,7 +2928,8 @@ function LAEMPLReport() {
                             </span>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                   <div style={{ marginTop: 20, display: "flex", gap: 10, justifyContent: "flex-end" }}>
@@ -2096,10 +2943,22 @@ function LAEMPLReport() {
                       className="btn primary" 
                       onClick={() => {
                         // Get selected peers and consolidate
-                        const selectedPeers = peerData.filter((_, index) => {
+                        const selectedPeers = peerData.filter((peer, index) => {
                           const checkbox = document.getElementById(`peer-${index}`);
-                          return checkbox?.checked;
+                          const isChecked = checkbox?.checked;
+                          
+                          // Double-check: also verify the peer isn't already consolidated
+                          if (isChecked) {
+                            const fields = typeof peer.fields === 'string' ? JSON.parse(peer.fields) : peer.fields;
+                            const consolidatedInto = fields?.meta?.consolidatedInto;
+                            if (consolidatedInto) {
+                              return false; // Exclude already-consolidated peers
+                            }
+                          }
+                          
+                          return isChecked;
                         });
+                        
                         if (selectedPeers.length > 0) {
                           consolidateFromPeers(selectedPeers);
                         } else {
@@ -2120,7 +2979,6 @@ function LAEMPLReport() {
     </>
   );
   } catch (error) {
-    console.error("Error rendering LAEMPLReport:", error);
     return (
       <div style={{ padding: '20px', textAlign: 'center' }}>
         <h2>Error Loading LAEMPL Report</h2>

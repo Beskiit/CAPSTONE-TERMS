@@ -169,7 +169,31 @@ export const getSubmission = (req, res) => {
   db.query(sql, [id], (err, results) => {
     if (err) return res.status(500).send('Database error: ' + err);
     if (!results.length) return res.status(404).send('No submission found for the given ID.');
-    res.json(normalizeFields(results[0]));
+    
+    const normalized = normalizeFields(results[0]);
+    
+    // Log what's being returned for LAEMPL submissions
+    if (normalized.fields && (normalized.fields.type === 'LAEMPL' || normalized.fields.type === 'LAEMPL_COORDINATOR' || normalized.fields.type === 'LAEMPL_TEACHER')) {
+      console.log("\n=== BACKEND LAEMPL GET DEBUG ===");
+      console.log(`[BACKEND] Loading submission ID: ${id}`);
+      console.log(`[BACKEND] Submission status: ${normalized.status}`);
+      console.log(`[BACKEND] Fields type: ${normalized.fields.type}`);
+      if (normalized.fields.rows && Array.isArray(normalized.fields.rows)) {
+        console.log(`[BACKEND] Rows count: ${normalized.fields.rows.length}`);
+        console.log("[BACKEND] Rows data:");
+        normalized.fields.rows.forEach((row, idx) => {
+          console.log(`  Row ${idx + 1} (${row.trait || 'no trait'}):`, JSON.stringify(row, null, 2));
+        });
+      } else {
+        console.log("[BACKEND] No rows found in fields");
+      }
+      if (normalized.fields.meta) {
+        console.log("[BACKEND] Meta:", JSON.stringify(normalized.fields.meta, null, 2));
+      }
+      console.log("=== END BACKEND LAEMPL GET DEBUG ===\n");
+    }
+    
+    res.json(normalized);
   });
 };
 
@@ -321,14 +345,19 @@ export const patchLAEMPLBySubmissionId = (req, res) => {
   const requestedStatus = body.status; // may be undefined
   const grade  = body.grade;
   
-  console.log("=== BACKEND LAEMPL SUBMIT DEBUG ===");
+  console.log("\n=== BACKEND LAEMPL SUBMIT DEBUG ===");
   console.log("Submission ID:", id);
-  console.log("Request body:", body);
   console.log("Requested status:", requestedStatus);
   console.log("Grade:", grade);
-  console.log("Rows input:", body.rows);
-  console.log("Totals input:", body.totals);
-  console.log("=== END BACKEND LAEMPL SUBMIT DEBUG ===");
+  console.log("\n[BACKEND] Rows received:", JSON.stringify(body.rows, null, 2));
+  console.log("\n[BACKEND] Totals received:", JSON.stringify(body.totals, null, 2));
+  if (body.rows && Array.isArray(body.rows)) {
+    console.log("\n[BACKEND] Row details:");
+    body.rows.forEach((row, idx) => {
+      console.log(`  Row ${idx + 1} (${row.trait || 'no trait'}):`, JSON.stringify(row, null, 2));
+    });
+  }
+  console.log("=== END BACKEND LAEMPL SUBMIT DEBUG ===\n");
 
   const rowsInput = body.rows ?? body.data ?? {};
   let rowsNormalized;
@@ -418,11 +447,15 @@ export const patchLAEMPLBySubmissionId = (req, res) => {
       nextFields.subject_name = body.subject_name;
     }
     
-    console.log("=== BACKEND FINAL DATA STRUCTURE ===");
-    console.log("Next fields:", JSON.stringify(nextFields, null, 2));
-    console.log("Clean rows:", cleanRows);
-    console.log("Totals:", totals);
-    console.log("=== END BACKEND FINAL DATA STRUCTURE ===");
+    console.log("\n=== BACKEND FINAL DATA STRUCTURE ===");
+    console.log("[BACKEND] Clean rows being saved:");
+    cleanRows.forEach((row, idx) => {
+      console.log(`  Row ${idx + 1} (${row.trait || 'no trait'}):`, JSON.stringify(row, null, 2));
+    });
+    console.log("\n[BACKEND] Totals:", JSON.stringify(totals, null, 2));
+    console.log("\n[BACKEND] Full nextFields structure:");
+    console.log(JSON.stringify(nextFields, null, 2));
+    console.log("=== END BACKEND FINAL DATA STRUCTURE ===\n");
 
     // Decide the new status:
     let newStatusClause = '';
@@ -959,13 +992,14 @@ export const getSubmissionsByAssignment = (req, res) => {
  */
 export const patchSubmission = (req, res) => {
   const { id } = req.params;
-  const { status, rejection_reason, coordinator_notes } = req.body;
+  const { status, rejection_reason, coordinator_notes, fields } = req.body;
 
   console.log('PATCH submission request:', {
     id,
     status,
     rejection_reason,
     coordinator_notes,
+    hasFields: !!fields,
     body: req.body
   });
 
@@ -991,6 +1025,85 @@ export const patchSubmission = (req, res) => {
   if (coordinator_notes !== undefined) {
     updates.push('fields = JSON_SET(COALESCE(fields, "{}"), "$.coordinator_notes", ?)');
     values.push(coordinator_notes);
+  }
+
+  // Handle full fields object update (for consolidation flags, etc.)
+  if (fields !== undefined && typeof fields === 'object') {
+    // Get current fields first, then merge
+    const selectSql = `SELECT fields FROM submission WHERE submission_id = ?`;
+    db.query(selectSql, [id], (selErr, selRows) => {
+      if (selErr) {
+        console.error('Error fetching current fields:', selErr);
+        return res.status(500).send('Database error: ' + selErr);
+      }
+      
+      if (!selRows.length) {
+        return res.status(404).send('Submission not found');
+      }
+
+      let current = {};
+      try {
+        current = typeof selRows[0].fields === 'string' 
+          ? JSON.parse(selRows[0].fields || '{}')
+          : (selRows[0].fields || {});
+      } catch (parseErr) {
+        console.error('Error parsing current fields:', parseErr);
+        current = {};
+      }
+
+      // Merge new fields with current fields
+      const merged = {
+        ...current,
+        ...fields,
+        // Preserve meta object structure
+        meta: {
+          ...(current.meta || {}),
+          ...(fields.meta || {})
+        }
+      };
+
+      // Build updates array for this specific case
+      const fieldUpdates = [];
+      const fieldValues = [];
+
+      if (status !== undefined) {
+        fieldUpdates.push('status = ?');
+        fieldValues.push(status);
+      }
+
+      fieldUpdates.push('fields = ?');
+      fieldValues.push(JSON.stringify(merged));
+      
+      fieldValues.push(id);
+      const sql = `UPDATE submission SET ${fieldUpdates.join(', ')} WHERE submission_id = ?`;
+      
+      console.log('Final SQL query (with fields):', sql);
+      console.log('Final values (with fields):', fieldValues);
+
+      db.query(sql, fieldValues, (err, result) => {
+        if (err) {
+          console.error('Error updating submission:', err);
+          return res.status(500).send('Database error: ' + err);
+        }
+
+        if (result.affectedRows === 0) {
+          return res.status(404).send('Submission not found');
+        }
+
+        // If status is 4 (rejected), implement rejection workflow
+        if (status === 4) {
+          handleRejectionWorkflow(req, res, id, rejection_reason);
+        } else {
+          // Return success
+          return res.json({ 
+            ok: true, 
+            message: 'Submission updated successfully',
+            submission_id: id
+          });
+        }
+      });
+    });
+    return; // Exit early since we're handling the update in the callback
   }
 
   if (updates.length === 0) {

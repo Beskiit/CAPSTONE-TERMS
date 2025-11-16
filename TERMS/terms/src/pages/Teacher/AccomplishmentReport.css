@@ -59,13 +59,22 @@
   background-color: #163D75;
 }
 
+/* Form Container Wrapper */
+.accomplishment-report-wrapper {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+  margin-bottom: 2rem;
+}
+
 /* Form Container */
 .accomplishment-report-container {
   background-color: white;
   border-radius: 8px;
   padding: 2rem;
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  margin-bottom: 2rem;
+  flex: 1;
+  min-width: 0;
 }
 
 .accomplishment-report-container h3 {
@@ -111,6 +120,21 @@ form {
 
 .form-row textarea {
   min-height: 120px;     /* comfortable size for textareas */
+}
+
+/* Narrative field - wider but not full width */
+.form-row textarea[id="teacherNarrative"],
+.form-row textarea[id="narrative"] {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+  max-width: 800px !important;
+}
+
+.form-row label[for="teacherNarrative"],
+.form-row label[for="narrative"] {
+  flex: 0 0 80px !important;
+  min-width: 80px !important;
+  max-width: 80px !important;
 }
 
 .form-row input:focus,
@@ -248,4 +272,53 @@ form {
   padding: 2px;
   font-size: 10px;
   text-align: center;
+}
+
+/* Assignment Details Card */
+.assignment-details-card {
+  background-color: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  border: 1px solid #e5e7eb;
+  flex: 0 0 350px;
+  position: sticky;
+  top: 1rem;
+  align-self: flex-start;
+}
+
+.assignment-section {
+  margin-bottom: 1rem;
+}
+
+.assignment-section:last-child {
+  margin-bottom: 0;
+}
+
+.assignment-section h4 {
+  font-size: 1.25rem;
+  font-weight: bold;
+  margin: 0 0 0.75rem 0;
+  color: #2a3b5c;
+}
+
+.assignment-field {
+  margin-bottom: 0.5rem;
+  font-size: 14px;
+  color: #374151;
+}
+
+.assignment-field:last-child {
+  margin-bottom: 0;
+}
+
+.assignment-field strong {
+  color: #1f2937;
+  margin-right: 0.5rem;
+}
+
+.assignment-divider {
+  height: 1px;
+  background-color: #e5e7eb;
+  margin: 1rem 0;
 }

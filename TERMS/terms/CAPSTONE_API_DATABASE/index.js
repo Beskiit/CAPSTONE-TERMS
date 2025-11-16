@@ -3405,8 +3405,8 @@ app.put("/reports/assignment/:reportId", requireAuth, async (req, res) => {
 
       // Create new submissions for added assignees
       if (assigneesToAdd.length > 0) {
-        // Get category_id and default number_of_submission from report_assignment
-        const getAssignmentQuery = `SELECT category_id FROM report_assignment WHERE report_assignment_id = ?`;
+        // Get category_id, title, and default number_of_submission from report_assignment
+        const getAssignmentQuery = `SELECT category_id, title FROM report_assignment WHERE report_assignment_id = ?`;
         const assignmentData = await new Promise((resolve, reject) => {
           db.query(getAssignmentQuery, [reportId], (err, results) => {
             if (err) reject(err);
@@ -3434,9 +3434,55 @@ app.put("/reports/assignment/:reportId", requireAuth, async (req, res) => {
             continue;
           }
 
+          // Get initial fields based on category_id
+          // For Accomplishment Report (category_id = 0), use proper initial structure
+          let initialFields = '{}';
+          if (assignmentData?.category_id === 0) {
+            // Accomplishment Report initial structure
+            initialFields = JSON.stringify({
+              type: "ACCOMPLISHMENT",
+              narrative: "",
+              images: [],
+              meta: { createdAt: new Date().toISOString() }
+            });
+          } else if (assignmentData?.category_id === 1) {
+            // LAEMPL/MPS Report - get structure from existing submission if available
+            const getExistingFieldsQuery = `
+              SELECT fields FROM submission 
+              WHERE report_assignment_id = ? AND category_id = ?
+              LIMIT 1
+            `;
+            const existingFieldsResult = await new Promise((resolve, reject) => {
+              db.query(getExistingFieldsQuery, [reportId, assignmentData.category_id], (err, results) => {
+                if (err) reject(err);
+                else resolve(results && results.length > 0 ? results[0] : null);
+              });
+            });
+            
+            if (existingFieldsResult && existingFieldsResult.fields) {
+              // Use existing structure as template
+              try {
+                const existingFields = typeof existingFieldsResult.fields === 'string' 
+                  ? JSON.parse(existingFieldsResult.fields) 
+                  : existingFieldsResult.fields;
+                // Create a blank copy with same structure
+                const blankFields = JSON.parse(JSON.stringify(existingFields));
+                // Clear data but keep structure
+                if (blankFields.rows) blankFields.rows = [];
+                if (blankFields.data) blankFields.data = [];
+                initialFields = JSON.stringify(blankFields);
+              } catch (e) {
+                // If parsing fails, use empty object
+                initialFields = '{}';
+              }
+            } else {
+              initialFields = '{}';
+            }
+          }
+
           const insertSubmissionQuery = `
-            INSERT INTO submission (report_assignment_id, category_id, submitted_by, status, number_of_submission, fields)
-            VALUES (?, ?, ?, 1, ?, '{}')
+            INSERT INTO submission (report_assignment_id, category_id, submitted_by, status, number_of_submission, value, fields)
+            VALUES (?, ?, ?, 1, ?, ?, ?)
           `;
           
           await new Promise((resolve, reject) => {
@@ -3444,11 +3490,13 @@ app.put("/reports/assignment/:reportId", requireAuth, async (req, res) => {
               reportId, 
               assignmentData?.category_id || 0, 
               assigneeId, 
-              number_of_submission || 1
+              number_of_submission || 1,
+              assignmentData?.title || null, // Set value (title) from assignment
+              initialFields
             ], (err, results) => {
               if (err) reject(err);
               else {
-                console.log('🔄 [DEBUG] Created submission for new assignee:', assigneeId);
+                console.log('🔄 [DEBUG] Created submission for new assignee:', assigneeId, 'with title:', assignmentData?.title, 'and initial fields:', initialFields);
                 resolve(results);
               }
             });
@@ -3485,6 +3533,36 @@ app.put("/reports/assignment/:reportId", requireAuth, async (req, res) => {
   } catch (error) {
     console.error("Error updating report assignment:", error);
     res.status(500).json({ error: "Failed to update report assignment", details: error.message });
+  }
+});
+
+// GET /reports/assignment/:reportId/child
+// Get the child assignment (if any) for a given parent assignment ID
+app.get("/reports/assignment/:reportId/child", requireAuth, async (req, res) => {
+  try {
+    const { reportId } = req.params;
+    
+    const query = `
+      SELECT report_assignment_id, title, parent_report_assignment_id, category_id, sub_category_id
+      FROM report_assignment 
+      WHERE parent_report_assignment_id = ?
+      LIMIT 1
+    `;
+    
+    db.query(query, [reportId], (err, results) => {
+      if (err) {
+        return res.status(500).json({ error: "Failed to find child assignment", details: err.message });
+      }
+      
+      if (results && results.length > 0) {
+        res.json(results[0]);
+      } else {
+        res.status(404).json({ error: "Child assignment not found" });
+      }
+    });
+  } catch (error) {
+    console.error("Error finding child assignment:", error);
+    res.status(500).json({ error: "Failed to find child assignment", details: error.message });
   }
 });
 

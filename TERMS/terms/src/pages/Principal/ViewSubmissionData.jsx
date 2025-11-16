@@ -49,7 +49,7 @@ const sanitizeKey = (rawKey) => {
   return cleanKey;
 };
 
-// Helper function to get column labels
+  // Helper function to get column labels
 const getColumnLabel = (key, subjectNames = {}) => {
   const labelMap = {
     'm': 'M',
@@ -71,7 +71,10 @@ const getColumnLabel = (key, subjectNames = {}) => {
   if (key.startsWith('subject_')) {
     const subjectId = key.replace('subject_', '');
     const subjectName = subjectNames[subjectId];
-    return subjectName || `Subject ${subjectId}`;
+    if (subjectName) {
+      return `${subjectName} (15 - 25 points)`;
+    }
+    return `Subject ${subjectId}`;
   }
   
   return labelMap[key] || key.toUpperCase();
@@ -142,6 +145,29 @@ function ViewSubmissionData() {
   const [COLS, setCOLS] = useState(DEFAULT_COLS);
   const [COLS_MPS, setCOLS_MPS] = useState(DEFAULT_COLS_MPS);
   const [subjectNames, setSubjectNames] = useState({});
+  
+  // Function to fetch subject names
+  const fetchSubjectNames = async (subjectIds) => {
+    if (!subjectIds || subjectIds.length === 0) return;
+    
+    try {
+      const response = await fetch(`${API_BASE}/subjects`, {
+        credentials: "include"
+      });
+      
+      if (response.ok) {
+        const subjects = await response.json();
+        const subjectMap = {};
+        subjects.forEach(subject => {
+          subjectMap[subject.subject_id] = subject.subject_name;
+        });
+        setSubjectNames(subjectMap);
+        console.log('Subject names fetched:', subjectMap);
+      }
+    } catch (error) {
+      console.error('Error fetching subject names:', error);
+    }
+  };
   
   // Export format state
 
@@ -253,9 +279,20 @@ function ViewSubmissionData() {
             console.log('Dynamic traits extracted from database:', actualTraits);
           }
           
-          // Extract dynamic columns from the first row
+          // Extract subject IDs from the first row
           const firstRow = fields.rows[0];
           if (firstRow) {
+            const subjectIds = Object.keys(firstRow)
+              .filter(key => key.startsWith('subject_'))
+              .map(key => key.replace('subject_', ''));
+            
+            // Fetch subject names if subject IDs are found
+            if (subjectIds.length > 0) {
+              console.log('Found subject IDs:', subjectIds);
+              fetchSubjectNames(subjectIds);
+            }
+            
+            // Extract dynamic columns from the first row
             const actualCols = Object.keys(firstRow)
               .filter(key => key !== 'trait')
               .map(key => ({
@@ -281,6 +318,27 @@ function ViewSubmissionData() {
 
     fetchSubmissionData();
   }, [currentSubmissionId]);
+
+  // Re-extract columns when subjectNames are updated
+  useEffect(() => {
+    if (submissionData && submissionData.fields && submissionData.fields.rows && Array.isArray(submissionData.fields.rows) && submissionData.fields.rows.length > 0) {
+      const firstRow = submissionData.fields.rows[0];
+      if (firstRow) {
+        const actualCols = Object.keys(firstRow)
+          .filter(key => key !== 'trait')
+          .map(key => ({
+            key: sanitizeKey(key),
+            originalKey: key,
+            label: getColumnLabel(sanitizeKey(key), subjectNames)
+          }));
+        
+        if (actualCols.length > 0) {
+          setCOLS(actualCols);
+          console.log('Columns updated with subject names:', actualCols);
+        }
+      }
+    }
+  }, [subjectNames, submissionData]);
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -773,7 +831,7 @@ function ViewSubmissionData() {
                     <td className="trait-cell">{trait}</td>
                     {cols.map(col => (
                       <td key={col.key} className="data-cell">
-                        {rowData[col.key] || ''}
+                        {rowData[col.originalKey || col.key] || ''}
                       </td>
                     ))}
                   </tr>
