@@ -184,7 +184,10 @@ function AccomplishmentReportInstruction() {
             return;
         }
         // Only meaningful for coordinators, but harmless otherwise
-        navigate(`/SetReport?reportId=${reportAssignmentId}&isPrincipalReport=true`);
+        // Pass isEditAction: false to indicate this is "Set as report to teachers" (CREATE new child assignments)
+        navigate(`/SetReport?reportId=${reportAssignmentId}&isPrincipalReport=true`, {
+            state: { isEditAction: false }
+        });
     };
 
     const handleViewSubmission = () => {
@@ -232,6 +235,7 @@ function AccomplishmentReportInstruction() {
                 // Navigate with all assignment data in state
                 navigate(`/SetReport?reportId=${reportAssignmentId}&isPrincipalReport=true`, {
                     state: {
+                        isEditAction: true, // Pass isEditAction: true to indicate this is "Edit" (UPDATE existing assignment)
                         assignmentData: assignmentData,
                         assignees: assignees,
                         prefillData: true, // Flag to indicate data should be pre-filled
@@ -240,12 +244,16 @@ function AccomplishmentReportInstruction() {
                 });
             } else {
                 // Fallback to just passing reportId
-                navigate(`/SetReport?reportId=${reportAssignmentId}&isPrincipalReport=true`);
+                navigate(`/SetReport?reportId=${reportAssignmentId}&isPrincipalReport=true`, {
+                    state: { isEditAction: true } // Pass isEditAction: true to indicate this is "Edit" (UPDATE existing assignment)
+                });
             }
         } catch (error) {
             console.error("Error fetching assignment data:", error);
             // Fallback to just passing reportId
-            navigate(`/SetReport?reportId=${reportAssignmentId}&isPrincipalReport=true`);
+            navigate(`/SetReport?reportId=${reportAssignmentId}&isPrincipalReport=true`, {
+                state: { isEditAction: true } // Pass isEditAction: true to indicate this is "Edit" (UPDATE existing assignment)
+            });
         }
     };
 

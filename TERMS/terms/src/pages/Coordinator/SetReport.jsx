@@ -30,6 +30,8 @@ function SetReport() {
   const parentAssignmentIdFromState = location.state?.parentAssignmentId != null
     ? Number(location.state.parentAssignmentId)
     : null;
+  // Track if this is an "Edit" action vs "Set as report to teachers" action
+  const isEditAction = location.state?.isEditAction === true;
   const [user, setUser] = useState(null);
   const role = (user?.role || "").toLowerCase();
   const isCoordinator = role === "coordinator";
@@ -333,12 +335,20 @@ function SetReport() {
   useEffect(() => {
     const fetchTeachers = async () => {
       try {
+        console.log('🔍 [DEBUG] Fetching teachers from:', `${API_BASE}/users/teachers`);
         const res = await fetch(`${API_BASE}/users/teachers`, { credentials: "include" });
-        if (!res.ok) throw new Error("Failed to fetch teachers");
+        console.log('🔍 [DEBUG] Teachers response status:', res.status, res.statusText);
+        if (!res.ok) {
+          const errorText = await res.text();
+          console.error('❌ [DEBUG] Failed to fetch teachers:', res.status, errorText);
+          throw new Error(`Failed to fetch teachers: ${res.status} ${errorText}`);
+        }
         const data = await res.json(); // [{ user_id, name }]
+        console.log('✅ [DEBUG] Teachers fetched:', data.length, 'users', data);
         setUsers(data);
       } catch (err) {
-        console.error(err);
+        console.error('❌ [DEBUG] Error fetching teachers:', err);
+        setUsers([]); // Set empty array on error
       }
     };
     fetchTeachers();
@@ -348,12 +358,20 @@ function SetReport() {
   useEffect(() => {
     const fetchCoordinators = async () => {
       try {
+        console.log('🔍 [DEBUG] Fetching coordinators from:', `${API_BASE}/users/coordinators`);
         const res = await fetch(`${API_BASE}/users/coordinators`, { credentials: "include" });
-        if (!res.ok) throw new Error("Failed to fetch coordinators");
+        console.log('🔍 [DEBUG] Coordinators response status:', res.status, res.statusText);
+        if (!res.ok) {
+          const errorText = await res.text();
+          console.error('❌ [DEBUG] Failed to fetch coordinators:', res.status, errorText);
+          throw new Error(`Failed to fetch coordinators: ${res.status} ${errorText}`);
+        }
         const data = await res.json(); // [{ user_id, name }]
+        console.log('✅ [DEBUG] Coordinators fetched:', data.length, 'users', data);
         setCoordinators(data);
       } catch (err) {
-        console.error(err);
+        console.error('❌ [DEBUG] Error fetching coordinators:', err);
+        setCoordinators([]); // Set empty array on error
       }
     };
     if (isPrincipal) {
@@ -1424,84 +1442,63 @@ function SetReport() {
         return user?.role?.toLowerCase() === 'coordinator';
       });
       
-      // For Accomplishment Report: Check if single coordinator recipient should get coordinator_user_id
-      // (i.e., they're not exclusively a LAEMPL/MPS coordinator)
+      // For Accomplishment Report: Check if coordinator recipient should get coordinator_user_id
+      // If principal assigns Accomplishment Report to a coordinator, set coordinator_user_id
       let shouldSetAccomplishmentCoordinatorId = false;
-      if (isPrincipal && reportType === "accomplishment" && recipients.length === 1) {
-        const singleRecipientId = recipients[0];
-        const recipientUser = usersWithGrades.find(u => String(u.user_id) === String(singleRecipientId)) ||
-          coordinators.find(u => String(u.user_id) === String(singleRecipientId));
-        if (recipientUser?.role?.toLowerCase() === 'coordinator') {
-          try {
-            const checkRes = await fetch(`${API_BASE}/reports/given_to/${singleRecipientId}`, {
-              credentials: "include"
-            });
-            if (checkRes.ok) {
-              const assignments = await checkRes.json();
-              // Check if coordinator has any Accomplishment Report assignments (category_id = 0)
-              const hasAccomplishmentAssignments = assignments.some(assignment => 
-                Number(assignment.category_id) === 0
-              );
-              
-              // Also check if they have coordinator_user_id set for Accomplishment Reports
-              const hasAccomplishmentCoordinatorRole = assignments.some(assignment => 
-                Number(assignment.category_id) === 0 && 
-                assignment.coordinator_user_id != null &&
-                Number(assignment.coordinator_user_id) === Number(singleRecipientId)
-              );
-              
-              // Check if they are exclusively a LAEMPL/MPS coordinator
-              const hasLaemplMpsCoordinatorRole = assignments.some(assignment => 
-                Number(assignment.category_id) === 1 && 
-                Number(assignment.sub_category_id) === 3 &&
-                assignment.coordinator_user_id != null &&
-                Number(assignment.coordinator_user_id) === Number(singleRecipientId)
-              );
-              
-              // Only set coordinator_user_id if:
-              // 1. They have Accomplishment Report assignments/coordinator role, AND
-              // 2. They are NOT exclusively a LAEMPL/MPS coordinator
-              // If they are exclusively a LAEMPL/MPS coordinator (has LAEMPL/MPS role but no Accomplishment role), don't set it
-              // If they have both roles, allow it (they can coordinate both)
-              // If they have neither role, don't set it (let them act as teacher)
-              shouldSetAccomplishmentCoordinatorId = 
-                (hasAccomplishmentAssignments || hasAccomplishmentCoordinatorRole) &&
-                !(hasLaemplMpsCoordinatorRole && !hasAccomplishmentCoordinatorRole && !hasAccomplishmentAssignments);
-              
-              console.log("🔍 [SetReport] Accomplishment coordinator check:", {
-                singleRecipientId,
-                hasAccomplishmentAssignments,
-                hasAccomplishmentCoordinatorRole,
-                hasLaemplMpsCoordinatorRole,
-                shouldSetAccomplishmentCoordinatorId
-              });
-            } else {
-              // If we can't check, default to NOT setting it (safer - let them act as teacher)
-              shouldSetAccomplishmentCoordinatorId = false;
-            }
-          } catch (err) {
-            console.warn("Failed to check coordinator assignments:", err);
-            // Default to NOT setting it if check fails (safer - let them act as teacher)
-            shouldSetAccomplishmentCoordinatorId = false;
-          }
+      if (isPrincipal && reportType === "accomplishment") {
+        // Check if any recipient is a coordinator
+        const coordinatorRecipients = recipients.filter(recipientId => {
+          const recipientUser = usersWithGrades.find(u => String(u.user_id) === String(recipientId)) ||
+            coordinators.find(u => String(u.user_id) === String(recipientId));
+          return recipientUser?.role?.toLowerCase() === 'coordinator';
+        });
+        
+        // If there's exactly one coordinator recipient, set coordinator_user_id
+        // This matches the behavior for LAEMPL & MPS where we set coordinator_user_id when principal assigns to coordinator
+        if (coordinatorRecipients.length === 1) {
+          shouldSetAccomplishmentCoordinatorId = true;
+          console.log("🔍 [SetReport] Accomplishment coordinator check:", {
+            coordinatorRecipient: coordinatorRecipients[0],
+            shouldSetAccomplishmentCoordinatorId: true,
+            reason: "Principal assigning Accomplishment Report to single coordinator"
+          });
+        } else if (coordinatorRecipients.length > 1) {
+          // Multiple coordinators - don't set coordinator_user_id (ambiguous)
+          console.log("🔍 [SetReport] Accomplishment coordinator check:", {
+            coordinatorRecipients: coordinatorRecipients,
+            shouldSetAccomplishmentCoordinatorId: false,
+            reason: "Multiple coordinator recipients - ambiguous"
+          });
         }
       }
 
       // Handle editing existing report - UPDATE instead of CREATE
-      // If editingReportId exists, we should ALWAYS UPDATE the existing assignment
+      // If editingReportId exists, we should UPDATE the existing assignment
       // EXCEPT when:
       // 1. forceCreateAssignments is true (explicitly forcing creation)
+      // 2. Coordinator is distributing from principal's assignment (isFromPrincipalWithCoordinator)
+      //    - This is "Set as report to teachers" action - should CREATE NEW child assignments
+      //    - NOT update the parent assignment
       // 
-      // Note: The "distributing from principal" logic only applies when creating NEW assignments,
-      // not when editing existing ones. When editing, we always update the existing assignment.
+      // Note: "EDIT" = Update existing assignment (dates, instructions, etc.)
+      //       "Set as report to teachers" = Create new child assignments from principal's assignment
       const fromAssignedReport = location.state?.fromAssignedReport || location.state?.prefillData || forceCreateAssignments;
       
       // Check if this is a coordinator's own assignment (not from principal)
       // For coordinator's own assignments, we should always update (handled in updateExistingReport)
       // Note: isCoordinatorOwnAssignment is already declared earlier in this function (line 1554)
       
-      // If editingReportId exists, always update (unless explicitly forcing creation)
-      const shouldUpdate = editingReportId && !forceCreateAssignments;
+      // Check if coordinator is distributing from principal's assignment (before we check shouldUpdate)
+      // This determines if we're doing "Set as report to teachers" (CREATE) vs "EDIT" (UPDATE)
+      const isFromPrincipalWithCoordinator = isFromPrincipalAssignment && isCoordinator && 
+        (originalReportData?.coordinator_user_id != null || originalReportData?.parent_report_assignment_id != null);
+      
+      // If editingReportId exists, update (unless explicitly forcing creation OR distributing from principal)
+      // When coordinator distributes from principal, we CREATE NEW child assignments, not update parent
+      // EXCEPT if isEditAction is true - then we should UPDATE even if it's from principal
+      // "Edit" button = UPDATE the existing assignment
+      // "Set as report to teachers" button = CREATE NEW child assignments
+      const shouldUpdate = editingReportId && !forceCreateAssignments && (isEditAction || !isFromPrincipalWithCoordinator);
       
       console.log('🔄 [DEBUG] Update vs Create decision:', {
         editingReportId,
@@ -1512,6 +1509,9 @@ function SetReport() {
         isCoordinator,
         isCoordinatorOwnAssignment,
         hasCoordinatorRecipients,
+        isFromPrincipalWithCoordinator,
+        isEditAction,
+        action: shouldUpdate ? 'EDIT (UPDATE)' : isFromPrincipalWithCoordinator ? 'Set as report to teachers (CREATE)' : 'CREATE',
         shouldUpdate
       });
       
@@ -1576,8 +1576,7 @@ function SetReport() {
       // Special handling for reports from principal (with coordinator_user_id or parent_report_assignment_id)
       // When coordinator distributes to teachers/coordinators, create separate assignments for each recipient
       // with parent_report_assignment_id set, regardless of category
-      const isFromPrincipalWithCoordinator = isFromPrincipalAssignment && isCoordinator && 
-        (originalReportData?.coordinator_user_id != null || originalReportData?.parent_report_assignment_id != null);
+      // Note: This is already declared above in the shouldUpdate check, so we don't redeclare it here
       
       console.log('🔄 [DEBUG] Checking if should create child assignments (handleConfirmSubmit):', {
         isFromPrincipalAssignment,
@@ -1644,8 +1643,10 @@ function SetReport() {
         is_given: isGiven,
         is_archived: 0,
         allow_late: allowLate ? 1 : 0,
-        // Only set parent_report_assignment_id when coordinator is assigning to teachers (not when creating their own)
-        parent_report_assignment_id: isCoordinatorAssigning ? parentAssignmentId ?? null : null,
+      // Only set parent_report_assignment_id when coordinator is assigning to teachers (not when creating their own)
+      // For principal assigning to coordinator: parent_report_assignment_id should be null (it's the parent assignment)
+      // For coordinator assigning to teachers: parent_report_assignment_id should be set to the parent assignment ID
+      parent_report_assignment_id: (isCoordinatorAssigning && !isPrincipal) ? parentAssignmentId ?? null : null,
       };
       
       // Only add coordinator_user_id if principal is assigning to a coordinator
@@ -1655,9 +1656,21 @@ function SetReport() {
       }
       
       // For Accomplishment Report: Set coordinator_user_id if principal assigns to exactly 1 coordinator
-      // AND that coordinator is not exclusively a LAEMPL/MPS coordinator
-      if (isPrincipal && reportType === "accomplishment" && finalRecipients.length === 1 && shouldSetAccomplishmentCoordinatorId) {
-        base.coordinator_user_id = Number(finalRecipients[0]);
+      if (isPrincipal && reportType === "accomplishment" && shouldSetAccomplishmentCoordinatorId) {
+        // Find the coordinator recipient
+        const coordinatorRecipient = finalRecipients.find(recipientId => {
+          const recipientUser = usersWithGrades.find(u => String(u.user_id) === String(recipientId)) ||
+            coordinators.find(u => String(u.user_id) === String(recipientId));
+          return recipientUser?.role?.toLowerCase() === 'coordinator';
+        });
+        
+        if (coordinatorRecipient) {
+          base.coordinator_user_id = Number(coordinatorRecipient);
+          console.log("✅ [SetReport] Setting coordinator_user_id for Accomplishment Report:", {
+            coordinator_user_id: base.coordinator_user_id,
+            coordinatorRecipient
+          });
+        }
       }
 
       let endpoint = "";
@@ -1869,6 +1882,16 @@ function SetReport() {
           ...base,
           title: fallbackTitle,
         };
+        
+        // For principal assigning to coordinator: ensure parent_report_assignment_id is null (it's the parent)
+        if (isPrincipal && base.coordinator_user_id) {
+          body.parent_report_assignment_id = null;
+          console.log("✅ [SetReport] Principal creating parent assignment for coordinator:", {
+            coordinator_user_id: base.coordinator_user_id,
+            parent_report_assignment_id: null,
+            is_given: base.is_given
+          });
+        }
       } else if (reportType === "laempl") {
         // Check if this is LAEMPL & MPS with subject selection
         const isLAEMPLMPS = selectedSubCategory === "3"; // LAEMPL & MPS sub-category ID
@@ -2295,25 +2318,33 @@ function SetReport() {
                       </div>
 
                       <div className="teacher-menu-content">
-                        {selectableUsers.map((u) => {
-                          // Compare as strings to handle type mismatch
-                          const checked = selectedTeachers.includes(String(u.user_id));
-                          return (
-                            <div
-                              key={u.user_id}
-                              onClick={() => toggleTeacher(String(u.user_id))}
-                              className={`teacher-menu-item ${checked ? 'selected' : ''}`}
-                            >
-                              <input
-                                className="menu-checkbox"
-                                type="checkbox"
-                                readOnly
-                                checked={checked}
-                              />
-                              <span>{u.name}</span>
-                            </div>
-                          );
-                        })}
+                        {selectableUsers.length === 0 ? (
+                          <div style={{ padding: '1rem', textAlign: 'center', color: '#666' }}>
+                            No users available. {console.log('⚠️ [DEBUG] selectableUsers is empty:', { users, coordinators, usersWithGrades, isPrincipal, selectedGradeLevel, selectedSubCategory })}
+                            <br />
+                            <small>Check browser console for details.</small>
+                          </div>
+                        ) : (
+                          selectableUsers.map((u) => {
+                            // Compare as strings to handle type mismatch
+                            const checked = selectedTeachers.includes(String(u.user_id));
+                            return (
+                              <div
+                                key={u.user_id}
+                                onClick={() => toggleTeacher(String(u.user_id))}
+                                className={`teacher-menu-item ${checked ? 'selected' : ''}`}
+                              >
+                                <input
+                                  className="menu-checkbox"
+                                  type="checkbox"
+                                  readOnly
+                                  checked={checked}
+                                />
+                                <span>{u.name}</span>
+                              </div>
+                            );
+                          })
+                        )}
                       </div>
                     </div>
                   )}
@@ -2508,10 +2539,18 @@ function SetReport() {
               <div className="form-actions">
                 <button type="submit" disabled={submitting}>
                   {(() => {
-                    // Determine button text based on coordinator's own assignment for LAEMPL and Accomplishment Report
+                    // Determine button text based on context
                     const isCoordinatorOwnAssignment = isCoordinator && !isFromPrincipalAssignment && !isPrincipalReportParam;
                     const reportType = detectReportType(subCategories, selectedSubCategory, selectedCategory);
                     const shouldShowSave = isCoordinatorOwnAssignment && (reportType === "accomplishment" || reportType === "laempl");
+                    
+                    // If editing a principal's report and it's an Edit action, show "Edit"
+                    if (isEditingPrincipalReport && isEditAction && editingReportId) {
+                      if (submitting) {
+                        return "Updating...";
+                      }
+                      return "Edit";
+                    }
                     
                     if (submitting) {
                       return shouldShowSave ? "Saving..." : "Setting...";

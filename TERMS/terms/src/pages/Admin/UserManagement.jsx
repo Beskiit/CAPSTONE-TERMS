@@ -431,6 +431,11 @@ function UserManagement() {
       coordinatorUserId
     } = options || {};
 
+    console.log('[UserManagement] updateAccomplishmentCoordinatorAssignment called:', {
+      coordinatorUserId,
+      activeYearQuarter
+    });
+
     if (!coordinatorUserId || !activeYearQuarter) {
       console.warn("[UserManagement] Cannot create Accomplishment Report assignment: missing coordinatorUserId or activeYearQuarter");
       return null;
@@ -438,16 +443,19 @@ function UserManagement() {
 
     try {
       // Check if an Accomplishment Report assignment already exists for this coordinator
+      console.log('[UserManagement] Checking for existing Accomplishment Report assignments...');
       const checkResponse = await fetch(`${API_BASE}/reports`, {
         credentials: "include"
       });
 
       if (!checkResponse.ok) {
-        console.warn("[UserManagement] Failed to check existing assignments");
+        console.warn("[UserManagement] Failed to check existing assignments:", checkResponse.status, checkResponse.statusText);
         return null;
       }
 
       const allAssignments = await checkResponse.json();
+      console.log('[UserManagement] All assignments fetched:', allAssignments.length);
+      
       const existingAssignment = allAssignments.find(assignment => 
         Number(assignment.category_id) === 0 &&
         assignment.coordinator_user_id != null &&
@@ -457,9 +465,12 @@ function UserManagement() {
       );
 
       if (existingAssignment) {
+        console.log('[UserManagement] Existing Accomplishment Report assignment found:', existingAssignment);
         // Assignment already exists
         return existingAssignment;
       }
+
+      console.log('[UserManagement] No existing assignment found, creating new one...');
 
       // Create a new Accomplishment Report assignment with coordinator_user_id
       // NOTE: Do NOT include coordinator in assignees - they should only be the coordinator,
@@ -489,6 +500,8 @@ function UserManagement() {
         number_of_submission: null
       };
 
+      console.log('[UserManagement] Creating Accomplishment Report assignment with payload:', payload);
+
       const response = await fetch(`${API_BASE}/reports/accomplishment/give`, {
         method: "POST",
         credentials: "include",
@@ -498,12 +511,18 @@ function UserManagement() {
         body: JSON.stringify(payload),
       });
 
+      console.log('[UserManagement] Response status:', response.status, response.statusText);
+
       const responseData = await response.json().catch(() => ({}));
+      console.log('[UserManagement] Response data:', responseData);
 
       if (!response.ok) {
-        throw new Error(responseData.error || responseData.message || "Failed to create Accomplishment Report assignment.");
+        const errorMsg = responseData.error || responseData.message || "Failed to create Accomplishment Report assignment.";
+        console.error('[UserManagement] Failed to create assignment:', errorMsg);
+        throw new Error(errorMsg);
       }
 
+      console.log('[UserManagement] Accomplishment Report assignment created successfully:', responseData.report_assignment || responseData);
       return responseData.report_assignment || responseData;
     } catch (err) {
       console.error("[UserManagement] Error creating Accomplishment Report assignment:", err);
@@ -622,6 +641,14 @@ function UserManagement() {
     const isAccomplishmentCoordinatorSelection =
       selectedUser?.role === 'coordinator' &&
       String(assignmentDetails.category) === '0';
+    
+    console.log('[UserManagement] Assignment check:', {
+      isLaemplCoordinatorSelection,
+      isAccomplishmentCoordinatorSelection,
+      userRole: selectedUser?.role,
+      category: assignmentDetails.category,
+      subCategory: assignmentDetails.subCategory
+    });
 
     if (isLaemplCoordinatorSelection) {
       if (!assignmentDetails.laemplGradeLevelId) {
@@ -681,9 +708,17 @@ function UserManagement() {
         console.log(`[UserManagement] Coordinator "${selectedUser.name}" (ID: ${selectedUser.user_id}) assigned/reassigned. Coordinator Grade Level (${gradeLevelSource}): ${gradeLevelDisplay} (grade_level_id: ${gradeLevelId || 'null'})`);
       } else if (isAccomplishmentCoordinatorSelection) {
         // Create Accomplishment Report assignment with coordinator_user_id
-        accomplishmentAssignment = await updateAccomplishmentCoordinatorAssignment({
-          coordinatorUserId: selectedUser.user_id
-        });
+        console.log('[UserManagement] Creating Accomplishment Report assignment for coordinator:', selectedUser.user_id);
+        try {
+          accomplishmentAssignment = await updateAccomplishmentCoordinatorAssignment({
+            coordinatorUserId: selectedUser.user_id
+          });
+          console.log('[UserManagement] Accomplishment Report assignment created:', accomplishmentAssignment);
+        } catch (err) {
+          console.error('[UserManagement] Failed to create Accomplishment Report assignment:', err);
+          toast.error('Failed to create Accomplishment Report assignment: ' + err.message);
+          return; // Don't proceed with user assignment if assignment creation fails
+        }
       }
 
       const response = await fetch(`${API_BASE}/admin/assign-user`, {

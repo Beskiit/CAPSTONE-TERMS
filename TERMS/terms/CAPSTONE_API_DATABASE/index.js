@@ -1485,8 +1485,15 @@ app.get("/submissions/user/:userId", async (req, res) => {
 // Get teachers from the same school as the requesting user
 app.get("/users/teachers", async (req, res) => {
   try {
+    console.log('🔍 [DEBUG] /users/teachers called:', {
+      isAuthenticated: req.isAuthenticated?.(),
+      userId: req.user?.user_id,
+      user: req.user
+    });
+    
     // Check authentication
     if (!req.isAuthenticated?.()) {
+      console.log('❌ [DEBUG] Not authenticated for /users/teachers');
       return res.status(401).json({ error: "Not authenticated" });
     }
 
@@ -1499,13 +1506,18 @@ app.get("/users/teachers", async (req, res) => {
       });
     });
 
+    console.log('🔍 [DEBUG] User query result:', userResult);
+
     if (userResult.length === 0) {
+      console.log('❌ [DEBUG] User not found in database');
       return res.status(404).json({ error: "User not found" });
     }
 
     const requesterSchoolId = userResult[0].school_id;
+    console.log('🔍 [DEBUG] Requester school_id:', requesterSchoolId);
     
     if (!requesterSchoolId) {
+      console.log('⚠️ [DEBUG] No school_id assigned to user, returning empty list');
       return res.json([]); // No school assigned, return empty list
     }
 
@@ -1525,9 +1537,10 @@ app.get("/users/teachers", async (req, res) => {
       });
     });
     
+    console.log('✅ [DEBUG] Teachers found:', teachers.length, teachers);
     res.json(teachers);
   } catch (error) {
-    console.error("Error fetching teachers:", error);
+    console.error("❌ [DEBUG] Error fetching teachers:", error);
     res.status(500).json({ error: "Failed to fetch teachers", details: error.message });
   }
 });
@@ -1535,8 +1548,15 @@ app.get("/users/teachers", async (req, res) => {
 // Get coordinators from the same school as the requesting user
 app.get("/users/coordinators", async (req, res) => {
   try {
+    console.log('🔍 [DEBUG] /users/coordinators called:', {
+      isAuthenticated: req.isAuthenticated?.(),
+      userId: req.user?.user_id,
+      user: req.user
+    });
+    
     // Check authentication
     if (!req.isAuthenticated?.()) {
+      console.log('❌ [DEBUG] Not authenticated for /users/coordinators');
       return res.status(401).json({ error: "Not authenticated" });
     }
 
@@ -1549,13 +1569,18 @@ app.get("/users/coordinators", async (req, res) => {
       });
     });
 
+    console.log('🔍 [DEBUG] User query result:', userResult);
+
     if (userResult.length === 0) {
+      console.log('❌ [DEBUG] User not found in database');
       return res.status(404).json({ error: "User not found" });
     }
 
     const requesterSchoolId = userResult[0].school_id;
+    console.log('🔍 [DEBUG] Requester school_id:', requesterSchoolId);
     
     if (!requesterSchoolId) {
+      console.log('⚠️ [DEBUG] No school_id assigned to user, returning empty list');
       return res.json([]); // No school assigned, return empty list
     }
 
@@ -1575,9 +1600,10 @@ app.get("/users/coordinators", async (req, res) => {
       });
     });
     
+    console.log('✅ [DEBUG] Coordinators found:', coordinators.length, coordinators);
     res.json(coordinators);
   } catch (error) {
-    console.error("Error fetching coordinators:", error);
+    console.error("❌ [DEBUG] Error fetching coordinators:", error);
     res.status(500).json({ error: "Failed to fetch coordinators", details: error.message });
   }
 });
