@@ -131,7 +131,12 @@ app.use(
     secret: process.env.SESSION_SECRET || "secret",
     resave: false,
     saveUninitialized: false,
-    // cookie: { secure: IS_PROD, sameSite: "lax" }, // enable when HTTPS is on
+    cookie: { 
+      secure: IS_PROD, // true in production (HTTPS), false in development
+      sameSite: IS_PROD ? "none" : "lax", // "none" for cross-site in production, "lax" for same-site in dev
+      httpOnly: true,
+      maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    },
   })
 );
 
@@ -3124,9 +3129,20 @@ app.get(
 );
 
 app.get("/auth/me", (req, res) => {
+  console.log('🔍 [DEBUG] /auth/me called:', {
+    isAuthenticated: req.isAuthenticated?.(),
+    hasUser: !!req.user,
+    user: req.user,
+    sessionId: req.sessionID,
+    cookies: req.headers.cookie
+  });
+  
   if (!req.isAuthenticated || !req.isAuthenticated()) {
+    console.log('❌ [DEBUG] Not authenticated - returning 401');
     return res.status(401).json({ error: "Not authenticated" });
   }
+  
+  console.log('✅ [DEBUG] Authenticated user:', req.user);
   res.json(req.user);
 });
 
