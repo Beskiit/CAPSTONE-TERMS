@@ -1172,6 +1172,33 @@ function SetReport() {
       }
 
       // For non-coordinator-own assignments, use normal update flow
+      // BUT: If this is a parent assignment from principal (has coordinator_user_id), 
+      // we need to find and update the CHILD assignment instead
+      let assignmentIdToUpdate = editingReportId;
+      
+      // Check if this is a parent assignment (has coordinator_user_id but no parent_report_assignment_id)
+      // If so, find the child assignment and update that instead
+      if (isFromPrincipalAssignment && originalReportData?.coordinator_user_id != null && 
+          originalReportData?.parent_report_assignment_id == null && isCoordinator) {
+        console.log('🔄 [DEBUG] This is a parent assignment from principal, looking for child assignment...');
+        try {
+          const findChildRes = await fetch(`${API_BASE}/reports/assignment/${editingReportId}/child`, {
+            credentials: "include"
+          });
+          if (findChildRes.ok) {
+            const childData = await findChildRes.json();
+            if (childData?.report_assignment_id) {
+              assignmentIdToUpdate = childData.report_assignment_id;
+              console.log('🔄 [DEBUG] Found child assignment, will update child instead of parent:', assignmentIdToUpdate);
+            } else {
+              console.log('🔄 [DEBUG] No child assignment found, will update parent:', assignmentIdToUpdate);
+            }
+          }
+        } catch (err) {
+          console.warn('🔄 [DEBUG] Failed to find child assignment, will update parent:', err);
+        }
+      }
+      
       const updateData = {
         title: title || (reportType === "accomplishment" ? "Accomplishment Report" : 
                         reportType === "laempl" ? "LAEMPL Report" : 
@@ -1259,11 +1286,18 @@ function SetReport() {
         updateData.coordinator_user_id = Number(selectedCoordinatorId);
       }
 
-      const res = await fetch(`${API_BASE}/reports/assignment/${editingReportId}`, {
+      const res = await fetch(`${API_BASE}/reports/assignment/${assignmentIdToUpdate}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify(updateData)
+      });
+      
+      console.log('🔄 [DEBUG] Updating assignment:', {
+        originalEditingReportId: editingReportId,
+        assignmentIdToUpdate,
+        isParent: originalReportData?.coordinator_user_id != null && originalReportData?.parent_report_assignment_id == null,
+        isChild: assignmentIdToUpdate !== editingReportId
       });
 
       if (!res.ok) {
