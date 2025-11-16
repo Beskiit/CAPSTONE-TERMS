@@ -876,39 +876,50 @@ function SetReport() {
       }
       
       // Fetch and set assignees from submissions
-      try {
-        console.log('[SetReport] Fetching assignees for report:', reportId);
-        const subRes = await fetch(`${API_BASE}/submissions/by-assignment/${reportId}`, {
-          credentials: "include"
-        });
-        
-        console.log('[SetReport] Submissions response status:', subRes.status);
-        
-        if (subRes.ok) {
-          const submissions = await subRes.json();
-          console.log('[SetReport] Received submissions:', submissions);
+      // BUT: Do NOT inherit assignees when coordinator opens a principal's report
+      // Coordinator should select their own teachers/coordinators to assign to
+      const shouldInheritAssignees = !(isCoordinator && fromPrincipal);
+      
+      if (shouldInheritAssignees) {
+        try {
+          console.log('[SetReport] Fetching assignees for report:', reportId);
+          const subRes = await fetch(`${API_BASE}/submissions/by-assignment/${reportId}`, {
+            credentials: "include"
+          });
           
-          // Get unique submitted_by user IDs (these are the assignees)
-          const assigneeIds = [...new Set(submissions.map(s => s.submitted_by).filter(Boolean))];
-          console.log('[SetReport] Extracted assignee IDs:', assigneeIds);
+          console.log('[SetReport] Submissions response status:', subRes.status);
           
-          if (assigneeIds.length > 0) {
-            // Always use selectedTeachers for the multi-select UI
-            // Convert all assignee IDs to strings for consistency
-            const assigneeIdsAsStrings = assigneeIds.map(id => String(id));
-            console.log('[SetReport] Setting selectedTeachers to:', assigneeIdsAsStrings);
-            setSelectedTeachers(assigneeIdsAsStrings);
-            setSelectedTeacher(""); // Clear single selection since we're using multi-select
-            console.log('[SetReport] Successfully loaded assignees:', assigneeIds);
+          if (subRes.ok) {
+            const submissions = await subRes.json();
+            console.log('[SetReport] Received submissions:', submissions);
+            
+            // Get unique submitted_by user IDs (these are the assignees)
+            const assigneeIds = [...new Set(submissions.map(s => s.submitted_by).filter(Boolean))];
+            console.log('[SetReport] Extracted assignee IDs:', assigneeIds);
+            
+            if (assigneeIds.length > 0) {
+              // Always use selectedTeachers for the multi-select UI
+              // Convert all assignee IDs to strings for consistency
+              const assigneeIdsAsStrings = assigneeIds.map(id => String(id));
+              console.log('[SetReport] Setting selectedTeachers to:', assigneeIdsAsStrings);
+              setSelectedTeachers(assigneeIdsAsStrings);
+              setSelectedTeacher(""); // Clear single selection since we're using multi-select
+              console.log('[SetReport] Successfully loaded assignees:', assigneeIds);
+            } else {
+              console.warn('[SetReport] No assignees found in submissions');
+            }
           } else {
-            console.warn('[SetReport] No assignees found in submissions');
+            const errorText = await subRes.text().catch(() => 'Unknown error');
+            console.error('[SetReport] Failed to fetch assignees. Status:', subRes.status, 'Error:', errorText);
           }
-        } else {
-          const errorText = await subRes.text().catch(() => 'Unknown error');
-          console.error('[SetReport] Failed to fetch assignees. Status:', subRes.status, 'Error:', errorText);
+        } catch (err) {
+          console.error('[SetReport] Error fetching assignees:', err);
         }
-      } catch (err) {
-        console.error('[SetReport] Error fetching assignees:', err);
+      } else {
+        console.log('[SetReport] Skipping assignee inheritance - coordinator opening principal report, should select own teachers/coordinators');
+        // Clear any existing selections
+        setSelectedTeachers([]);
+        setSelectedTeacher("");
       }
       
       // Extract subject from title for LAEMPL & MPS reports (format: "Title - SubjectName")
