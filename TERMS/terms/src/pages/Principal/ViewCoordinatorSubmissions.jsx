@@ -23,6 +23,16 @@ const DEFAULT_COLS = [
   { key: "makabasa", label: "MAKABASA (15 - 25 points)" },
 ];
 
+const COLUMN_SYNONYMS = {
+  hs: ["hs", "highest_score"],
+  ls: ["ls", "lowest_score"],
+};
+
+const NORMALIZED_DUPLICATE_KEYS = new Set(["highestscore", "lowestscore"]);
+
+const normalizeKey = (key = "") =>
+  key.toString().toLowerCase().replace(/[^a-z0-9]/g, "");
+
 const DEFAULT_COLS_MPS = [
   { key: "m",      label: "Male" },
   { key: "f",      label: "Female" },
@@ -214,6 +224,15 @@ function ViewCoordinatorSubmissions() {
     for (const key of fallbackKeys) {
       if (row[key] !== undefined && row[key] !== null && row[key] !== "") {
         return row[key];
+      }
+    }
+    const normalizedKey = (col.key || "").toLowerCase();
+    const synonymKeys = COLUMN_SYNONYMS[normalizedKey];
+    if (synonymKeys) {
+      for (const key of synonymKeys) {
+        if (row[key] !== undefined && row[key] !== null && row[key] !== "") {
+          return row[key];
+        }
       }
     }
     return "";
@@ -511,19 +530,19 @@ function ViewCoordinatorSubmissions() {
   const extractColumns = useCallback((rows, submission = null, fields = null) => {
     // Always include required standard columns in the correct order
     const requiredColumns = [
-      { key: "m", label: "No. of Male" },
-      { key: "f", label: "No. of Female" },
-      { key: "no_of_cases", label: "No. of Cases" },
-      { key: "no_of_items", label: "No. of Items" },
-      { key: "total_score", label: "Total Score" },
-      { key: "hs", label: "Highest Score" },
-      { key: "ls", label: "Lowest Score" },
-      { key: "male_passed", label: "Number of Male Learners who Passed (MPL)" },
-      { key: "male_mpl_percent", label: "% MPL (MALE)" },
-      { key: "female_passed", label: "Number of Female who passed(MPL)" },
-      { key: "female_mpl_percent", label: "% MPL(FEMALE)" },
-      { key: "total_passed", label: "Number of Learners who Passed(MPL)" },
-      { key: "total_mpl_percent", label: "% MPL(TOTAL)" },
+      { key: "m", label: "No. of Male", originalKey: "m" },
+      { key: "f", label: "No. of Female", originalKey: "f" },
+      { key: "no_of_cases", label: "No. of Cases", originalKey: "no_of_cases" },
+      { key: "no_of_items", label: "No. of Items", originalKey: "no_of_items" },
+      { key: "total_score", label: "Total Score", originalKey: "total_score" },
+      { key: "hs", label: "Highest Score", originalKey: "highest_score" },
+      { key: "ls", label: "Lowest Score", originalKey: "lowest_score" },
+      { key: "male_passed", label: "Number of Male Learners who Passed (MPL)", originalKey: "male_passed" },
+      { key: "male_mpl_percent", label: "% MPL (MALE)", originalKey: "male_mpl_percent" },
+      { key: "female_passed", label: "Number of Female who passed(MPL)", originalKey: "female_passed" },
+      { key: "female_mpl_percent", label: "% MPL(FEMALE)", originalKey: "female_mpl_percent" },
+      { key: "total_passed", label: "Number of Learners who Passed(MPL)", originalKey: "total_passed" },
+      { key: "total_mpl_percent", label: "% MPL(TOTAL)", originalKey: "total_mpl_percent" },
     ];
     
     if (!rows || rows.length === 0) {
@@ -532,52 +551,53 @@ function ViewCoordinatorSubmissions() {
     }
     
     const firstRow = rows[0];
-    const dataKeys = Object.keys(firstRow).filter(key => key !== 'trait');
-    
-    // Extract columns from actual data, but ensure required columns are always included
-    const dataColsMap = new Map();
-    dataKeys.forEach(key => {
-      dataColsMap.set(key, {
-        key: key.toLowerCase().replace(/[^a-z0-9]/g, ''),
-        originalKey: key,
-        label: getColumnLabel(key, key)
-      });
+    const dataKeys = Object.keys(firstRow).filter((key) => {
+      if (key === "trait") return false;
+      if (key.startsWith("subject_")) return false;
+      const normalized = normalizeKey(key);
+      return !NORMALIZED_DUPLICATE_KEYS.has(normalized);
     });
     
-    // Start with required columns, using data if available, otherwise use defaults
-    const cols = [];
-    const processedKeys = new Set();
+    const dataCols = dataKeys.map((key) => {
+      const normalizedKey = normalizeKey(key);
+      return {
+        key,
+        label: getColumnLabel(key, key),
+        originalKey: key,
+        normalizedKey,
+      };
+    });
     
-    // Add required columns first in the correct order
-    requiredColumns.forEach(reqCol => {
-      const normalizedReqKey = reqCol.key.toLowerCase().replace(/[^a-z0-9]/g, '');
-      // Check if this column exists in data (by normalized key)
-      const dataCol = Array.from(dataColsMap.entries()).find(([key, col]) => {
-        const normalizedDataKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
-        return normalizedDataKey === normalizedReqKey;
-      });
+    const cols = [];
+    const processedNormalizedKeys = new Set();
+    
+    requiredColumns.forEach((reqCol) => {
+      const normalizedReqKey = normalizeKey(reqCol.key);
+      const matchingDataCol = dataCols.find(
+        (col) => col.normalizedKey === normalizedReqKey
+      );
       
-      if (dataCol) {
-        cols.push(dataCol[1]);
-        processedKeys.add(dataCol[0]);
+      if (matchingDataCol) {
+        cols.push({
+          ...reqCol,
+          originalKey: matchingDataCol.originalKey,
+        });
       } else {
         cols.push(reqCol);
       }
-      processedKeys.add(reqCol.key);
+      processedNormalizedKeys.add(normalizedReqKey);
     });
     
-    // Add any remaining columns from data that aren't already processed (excluding subject columns)
-    dataKeys.forEach(key => {
-      // Skip subject columns
-      if (key.startsWith('subject_')) {
-        return;
-      }
-      if (!processedKeys.has(key)) {
-        cols.push(dataColsMap.get(key));
-      }
+    dataCols.forEach((col) => {
+      if (processedNormalizedKeys.has(col.normalizedKey)) return;
+      cols.push({
+        key: col.originalKey,
+        label: col.label,
+        originalKey: col.originalKey,
+      });
+      processedNormalizedKeys.add(col.normalizedKey);
     });
     
-    // Columns are already in the correct order from requiredColumns, so return them directly
     return cols;
   }, [getColumnLabel]);
 
