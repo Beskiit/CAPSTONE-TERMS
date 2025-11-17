@@ -60,8 +60,6 @@ export const getStatusCountsByUserInRange = (req, res) => {
 export const getStatusCountsByUser = (req, res) => {
   const { id } = req.params;
 
-  // Check if this is a coordinator by looking at the user's role
-  // For now, we'll use a different approach - count reports assigned by this user
   const sql = `
     SELECT
       SUM(CASE WHEN s.status = 1 THEN 1 ELSE 0 END) AS pending,
@@ -70,8 +68,7 @@ export const getStatusCountsByUser = (req, res) => {
       SUM(CASE WHEN s.status = 4 THEN 1 ELSE 0 END) AS rejected,
       COUNT(*) AS total
     FROM submission s
-    JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
-    WHERE ra.given_by = ?
+    WHERE s.submitted_by = ?
   `;
 
   db.query(sql, [id], (err, rows) => {

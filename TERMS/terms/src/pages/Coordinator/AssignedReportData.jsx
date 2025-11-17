@@ -3,7 +3,7 @@ import Sidebar from "../../components/shared/SidebarCoordinator";
 import "./AssignedReport.css";
 import "../Teacher/ViewSubmission.css";
 import SidebarPrincipal from "../../components/shared/SidebarPrincipal";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Header from "../../components/shared/Header";
 import Breadcrumb from "../../components/Breadcrumb";
@@ -12,8 +12,26 @@ import toast from "react-hot-toast";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle, ImageRun } from "docx";
 import { saveAs } from "file-saver";
 import { getImageUrl } from "../../utils/imageUtils";
+import * as XLSX from "xlsx";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
+const FIXED_COL_WIDTH = 25;
+const applySheetSizing = (worksheet, data) => {
+    const maxCols = data.reduce((max, row) => Math.max(max, row.length), 0);
+    worksheet["!cols"] = Array.from({ length: maxCols }, () => ({
+        wch: FIXED_COL_WIDTH,
+    }));
+    worksheet["!rows"] = data.map((row) => {
+        const longest = row.reduce((max, cell) => {
+            if (cell == null) return max;
+            return Math.max(max, cell.toString().length);
+        }, 0);
+        const lines = Math.max(1, Math.ceil(longest / FIXED_COL_WIDTH));
+        return { hpt: Math.min(18 * lines, 120) };
+    });
+};
+
+const DEFAULT_LAEMPL_TRAITS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
 
 function AssignedReportData() {
     const navigate = useNavigate();
@@ -44,6 +62,198 @@ function AssignedReportData() {
     
     // Subject names for dynamic column labels
     const [subjectNames, setSubjectNames] = useState({});
+    const getMpsRows = (fields = {}) => {
+        if (Array.isArray(fields.mps_rows)) return fields.mps_rows;
+        if (Array.isArray(fields.mpsRows)) return fields.mpsRows;
+        return null;
+    };
+
+    const getMpsTotals = (fields = {}) => {
+        return fields.mps_totals || fields.mpsTotals || null;
+    };
+
+    const coordinatorSubmissionTypes = new Set(["LAEMPL_COORDINATOR", "LAEMPL_MPS_COORDINATOR"]);
+
+const cleanNumber = (value) => {
+    if (value == null) return null;
+    const num = Number(value);
+    return Number.isNaN(num) ? null : num;
+};
+
+const isCoordinatorReport = (submission, assignmentInfo, fields = {}) => {
+    const submissionType = (fields.type || "").toUpperCase();
+    if (coordinatorSubmissionTypes.has(submissionType)) return true;
+
+    const coordinatorId = cleanNumber(submission?.coordinator_user_id);
+    const submittedId = cleanNumber(submission?.submitted_by);
+    const assignmentCoordinatorId = cleanNumber(assignmentInfo?.coordinator_user_id);
+
+    if (coordinatorId != null && submittedId != null && coordinatorId === submittedId) return true;
+    if (assignmentCoordinatorId != null && submittedId != null && assignmentCoordinatorId === submittedId) return true;
+    return false;
+};
+
+const extractCoordinatorSectionNames = (fields = {}, fallbackSections = []) => {
+    const names = new Set();
+    const addName = (value) => {
+        if (!value) return;
+        if (typeof value === "string" && value.trim()) {
+            names.add(value.trim());
+        } else if (value && typeof value === "object") {
+            const derived = value.section_name || value.section || value.name;
+            if (derived && typeof derived === "string") {
+                names.add(derived.trim());
+            }
+        }
+    };
+
+    const tryArrays = [
+        fields.sections,
+        fields.section_names,
+        fields.sectionNames,
+        fields.section_list,
+        fields.sectionList,
+        fields.sectionsCovered,
+        fields.sections_covered,
+    ];
+    tryArrays.forEach(arr => {
+        if (Array.isArray(arr)) {
+            arr.forEach(addName);
+        }
+    });
+
+    const tryObjects = [
+        fields.section_map,
+        fields.sectionMap,
+        fields.sections_by_grade,
+    ];
+    tryObjects.forEach(obj => {
+        if (obj && typeof obj === "object") {
+            Object.values(obj).forEach(addName);
+        }
+    });
+
+    if (fields.section_name) addName(fields.section_name);
+    if (fields.section) addName(fields.section);
+
+    if (Array.isArray(fallbackSections) && fallbackSections.length > 0) {
+        fallbackSections.forEach(sec => addName(sec));
+    }
+
+    return Array.from(names).filter(Boolean);
+};
+
+const collectCoordinatorSectionsFromFields = (fields = {}, allSections = []) => {
+    const names = new Set();
+    const addName = (value) => {
+        if (!value) return;
+        if (typeof value === "string" && value.trim()) {
+            names.add(value.trim());
+        } else if (value && typeof value === "object") {
+            const derived = value.section_name || value.section || value.name;
+            if (derived && typeof derived === "string") {
+                names.add(derived.trim());
+            }
+        }
+    };
+
+    const tryArrays = [
+        fields.sections,
+        fields.section_names,
+        fields.sectionNames,
+        fields.section_list,
+        fields.sectionList,
+        fields.sectionsCovered,
+        fields.sections_covered,
+    ];
+    tryArrays.forEach(arr => {
+        if (Array.isArray(arr)) {
+            arr.forEach(addName);
+        }
+    });
+
+    const tryObjects = [
+        fields.section_map,
+        fields.sectionMap,
+        fields.sections_by_grade,
+    ];
+    tryObjects.forEach(obj => {
+        if (obj && typeof obj === "object") {
+            Object.values(obj).forEach(addName);
+        }
+    });
+
+    if (fields.section_name) addName(fields.section_name);
+    if (fields.section) addName(fields.section);
+
+    if (Array.isArray(allSections) && allSections.length > 0) {
+        allSections.forEach(sec => addName(sec));
+    }
+
+    return Array.from(names).filter(Boolean);
+};
+
+    const sectionLabel = useMemo(() => {
+        if (!submission) return "Not specified";
+        const fields = submission.fields || {};
+        const gradeLevel = fields.grade || submission.grade_level || assignmentInfo?.grade_level || assignmentInfo?.grade;
+        const coordinatorView = isCoordinatorReport(submission, assignmentInfo, fields);
+
+        const collectSectionNames = () => {
+            const names = new Set();
+            const sectionsField = fields.sections;
+            if (Array.isArray(sectionsField)) {
+                sectionsField.forEach((sec) => {
+                    const name = sec?.section_name || sec?.section || sec;
+                    if (name) names.add(name);
+                });
+            } else if (sectionsField && typeof sectionsField === "object") {
+                Object.values(sectionsField).forEach((name) => {
+                    if (typeof name === "string" && name.trim()) names.add(name.trim());
+                });
+            }
+
+            if (Array.isArray(fields.rows)) {
+                fields.rows.forEach((row) => {
+                    const trait = row?.trait;
+                    if (trait && !DEFAULT_LAEMPL_TRAITS.includes(trait)) {
+                        names.add(trait);
+                    }
+                });
+            }
+
+            if (Array.isArray(allSections) && allSections.length > 0) {
+                allSections.forEach((sec) => {
+                    const name = sec?.section_name || sec?.section;
+                    if (name) names.add(name);
+                });
+            }
+
+            return Array.from(names).filter(Boolean);
+        };
+
+        if (coordinatorView) {
+            const coordinatorSections = collectSectionNames();
+            const sectionText = coordinatorSections.length ? coordinatorSections.join(", ") : "All Sections";
+            return gradeLevel ? `Grade ${gradeLevel} - ${sectionText}` : sectionText;
+        }
+
+        const teacherSection =
+            fields.section_name ||
+            fields.section ||
+            fields.teacher_section ||
+            fields.teacher_section_name ||
+            submission.section_name ||
+            submission.section ||
+            submission.sectionName;
+
+        if (teacherSection) {
+            return gradeLevel ? `Grade ${gradeLevel} - ${teacherSection}` : teacherSection;
+        }
+
+        return gradeLevel ? `Grade ${gradeLevel}` : "Not specified";
+    }, [submission, allSections, assignmentInfo]);
+
     
     // Debug assignmentInfo changes
     useEffect(() => {
@@ -71,19 +281,29 @@ function AssignedReportData() {
     // Helper function to get column labels (from ForApprovalData)
     const getColumnLabel = (key, subjectNames = {}) => {
         const labelMap = {
-            'm': 'M',
-            'f': 'F',
-            'gmrc': 'GMRC (15 - 25 points)',
-            'math': 'Mathematics (15 - 25 points)',
-            'lang': 'Language (15 - 25 points)',
-            'read': 'Reading and Literacy (15 - 25 points)',
-            'makabasa': 'MAKABASA (15 - 25 points)',
-            'english': 'English (15 - 25 points)',
-            'araling_panlipunan': 'Araling Panlipunan (15 - 25 points)',
-            'total_score': 'Total Score',
-            'hs': 'HS',
-            'ls': 'LS',
-            'total_items': 'Total no. of Items'
+            m: "No. of Male",
+            f: "No. of Female",
+            no_of_cases: "No. of Cases",
+            no_of_items: "No. of Items",
+            total_score: "Total Score",
+            highest_score: "Highest Score",
+            lowest_score: "Lowest Score",
+            male_passed: "Number of Male Learners who Passed (MPL)",
+            male_mpl_percent: "% MPL (MALE)",
+            female_passed: "Number of Female who Passed (MPL)",
+            female_mpl_percent: "% MPL (FEMALE)",
+            total_passed: "Number of Learners who Passed (MPL)",
+            total_mpl_percent: "% MPL (TOTAL)",
+            hs: "HS",
+            ls: "LS",
+            total_items: "Total no. of Items",
+            total: "Total no. of Pupils",
+            mean: "Mean",
+            median: "Median",
+            pl: "PL",
+            mps: "MPS",
+            sd: "SD",
+            target: "Target",
         };
         
         // Handle subject IDs (e.g., subject_8, subject_10)
@@ -96,16 +316,22 @@ function AssignedReportData() {
         return labelMap[key] || key.toUpperCase();
     };
     
-    // Combined export function for both LAEMPL and MPS reports
-    const exportBothReportsToCSV = (fields) => {
-        const lines = [];
-        
-        // Export LAEMPL Report
+    const EXCLUDED_SUBJECT_COLS = new Set([
+        "gmrc",
+        "math",
+        "lang",
+        "read",
+        "makabasa",
+        "english",
+        "araling_panlipunan",
+    ]);
+
+    const exportBothReportsToExcel = (fields) => {
+        const workbook = XLSX.utils.book_new();
+
         if (fields.rows && fields.rows.length > 0) {
             const rows = fields.rows;
             const traits = rows.map(row => row.trait).filter(Boolean);
-            
-            // Get dynamic columns from the first row
             let cols = [];
             if (rows.length > 0) {
                 const firstRow = rows[0];
@@ -120,8 +346,7 @@ function AssignedReportData() {
                         };
                     });
             }
-            
-            lines.push("=== LAEMPL REPORT ===");
+
             const laemplHeader = ["Trait", ...cols.map(c => c.label)];
             const laemplRows = traits.map(trait => {
                 const rowData = rows.find(r => r.trait === trait) || {};
@@ -130,46 +355,35 @@ function AssignedReportData() {
                     ...cols.map(c => rowData[c.originalKey || c.key] || "")
                 ];
             });
-            
-            lines.push(laemplHeader.map(x => `"${String(x).replace(/"/g, '""')}"`).join(","));
-            laemplRows.forEach(row => {
-                lines.push(row.map(x => `"${String(x).replace(/"/g, '""')}"`).join(","));
-            });
+            const laemplData = [laemplHeader, ...laemplRows];
+            const laemplSheet = XLSX.utils.aoa_to_sheet(laemplData);
+            applySheetSizing(laemplSheet, laemplData);
+            XLSX.utils.book_append_sheet(workbook, laemplSheet, "LAEMPL");
         }
-        
-        // Export MPS Report if available
-        if (fields.mps_rows && fields.mps_rows.length > 0) {
-            lines.push(""); // Empty line separator
-            lines.push("=== MPS REPORT ===");
-            
-            const mpsRows = fields.mps_rows;
+
+        const mpsRows = getMpsRows(fields);
+        if (mpsRows && mpsRows.length > 0) {
             const mpsTraits = mpsRows.map(row => row.trait).filter(Boolean);
-            const mpsCols = COLS_MPS;
-            
-            const mpsHeader = ["Trait", ...mpsCols.map(c => c.label)];
-            const mpsCsvRows = mpsTraits.map(trait => {
+            const mpsHeader = ["Trait", ...COLS_MPS.map(c => c.label)];
+            const mpsSheetRows = mpsTraits.map(trait => {
                 const rowData = mpsRows.find(r => r.trait === trait) || {};
                 return [
                     trait,
-                    ...mpsCols.map(c => rowData[c.key] || "")
+                    ...COLS_MPS.map(c => rowData[c.key] || "")
                 ];
             });
-            
-            lines.push(mpsHeader.map(x => `"${String(x).replace(/"/g, '""')}"`).join(","));
-            mpsCsvRows.forEach(row => {
-                lines.push(row.map(x => `"${String(x).replace(/"/g, '""')}"`).join(","));
-            });
+            const mpsData = [mpsHeader, ...mpsSheetRows];
+            const mpsSheet = XLSX.utils.aoa_to_sheet(mpsData);
+            applySheetSizing(mpsSheet, mpsData);
+            XLSX.utils.book_append_sheet(workbook, mpsSheet, "MPS");
         }
-        
-        // Create and download the combined CSV
-        const csvContent = lines.join("\n");
-        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `Combined_Reports_${submissionId || 'export'}.csv`;
-        a.click();
-        URL.revokeObjectURL(url);
+
+        if (workbook.SheetNames.length === 0) {
+            toast.error("No report data available to export.");
+            return;
+        }
+
+        XLSX.writeFile(workbook, `Combined_Reports_${submissionId || 'export'}.xlsx`);
     };
 
     // Function to fetch assignment details from report_assignment table
@@ -279,6 +493,33 @@ function AssignedReportData() {
             // This will trigger a re-render with updated subject names
         }
     }, [subjectNames]);
+
+    useEffect(() => {
+        const ensureSectionList = async () => {
+            if (!submission) return;
+            const fields = submission.fields || {};
+            const coordinatorView = isCoordinatorReport(submission, assignmentInfo, fields);
+            const hasRows = Array.isArray(fields.rows) && fields.rows.length > 0;
+
+            if (!coordinatorView || hasRows) return;
+            if (allSections.length > 0) return;
+
+            const gradeLevel =
+                fields.grade ||
+                assignmentInfo?.grade_level ||
+                assignmentInfo?.grade ||
+                submission.grade_level;
+
+            if (!gradeLevel) return;
+
+            const sections = await getSectionsForGrade(gradeLevel);
+            if (Array.isArray(sections) && sections.length > 0) {
+                setAllSections(sections);
+            }
+        };
+
+        ensureSectionList();
+    }, [submission, assignmentInfo, allSections.length]);
 
     // Fetch consolidated data for principal view
     const fetchConsolidatedData = async () => {
@@ -468,7 +709,9 @@ function AssignedReportData() {
                             category_name: submissionData.category_name || 'Unknown Category',
                             sub_category_name: submissionData.sub_category_name || 'Unknown Sub-Category',
                             due_date: submissionData.due_date,
-                            to_date: submissionData.to_date
+                            to_date: submissionData.to_date,
+                            grade_level: assignmentDetails?.grade_level || submissionData?.grade || submissionData?.grade_level || assignmentDetails?.grade,
+                            coordinator_user_id: assignmentDetails?.coordinator_user_id ?? submissionData?.coordinator_user_id ?? null
                         });
                     }
                     
@@ -518,7 +761,9 @@ function AssignedReportData() {
                             category_name: submissionData.category_name || 'Unknown Category',
                             sub_category_name: submissionData.sub_category_name || 'Unknown Sub-Category',
                             due_date: submissionData.due_date,
-                            to_date: submissionData.to_date
+                            to_date: submissionData.to_date,
+                            grade_level: assignmentDetails?.grade_level || submissionData?.grade || submissionData?.grade_level || assignmentDetails?.grade,
+                            coordinator_user_id: assignmentDetails?.coordinator_user_id ?? submissionData?.coordinator_user_id ?? null
                         });
                     }
                 }
@@ -860,18 +1105,21 @@ function AssignedReportData() {
         // Determine submission type based on fields structure
         if (fields.type === 'ACCOMPLISHMENT' || fields._answers) {
             return renderAccomplishmentReport(fields);
-        } else if (fields.type === 'LAEMPL' && fields.rows && Array.isArray(fields.rows)) {
+        } else if (fields.type === 'LAEMPL') {
+            const mpsRows = getMpsRows(fields) || [];
             return (
                 <div>
                     {renderLAEMPLReport(fields)}
-                    {fields.mps_rows && fields.mps_totals && (
-                        <div style={{ marginTop: '2rem' }}>
-                            {renderMPSReport({ rows: fields.mps_rows, totals: fields.mps_totals })}
-                        </div>
-                    )}
+                    <div style={{ marginTop: '2rem' }}>
+                        {renderMPSReport({ rows: mpsRows, totals: getMpsTotals(fields) })}
+                    </div>
                 </div>
             );
-        } else if (fields.type === 'MPS' && fields.rows && Array.isArray(fields.rows)) {
+        } else if (fields.type === 'MPS') {
+            const mpsRows = getMpsRows(fields) || fields.rows;
+            if (Array.isArray(mpsRows)) {
+                return renderMPSReport({ rows: mpsRows, totals: getMpsTotals(fields) });
+            }
             return renderMPSReport(fields);
         } else if (fields.rows && Array.isArray(fields.rows)) {
             // Check if it's LAEMPL or MPS based on column structure
@@ -879,18 +1127,17 @@ function AssignedReportData() {
             const hasMPSCols = fields.rows.some(row => row.mps !== undefined || row.mean !== undefined);
             
             if (hasLAEMPLCols) {
+                const mpsRows = getMpsRows(fields) || [];
                 return (
                     <div>
                         {renderLAEMPLReport(fields)}
-                        {fields.mps_rows && fields.mps_totals && (
-                            <div style={{ marginTop: '2rem' }}>
-                                {renderMPSReport({ rows: fields.mps_rows, totals: fields.mps_totals })}
-                            </div>
-                        )}
+                        <div style={{ marginTop: '2rem' }}>
+                            {renderMPSReport({ rows: mpsRows, totals: getMpsTotals(fields) })}
+                        </div>
                     </div>
                 );
             } else if (hasMPSCols) {
-                return renderMPSReport(fields);
+                return renderMPSReport({ rows: fields.rows, totals: getMpsTotals(fields) });
             } else {
                 return renderLAEMPLReport(fields); // Default to LAEMPL
             }
@@ -1111,20 +1358,33 @@ function AssignedReportData() {
 
     const renderLAEMPLReport = (fields) => {
         const rows = fields.rows || [];
+        const coordinatorView = isCoordinatorReport(submission, assignmentInfo, fields);
+        const coordinatorSections = coordinatorView
+            ? extractCoordinatorSectionNames(submission?.fields || {}, allSections)
+            : [];
         
-        // Extract dynamic traits and columns from the actual data (like ForApprovalData)
         const actualTraits = rows.map(row => row.trait).filter(Boolean);
-        const traits = actualTraits.length > 0 ? actualTraits : ["Masipag", "Matulungin", "Masunurin", "Magalang", "Matapat", "Matiyaga"];
+        let traits = actualTraits.length > 0 ? actualTraits : DEFAULT_LAEMPL_TRAITS;
+        
+        if (coordinatorView && coordinatorSections.length > 0) {
+            traits = coordinatorSections;
+        }
         
         // Extract columns from the first row
         let cols = [
-            { key: "m", label: "M" },
-            { key: "f", label: "F" },
-            { key: "gmrc", label: "GMRC (15 - 25 points)" },
-            { key: "math", label: "Mathematics (15 - 25 points)" },
-            { key: "lang", label: "Language (15 - 25 points)" },
-            { key: "read", label: "Reading and Literacy (15 - 25 points)" },
-            { key: "makabasa", label: "MAKABASA (15 - 25 points)" },
+            { key: "m", label: getColumnLabel("m") },
+            { key: "f", label: getColumnLabel("f") },
+            { key: "no_of_cases", label: getColumnLabel("no_of_cases") },
+            { key: "no_of_items", label: getColumnLabel("no_of_items") },
+            { key: "total_score", label: getColumnLabel("total_score") },
+            { key: "highest_score", label: getColumnLabel("highest_score") },
+            { key: "lowest_score", label: getColumnLabel("lowest_score") },
+            { key: "male_passed", label: getColumnLabel("male_passed") },
+            { key: "male_mpl_percent", label: getColumnLabel("male_mpl_percent") },
+            { key: "female_passed", label: getColumnLabel("female_passed") },
+            { key: "female_mpl_percent", label: getColumnLabel("female_mpl_percent") },
+            { key: "total_passed", label: getColumnLabel("total_passed") },
+            { key: "total_mpl_percent", label: getColumnLabel("total_mpl_percent") },
         ];
         
         if (rows.length > 0) {
@@ -1138,7 +1398,8 @@ function AssignedReportData() {
                         originalKey: key,
                         label: getColumnLabel(cleanKey, subjectNames)
                     };
-                });
+                })
+                .filter(col => !EXCLUDED_SUBJECT_COLS.has(col.key));
             if (actualCols.length > 0) {
                 cols = actualCols;
             }
@@ -1175,7 +1436,7 @@ function AssignedReportData() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                         <h4>LAEMPL Report</h4>
                         <button 
-                            onClick={() => exportBothReportsToCSV(fields)}
+                            onClick={() => exportBothReportsToExcel(fields)}
                             style={{
                                 padding: '8px 16px',
                                 backgroundColor: '#007bff',
@@ -1228,7 +1489,7 @@ function AssignedReportData() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                         <h4>LAEMPL Report</h4>
                         <button 
-                            onClick={() => exportBothReportsToCSV(fields)}
+                            onClick={() => exportBothReportsToExcel(fields)}
                             style={{
                                 padding: '8px 16px',
                                 backgroundColor: '#007bff',
@@ -1302,10 +1563,18 @@ function AssignedReportData() {
 
     const renderMPSReport = (fields) => {
         const rows = fields.rows || [];
+        const submissionFields = submission?.fields || {};
+        const coordinatorView = isCoordinatorReport(submission, assignmentInfo, submissionFields);
+        const coordinatorSections = coordinatorView
+            ? extractCoordinatorSectionNames(submissionFields, allSections)
+            : [];
         
-        // Extract dynamic traits and columns from the actual data (like ForApprovalData)
         const actualTraits = rows.map(row => row.trait).filter(Boolean);
-        const traits = actualTraits.length > 0 ? actualTraits : ["Masipag", "Matulungin", "Masunurin", "Magalang", "Matapat", "Matiyaga"];
+        let traits = actualTraits.length > 0 ? actualTraits : DEFAULT_LAEMPL_TRAITS;
+        
+        if (coordinatorView && coordinatorSections.length > 0) {
+            traits = coordinatorSections;
+        }
         
         // Use the state variable for MPS columns
         let cols = COLS_MPS;

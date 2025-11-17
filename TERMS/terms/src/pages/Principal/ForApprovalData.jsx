@@ -11,6 +11,7 @@ import "../Teacher/ViewSubmission.css";
 import Modal from "react-modal";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle, ImageRun } from "docx";
 import { saveAs } from "file-saver";
+import * as XLSX from "xlsx";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
 
@@ -40,6 +41,39 @@ const getSubmissionId = () => {
 };
 
 const SUBMISSION_ID = getSubmissionId();
+const FIXED_COL_WIDTH = 25;
+const applySheetSizing = (worksheet, data) => {
+  const maxCols = data.reduce((max, row) => Math.max(max, row.length), 0);
+  worksheet["!cols"] = Array.from({ length: maxCols }, () => ({
+    wch: FIXED_COL_WIDTH,
+  }));
+  worksheet["!rows"] = data.map((row) => {
+    const longest = row.reduce((max, cell) => {
+      if (cell == null) return max;
+      return Math.max(max, cell.toString().length);
+    }, 0);
+    const lines = Math.max(1, Math.ceil(longest / FIXED_COL_WIDTH));
+    return { hpt: Math.min(18 * lines, 120) };
+  });
+};
+const parseSpreadsheet = async (file) => {
+  const lower = file.name.toLowerCase();
+  if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: "array" });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    return XLSX.utils.sheet_to_json(sheet, { header: 1 });
+  }
+  const text = await file.text();
+  return text
+    .trim()
+    .split(/\r?\n/)
+    .map((l) =>
+      l
+        .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
+        .map((s) => s.replace(/^"|"$/g, "").replace(/""/g, '"'))
+    );
+};
 
 // Helper function to sanitize keys from database (e.g., "English (15 - 25 points)" -> "english")
 const sanitizeKey = (rawKey) => {
@@ -52,19 +86,36 @@ const sanitizeKey = (rawKey) => {
 // Helper function to get column labels
 const getColumnLabel = (key, subjectNames = {}) => {
   const labelMap = {
-    'm': 'M',
-    'f': 'F',
-    'gmrc': 'GMRC (15 - 25 points)',
-    'math': 'Mathematics (15 - 25 points)',
-    'lang': 'Language (15 - 25 points)',
-    'read': 'Reading and Literacy (15 - 25 points)',
-    'makabasa': 'MAKABASA (15 - 25 points)',
-    'english': 'English (15 - 25 points)',
-    'araling_panlipunan': 'Araling Panlipunan (15 - 25 points)',
-    'total_score': 'Total Score',
-    'hs': 'HS',
-    'ls': 'LS',
-    'total_items': 'Total no. of Items'
+    m: "No. of Male",
+    f: "No. of Female",
+    no_of_cases: "No. of Cases",
+    no_of_items: "No. of Items",
+    total_score: "Total Score",
+    highest_score: "Highest Score",
+    lowest_score: "Lowest Score",
+    male_passed: "Number of Male Learners who Passed (MPL)",
+    male_mpl_percent: "% MPL (MALE)",
+    female_passed: "Number of Female who Passed (MPL)",
+    female_mpl_percent: "% MPL (FEMALE)",
+    total_passed: "Number of Learners who Passed (MPL)",
+    total_mpl_percent: "% MPL (TOTAL)",
+    gmrc: "GMRC (15 - 25 points)",
+    math: "Mathematics (15 - 25 points)",
+    lang: "Language (15 - 25 points)",
+    read: "Reading and Literacy (15 - 25 points)",
+    makabasa: "MAKABASA (15 - 25 points)",
+    english: "English (15 - 25 points)",
+    araling_panlipunan: "Araling Panlipunan (15 - 25 points)",
+    hs: "HS",
+    ls: "LS",
+    total_items: "Total no. of Items",
+    total: "Total no. of Pupils",
+    mean: "Mean",
+    median: "Median",
+    pl: "PL",
+    mps: "MPS",
+    sd: "SD",
+    target: "Target",
   };
   
   // Handle subject IDs (e.g., subject_8, subject_10)
@@ -91,18 +142,18 @@ const DEFAULT_COLS = [
 ];
 
 const DEFAULT_COLS_MPS = [
-  { key: "m",      label: "Male" },
-  { key: "f",      label: "Female" },
-  { key: "total",  label: "Total no. of Pupils" },
+  { key: "m", label: "Male" },
+  { key: "f", label: "Female" },
+  { key: "total", label: "Total no. of Pupils" },
   { key: "total_score", label: "Total Score" },
-  { key: "mean",   label: "Mean" },
+  { key: "mean", label: "Mean" },
   { key: "median", label: "Median" },
-  { key: "pl",     label: "PL" },
-  { key: "mps",    label: "MPS" },
-  { key: "sd",     label: "SD" },
+  { key: "pl", label: "PL" },
+  { key: "mps", label: "MPS" },
+  { key: "sd", label: "SD" },
   { key: "target", label: "Target" },
-  { key: "hs",     label: "HS" },
-  { key: "ls",     label: "LS" },
+  { key: "hs", label: "HS" },
+  { key: "ls", label: "LS" },
 ];
 
 const COL_RULES = {
@@ -454,53 +505,35 @@ function ForApprovalData() {
     load();
   }, []);
 
-  // Export / Template / Import / Clear (kept)
-  const toCSV = () => {
+  const exportToExcel = () => {
+    const workbook = XLSX.utils.book_new();
     const header = ["Trait", ...COLS.map((c) => c.label)];
     const rows = TRAITS.map((trait) => [
       trait,
       ...COLS.map((c) => data[trait]?.[c.key] || ""),
     ]);
     const totalRow = ["Total", ...COLS.map((c) => totals[c.key])];
-
-    const lines = [header, ...rows, totalRow]
-      .map((r) => r.map((x) => `"${String(x).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
-
-    const blob = new Blob([lines], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "LAEMPL_Grade1.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+    const sheetData = [header, ...rows, totalRow];
+    const sheet = XLSX.utils.aoa_to_sheet(sheetData);
+    applySheetSizing(sheet, sheetData);
+    XLSX.utils.book_append_sheet(workbook, sheet, "LAEMPL");
+    XLSX.writeFile(workbook, "LAEMPL_Grade1.xlsx");
   };
 
-  const handleGenerateTemplate = () => {
+  const exportTemplateExcel = () => {
+    const workbook = XLSX.utils.book_new();
     const header = ["Trait", ...COLS.map((c) => c.label)];
     const blank = TRAITS.map((trait) => [trait, ...COLS.map(() => "")]);
-    const csv = [header, ...blank].map((r) => r.join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "LAEMPL_Template.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+    const sheetData = [header, ...blank];
+    const sheet = XLSX.utils.aoa_to_sheet(sheetData);
+    applySheetSizing(sheet, sheetData);
+    XLSX.utils.book_append_sheet(workbook, sheet, "LAEMPL_Template");
+    XLSX.writeFile(workbook, "LAEMPL_Template.xlsx");
   };
 
   const onImport = async (file) => {
     try {
-      const text = await file.text();
-      const lines = text
-        .trim()
-        .split(/\r?\n/)
-        .map((l) =>
-          l
-            .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
-            .map((s) => s.replace(/^"|"$/g, "").replace(/""/g, '"'))
-        );
-
+      const lines = await parseSpreadsheet(file);
       const body = lines.slice(1, 1 + TRAITS.length);
       const next = Object.fromEntries(
         TRAITS.map((t) => [
@@ -525,7 +558,7 @@ function ForApprovalData() {
       setErr("");
       setOpenPopup(false);
     } catch (e) {
-      setErr("Failed to import CSV. " + (e?.message || ""));
+      setErr("Failed to import file. " + (e?.message || ""));
     }
   };
 
@@ -804,80 +837,61 @@ function ForApprovalData() {
     }
   };
 
-  // Combined export function for both LAEMPL and MPS reports
-  const exportBothReportsToCSV = (fields) => {
-    const lines = [];
-    
-    // Export LAEMPL Report
+  const exportBothReportsToExcel = (fields) => {
+    const workbook = XLSX.utils.book_new();
+
     if (fields.rows && fields.rows.length > 0) {
       const rows = fields.rows;
-      const traits = rows.map(row => row.trait).filter(Boolean);
-      
-      // Get dynamic columns from the first row
+      const traits = rows.map((row) => row.trait).filter(Boolean);
       let cols = [];
       if (rows.length > 0) {
         const firstRow = rows[0];
         cols = Object.keys(firstRow)
-          .filter(key => key !== 'trait')
-          .map(key => {
-            const cleanKey = key.replace(/[^a-zA-Z0-9]/g, '_');
+          .filter((key) => key !== "trait")
+          .map((key) => {
+            const cleanKey = key.replace(/[^a-zA-Z0-9]/g, "_");
             return {
               key: cleanKey,
               originalKey: key,
-              label: getColumnLabel(cleanKey, subjectNames)
+              label: getColumnLabel(cleanKey, subjectNames),
             };
           });
       }
-      
-      lines.push("=== LAEMPL REPORT ===");
-      const laemplHeader = ["Trait", ...cols.map(c => c.label)];
-      const laemplRows = traits.map(trait => {
-        const rowData = rows.find(r => r.trait === trait) || {};
-        return [
-          trait,
-          ...cols.map(c => rowData[c.originalKey || c.key] || "")
-        ];
+
+      const laemplHeader = ["Trait", ...cols.map((c) => c.label)];
+      const laemplRows = traits.map((trait) => {
+        const rowData = rows.find((r) => r.trait === trait) || {};
+        return [trait, ...cols.map((c) => rowData[c.originalKey || c.key] || "")];
       });
-      
-      lines.push(laemplHeader.map(x => `"${String(x).replace(/"/g, '""')}"`).join(","));
-      laemplRows.forEach(row => {
-        lines.push(row.map(x => `"${String(x).replace(/"/g, '""')}"`).join(","));
-      });
+      const laemplData = [laemplHeader, ...laemplRows];
+      const laemplSheet = XLSX.utils.aoa_to_sheet(laemplData);
+      applySheetSizing(laemplSheet, laemplData);
+      XLSX.utils.book_append_sheet(workbook, laemplSheet, "LAEMPL");
     }
-    
-    // Export MPS Report if available
+
     if (fields.mps_rows && fields.mps_rows.length > 0) {
-      lines.push(""); // Empty line separator
-      lines.push("=== MPS REPORT ===");
-      
       const mpsRows = fields.mps_rows;
-      const mpsTraits = mpsRows.map(row => row.trait).filter(Boolean);
-      const mpsCols = COLS_MPS;
-      
-      const mpsHeader = ["Trait", ...mpsCols.map(c => c.label)];
-      const mpsCsvRows = mpsTraits.map(trait => {
-        const rowData = mpsRows.find(r => r.trait === trait) || {};
-        return [
-          trait,
-          ...mpsCols.map(c => rowData[c.key] || "")
-        ];
+      const mpsTraits = mpsRows.map((row) => row.trait).filter(Boolean);
+      const mpsHeader = ["Trait", ...COLS_MPS.map((c) => c.label)];
+      const mpsSheetRows = mpsTraits.map((trait) => {
+        const rowData = mpsRows.find((r) => r.trait === trait) || {};
+        return [trait, ...COLS_MPS.map((c) => rowData[c.key] || "")];
       });
-      
-      lines.push(mpsHeader.map(x => `"${String(x).replace(/"/g, '""')}"`).join(","));
-      mpsCsvRows.forEach(row => {
-        lines.push(row.map(x => `"${String(x).replace(/"/g, '""')}"`).join(","));
-      });
+      const mpsData = [mpsHeader, ...mpsSheetRows];
+      const mpsSheet = XLSX.utils.aoa_to_sheet(mpsData);
+      applySheetSizing(mpsSheet, mpsData);
+      XLSX.utils.book_append_sheet(workbook, mpsSheet, "MPS");
     }
-    
-    // Create and download the combined CSV
-    const csvContent = lines.join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `Combined_Reports_${SUBMISSION_ID || 'export'}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+
+    if (workbook.SheetNames.length === 0) {
+      alert("No report data available to export.");
+      return;
+    }
+
+    XLSX.writeFile(
+      workbook,
+      `Combined_Reports_${SUBMISSION_ID || "export"}.xlsx`
+    );
   };
 
   const exportToWord = async (submissionData) => {
@@ -1233,8 +1247,8 @@ function ForApprovalData() {
       <div className="laempl-report-display">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
           <h4>LAEMPL Report</h4>
-          <button 
-            onClick={() => exportBothReportsToCSV(fields)}
+            <button
+              onClick={() => exportBothReportsToExcel(fields)}
             style={{
               padding: '8px 16px',
               backgroundColor: '#007bff',
@@ -1321,7 +1335,7 @@ function ForApprovalData() {
               <tr>
                 <th>Trait</th>
                 {cols.map(col => (
-                  <th key={col.key}>{col.label}</th>
+                  <th key={col.key}>{col.originalKey || col.label}</th>
                 ))}
               </tr>
             </thead>
@@ -1331,11 +1345,14 @@ function ForApprovalData() {
                 return (
                   <tr key={trait}>
                     <td className="trait-cell">{trait}</td>
-                    {cols.map(col => (
-                      <td key={col.key} className="data-cell">
-                        {rowData[col.key] || ''}
+                    {cols.map(col => {
+                      const valueKey = col.originalKey || col.key;
+                      return (
+                        <td key={col.key} className="data-cell">
+                          {rowData[valueKey] ?? ""}
                       </td>
-                    ))}
+                      );
+                    })}
                   </tr>
                 );
               })}

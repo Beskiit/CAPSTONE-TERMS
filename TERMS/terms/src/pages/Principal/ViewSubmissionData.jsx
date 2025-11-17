@@ -11,6 +11,7 @@ import "../Teacher/ViewSubmission.css";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle, ImageRun } from "docx";
 import { saveAs } from "file-saver";
 import { useAuth } from "../../context/AuthContext.jsx";
+import * as XLSX from "xlsx";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
 
@@ -40,6 +41,21 @@ const getSubmissionId = () => {
 };
 
 const SUBMISSION_ID = getSubmissionId();
+const FIXED_COL_WIDTH = 25;
+const applySheetSizing = (worksheet, data) => {
+  const maxCols = data.reduce((max, row) => Math.max(max, row.length), 0);
+  worksheet["!cols"] = Array.from({ length: maxCols }, () => ({
+    wch: FIXED_COL_WIDTH,
+  }));
+  worksheet["!rows"] = data.map((row) => {
+    const longest = row.reduce((max, cell) => {
+      if (cell == null) return max;
+      return Math.max(max, cell.toString().length);
+    }, 0);
+    const lines = Math.max(1, Math.ceil(longest / FIXED_COL_WIDTH));
+    return { hpt: Math.min(18 * lines, 120) };
+  });
+};
 
 // Helper function to sanitize keys from database (e.g., "English (15 - 25 points)" -> "english")
 const sanitizeKey = (rawKey) => {
@@ -52,8 +68,22 @@ const sanitizeKey = (rawKey) => {
   // Helper function to get column labels
 const getColumnLabel = (key, subjectNames = {}) => {
   const labelMap = {
-    'm': 'M',
-    'f': 'F',
+    'm': 'No. of Male',
+    'f': 'No. of Female',
+    'no_of_cases': 'No. of Cases',
+    'no_of_items': 'No. of Items',
+    'total_score': 'Total Score',
+    'hs': 'Highest Score',
+    'ls': 'Lowest Score',
+    'highest_score': 'Highest Score',
+    'lowest_score': 'Lowest Score',
+    'male_passed': 'Number of Male Learners who Passed (MPL)',
+    'male_mpl_percent': '% MPL (MALE)',
+    'female_passed': 'Number of Female who passed(MPL)',
+    'female_mpl_percent': '% MPL(FEMALE)',
+    'total_passed': 'Number of Learners who Passed(MPL)',
+    'total_mpl_percent': '% MPL(TOTAL)',
+    'total_items': 'Total no. of Items',
     'gmrc': 'GMRC (15 - 25 points)',
     'math': 'Mathematics (15 - 25 points)',
     'lang': 'Language (15 - 25 points)',
@@ -61,23 +91,31 @@ const getColumnLabel = (key, subjectNames = {}) => {
     'makabasa': 'MAKABASA (15 - 25 points)',
     'english': 'English (15 - 25 points)',
     'araling_panlipunan': 'Araling Panlipunan (15 - 25 points)',
-    'total_score': 'Total Score',
-    'hs': 'HS',
-    'ls': 'LS',
-    'total_items': 'Total no. of Items'
   };
   
-  // Handle subject IDs (e.g., subject_8, subject_10)
+  // Handle subject IDs (e.g., subject_8, subject_10) - but we're removing subject columns
   if (key.startsWith('subject_')) {
-    const subjectId = key.replace('subject_', '');
-    const subjectName = subjectNames[subjectId];
-    if (subjectName) {
-      return `${subjectName} (15 - 25 points)`;
-    }
-    return `Subject ${subjectId}`;
+    return null; // Don't show subject columns
   }
   
-  return labelMap[key] || key.toUpperCase();
+  // Normalize key for matching (handle both lowercase and uppercase)
+  const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+  for (const [mapKey, label] of Object.entries(labelMap)) {
+    const normalizedMapKey = mapKey.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (normalizedKey === normalizedMapKey) {
+      return label;
+    }
+  }
+  
+  // If no match found, try to format common patterns
+  if (normalizedKey.includes('highest') || normalizedKey.includes('high')) {
+    return 'Highest Score';
+  }
+  if (normalizedKey.includes('lowest') || normalizedKey.includes('low')) {
+    return 'Lowest Score';
+  }
+  
+  return key.toUpperCase();
 };
 
 // Default traits and columns - will be replaced with dynamic data
@@ -292,18 +330,48 @@ function ViewSubmissionData() {
               fetchSubjectNames(subjectIds);
             }
             
-            // Extract dynamic columns from the first row
-            const actualCols = Object.keys(firstRow)
-              .filter(key => key !== 'trait')
+            // Extract dynamic columns from the first row, excluding subject columns
+            const requiredColumnOrder = [
+              'm', 'f', 'no_of_cases', 'no_of_items', 'total_score', 
+              'hs', 'ls', 'male_passed', 'male_mpl_percent', 
+              'female_passed', 'female_mpl_percent', 'total_passed', 'total_mpl_percent'
+            ];
+            
+            const allCols = Object.keys(firstRow)
+              .filter(key => key !== 'trait' && !key.startsWith('subject_'))
               .map(key => ({
                 key: sanitizeKey(key),
                 originalKey: key,
                 label: getColumnLabel(sanitizeKey(key), subjectNames)
-              }));
+              }))
+              .filter(col => col.label !== null); // Filter out null labels (subject columns)
             
-            if (actualCols.length > 0) {
-              setCOLS(actualCols);
-              console.log('Dynamic columns extracted from database:', actualCols);
+            // Order columns according to required order
+            const orderedCols = [];
+            const processedKeys = new Set();
+            
+            // Add required columns first in order
+            requiredColumnOrder.forEach(reqKey => {
+              const col = allCols.find(c => {
+                const normalized = c.key.toLowerCase().replace(/[^a-z0-9]/g, '');
+                return normalized === reqKey.toLowerCase().replace(/[^a-z0-9]/g, '');
+              });
+              if (col) {
+                orderedCols.push(col);
+                processedKeys.add(col.key);
+              }
+            });
+            
+            // Add any remaining columns that weren't in the required order
+            allCols.forEach(col => {
+              if (!processedKeys.has(col.key)) {
+                orderedCols.push(col);
+              }
+            });
+            
+            if (orderedCols.length > 0) {
+              setCOLS(orderedCols);
+              console.log('Dynamic columns extracted from database:', orderedCols);
             }
           }
         }
@@ -324,17 +392,47 @@ function ViewSubmissionData() {
     if (submissionData && submissionData.fields && submissionData.fields.rows && Array.isArray(submissionData.fields.rows) && submissionData.fields.rows.length > 0) {
       const firstRow = submissionData.fields.rows[0];
       if (firstRow) {
-        const actualCols = Object.keys(firstRow)
-          .filter(key => key !== 'trait')
+        const requiredColumnOrder = [
+          'm', 'f', 'no_of_cases', 'no_of_items', 'total_score', 
+          'hs', 'ls', 'male_passed', 'male_mpl_percent', 
+          'female_passed', 'female_mpl_percent', 'total_passed', 'total_mpl_percent'
+        ];
+        
+        const allCols = Object.keys(firstRow)
+          .filter(key => key !== 'trait' && !key.startsWith('subject_'))
           .map(key => ({
             key: sanitizeKey(key),
             originalKey: key,
             label: getColumnLabel(sanitizeKey(key), subjectNames)
-          }));
+          }))
+          .filter(col => col.label !== null);
         
-        if (actualCols.length > 0) {
-          setCOLS(actualCols);
-          console.log('Columns updated with subject names:', actualCols);
+        // Order columns according to required order
+        const orderedCols = [];
+        const processedKeys = new Set();
+        
+        // Add required columns first in order
+        requiredColumnOrder.forEach(reqKey => {
+          const col = allCols.find(c => {
+            const normalized = c.key.toLowerCase().replace(/[^a-z0-9]/g, '');
+            return normalized === reqKey.toLowerCase().replace(/[^a-z0-9]/g, '');
+          });
+          if (col) {
+            orderedCols.push(col);
+            processedKeys.add(col.key);
+          }
+        });
+        
+        // Add any remaining columns that weren't in the required order
+        allCols.forEach(col => {
+          if (!processedKeys.has(col.key)) {
+            orderedCols.push(col);
+          }
+        });
+        
+        if (orderedCols.length > 0) {
+          setCOLS(orderedCols);
+          console.log('Columns updated with subject names:', orderedCols);
         }
       }
     }
@@ -367,80 +465,67 @@ function ViewSubmissionData() {
     }
   };
 
-  // Combined export function for both LAEMPL and MPS reports
-  const exportBothReportsToCSV = (fields) => {
-    const lines = [];
-    
-    // Export LAEMPL Report
+  const exportBothReportsToExcel = (fields) => {
+    const workbook = XLSX.utils.book_new();
+
     if (fields.rows && fields.rows.length > 0) {
       const rows = fields.rows;
-      const traits = rows.map(row => row.trait).filter(Boolean);
-      
-      // Get dynamic columns from the first row
+      const traits = rows.map((row) => row.trait).filter(Boolean);
       let cols = [];
       if (rows.length > 0) {
         const firstRow = rows[0];
         cols = Object.keys(firstRow)
-          .filter(key => key !== 'trait')
-          .map(key => {
-            const cleanKey = key.replace(/[^a-zA-Z0-9]/g, '_');
+          .filter((key) => key !== "trait")
+          .map((key) => {
+            const cleanKey = key.replace(/[^a-zA-Z0-9]/g, "_");
             return {
               key: cleanKey,
               originalKey: key,
-              label: getColumnLabel(cleanKey, subjectNames)
+              label: getColumnLabel(cleanKey, subjectNames),
             };
           });
       }
-      
-      lines.push("=== LAEMPL REPORT ===");
-      const laemplHeader = ["Trait", ...cols.map(c => c.label)];
-      const laemplRows = traits.map(trait => {
-        const rowData = rows.find(r => r.trait === trait) || {};
+
+      const laemplHeader = ["Trait", ...cols.map((c) => c.label)];
+      const laemplRows = traits.map((trait) => {
+        const rowData = rows.find((r) => r.trait === trait) || {};
         return [
           trait,
-          ...cols.map(c => rowData[c.originalKey || c.key] || "")
+          ...cols.map((c) => rowData[c.originalKey || c.key] || ""),
         ];
       });
-      
-      lines.push(laemplHeader.map(x => `"${String(x).replace(/"/g, '""')}"`).join(","));
-      laemplRows.forEach(row => {
-        lines.push(row.map(x => `"${String(x).replace(/"/g, '""')}"`).join(","));
-      });
+      const laemplData = [laemplHeader, ...laemplRows];
+      const laemplSheet = XLSX.utils.aoa_to_sheet(laemplData);
+      applySheetSizing(laemplSheet, laemplData);
+      XLSX.utils.book_append_sheet(workbook, laemplSheet, "LAEMPL");
     }
-    
-    // Export MPS Report if available
+
     if (fields.mps_rows && fields.mps_rows.length > 0) {
-      lines.push(""); // Empty line separator
-      lines.push("=== MPS REPORT ===");
-      
       const mpsRows = fields.mps_rows;
-      const mpsTraits = mpsRows.map(row => row.trait).filter(Boolean);
-      const mpsCols = COLS_MPS;
-      
-      const mpsHeader = ["Trait", ...mpsCols.map(c => c.label)];
-      const mpsCsvRows = mpsTraits.map(trait => {
-        const rowData = mpsRows.find(r => r.trait === trait) || {};
+      const mpsTraits = mpsRows.map((row) => row.trait).filter(Boolean);
+      const mpsHeader = ["Trait", ...COLS_MPS.map((c) => c.label)];
+      const mpsSheetRows = mpsTraits.map((trait) => {
+        const rowData = mpsRows.find((r) => r.trait === trait) || {};
         return [
           trait,
-          ...mpsCols.map(c => rowData[c.key] || "")
+          ...COLS_MPS.map((c) => rowData[c.key] || ""),
         ];
       });
-      
-      lines.push(mpsHeader.map(x => `"${String(x).replace(/"/g, '""')}"`).join(","));
-      mpsCsvRows.forEach(row => {
-        lines.push(row.map(x => `"${String(x).replace(/"/g, '""')}"`).join(","));
-      });
+      const mpsData = [mpsHeader, ...mpsSheetRows];
+      const mpsSheet = XLSX.utils.aoa_to_sheet(mpsData);
+      applySheetSizing(mpsSheet, mpsData);
+      XLSX.utils.book_append_sheet(workbook, mpsSheet, "MPS");
     }
-    
-    // Create and download the combined CSV
-    const csvContent = lines.join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `Combined_Reports_${SUBMISSION_ID || 'export'}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+
+    if (workbook.SheetNames.length === 0) {
+      alert("No report data available to export.");
+      return;
+    }
+
+    XLSX.writeFile(
+      workbook,
+      `Combined_Reports_${SUBMISSION_ID || "export"}.xlsx`
+    );
   };
 
   // Export to Word function (exact copy from ForApprovalData)
@@ -795,11 +880,11 @@ function ViewSubmissionData() {
     const cols = COLS;
 
     return (
-      <div className="laempl-report-display">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+      <div className="laempl-report-display" style={{ width: '100%', maxWidth: '100%', margin: '20px 0', marginLeft: 0, marginRight: 0, padding: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', padding: '0 20px' }}>
           <h4>LAEMPL Report</h4>
           <button 
-            onClick={() => exportBothReportsToCSV(fields)}
+            onClick={() => exportBothReportsToExcel(fields)}
             style={{
               padding: '8px 16px',
               backgroundColor: '#007bff',
@@ -813,8 +898,8 @@ function ViewSubmissionData() {
             Export Both Reports
           </button>
         </div>
-        <div className="table-container">
-          <table className="laempl-table">
+        <div className="table-container" style={{ width: '100%', overflowX: 'auto', margin: 0, padding: 0 }}>
+          <table className="laempl-table" style={{ width: '100%', tableLayout: 'auto', margin: 0 }}>
             <thead>
               <tr>
                 <th>Trait</th>
@@ -878,10 +963,12 @@ function ViewSubmissionData() {
     const averages = calculateMPSAverages(rows, cols);
 
     return (
-      <div className="mps-report-display">
-        <h4>MPS Report</h4>
-        <div className="table-container">
-          <table className="mps-table">
+      <div className="mps-report-display" style={{ width: '100%', maxWidth: '100%', margin: '20px 0', marginLeft: 0, marginRight: 0, padding: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', padding: '0 20px' }}>
+          <h4>MPS Report</h4>
+        </div>
+        <div className="table-container" style={{ width: '100%', overflowX: 'auto', margin: 0, padding: 0 }}>
+          <table className="mps-table" style={{ width: '100%', tableLayout: 'auto', margin: 0 }}>
             <thead>
               <tr>
                 <th>Trait</th>

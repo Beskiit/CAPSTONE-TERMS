@@ -1,8 +1,7 @@
 import "./DashboardTeacher.css";
 import DeadlineComponent from "./DeadlineComponent.jsx";
-import React from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import Header from '../../components/shared/Header.jsx';
@@ -129,6 +128,76 @@ function Dashboard() {
     }
   }, [user]);
 
+  const topUpcomingDeadlines = useMemo(() => {
+    if (!Array.isArray(deadlines)) return [];
+    return deadlines
+      .filter((d) => d?.to_date || d?.due_date)
+      .sort((a, b) => {
+        const dateA = new Date(a.to_date || a.due_date || a.from_date || 0);
+        const dateB = new Date(b.to_date || b.due_date || b.from_date || 0);
+        return dateA - dateB;
+      })
+      .slice(0, 3);
+  }, [deadlines]);
+
+  const formatDeadlineDate = (dateStr) => {
+    if (!dateStr) return "No due date";
+    const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) return dateStr;
+    return date.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  };
+
+  const detectDeadlineType = (d) => {
+    const title   = (d?.title || d?.assignment_title || "").toLowerCase();
+    const catName = (d?.category_name || "").toLowerCase();
+    const subName = (d?.sub_category_name || "").toLowerCase();
+    const subId   = Number(d?.sub_category_id);
+    const catId   = Number(d?.category_id);
+
+    const hay = `${title} ${catName} ${subName}`;
+    if (hay.includes("laempl")) return "laempl";
+    if (hay.includes("mps")) return "mps";
+    if (hay.includes("accomplishment")) return "accomplishment";
+    if (hay.includes("classification of grades") || hay.includes("classification")) return "cog";
+
+    if (subId === 20) return "laempl";
+    if (subId === 30) return "mps";
+    if (catId === 1)  return "accomplishment";
+    if (catId === 2)  return "laempl";
+    return "generic";
+  };
+
+  const getDeadlineSubmissionId = (d) =>
+    d?.submission_id ?? d?.id ?? d?.report_assignment_id ?? null;
+
+  const handleDeadlineNavigation = (deadline) => {
+    const kind = detectDeadlineType(deadline);
+    const submissionId = getDeadlineSubmissionId(deadline);
+
+    const commonState = {
+      submission_id: submissionId,
+      title: deadline.title || deadline.assignment_title,
+      instruction: deadline.instruction,
+      from_date: deadline.from_date,
+      to_date: deadline.to_date || deadline.due_date,
+      number_of_submission: deadline.number_of_submission,
+      allow_late: deadline.allow_late,
+    };
+
+    if (kind === "laempl")         return navigate("/LAEMPLInstruction", { state: { ...commonState, fromDeadline: true } });
+    if (kind === "mps")            return navigate("/MPSInstruction", { state: { ...commonState, fromDeadline: true } });
+    if (kind === "accomplishment") return navigate("/AccomplishmentReportInstruction", { state: { ...commonState, fromDeadline: true } });
+    if (kind === "cog")            return navigate("/ClassificationOfGradesInstruction", { state: commonState });
+    return navigate("/SubmittedReport");
+  };
+
   // Navigation handlers
   const handleSubmittedReportClick = (report) => {
     // Navigate to ViewSubmission for submitted reports
@@ -162,6 +231,52 @@ function Dashboard() {
               </div>
             </div>
 
+          <div className="top-deadlines-section">
+            <h3>Top 3 Upcoming Deadlines</h3>
+            <hr />
+              <div className="top-deadlines-list">
+                {topUpcomingDeadlines.length > 0 ? (
+                  topUpcomingDeadlines.map((deadline, index) => (
+                    <div
+                      key={deadline.report_assignment_id || deadline.submission_id || index}
+                      className="top-deadline-card"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => handleDeadlineNavigation(deadline)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          handleDeadlineNavigation(deadline);
+                        }
+                      }}
+                    >
+                      <div className="deadline-card-header">
+                        <p className="deadline-card-title">
+                          {deadline.title || deadline.assignment_title || "Untitled Report"}
+                        </p>
+                        <span className="deadline-card-category">
+                          {deadline.category_name || "No category"}
+                        </span>
+                      </div>
+                      <div className="deadline-card-details">
+                        <p>
+                          Due:&nbsp;
+                          <strong>{formatDeadlineDate(deadline.to_date || deadline.due_date)}</strong>
+                        </p>
+                        {deadline.from_date && (
+                          <p>Opens: {formatDeadlineDate(deadline.from_date)}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="top-deadline-empty">
+                    No upcoming deadlines.
+                  </div>
+                )}
+              </div>
+            </div>
+
             <div className="submitted-reports">
               <h2>Submitted Reports</h2>
               <hr />
@@ -169,7 +284,7 @@ function Dashboard() {
                 {loading ? (
                   <div className="loading-message">Loading submitted reports...</div>
                 ) : submittedReports.length > 0 ? (
-                  submittedReports.slice(0, 5).map((report, index) => (
+                  submittedReports.map((report, index) => (
                     <div 
                       key={report.submission_id || index} 
                       className="submitted-reports-container clickable-report"

@@ -94,6 +94,8 @@ function AccomplishmentReport() {
   const [showSubmitToast, setShowSubmitToast] = useState(false);
   const [showConsolidate, setShowConsolidate] = useState(false);
   const [peerGroups, setPeerGroups] = useState([]); // [{title, images, submissions}]
+  const [selectedSubmissions, setSelectedSubmissions] = useState(new Set()); // Track selected submission IDs
+  const [includeAiSummary, setIncludeAiSummary] = useState(false); // Track AI Summary checkbox
 
   // AI Summary
   const [aiSummary, setAiSummary] = useState("");
@@ -904,25 +906,102 @@ function AccomplishmentReport() {
         return `${baseUrl}${separator}includeConsolidated=true`;
       };
 
-      // Try RA first for principal/teacher; if empty, retry PRA (child linking)
-      let firstKey = (isTeacher || isPrincipal) ? 'ra' : 'pra';
-      let url = buildUrl(firstKey);
-      console.log("[Consolidate] DEBUG - Request details (first):", { submissionId, reportAssignmentId, key: firstKey, url });
+      // Fetch assignment details to check if it's a parent assignment
+      let isParentAssignment = false;
+      if (reportAssignmentId) {
+        try {
+          const assignmentRes = await fetch(`${API_BASE}/reports/assignment/${reportAssignmentId}`, {
+            credentials: "include"
+          });
+          if (assignmentRes.ok) {
+            const assignmentData = await assignmentRes.json();
+            // If this assignment has no parent, it might be a parent assignment
+            // We should query both ra (same assignment) and pra (child assignments) to get all submissions
+            isParentAssignment = !assignmentData?.parent_report_assignment_id;
+          }
+        } catch (err) {
+          console.warn('[Consolidate] Failed to fetch assignment details:', err);
+        }
+      }
+
+      // Query same assignment first
+      let url = buildUrl('ra');
+      console.log("[Consolidate] DEBUG - Request details (first):", { submissionId, reportAssignmentId, key: 'ra', url });
       let res = await fetch(url, { credentials: "include" });
       if (!res.ok) {
         const txt = await res.text().catch(() => "");
         throw new Error(`Failed to load peers: ${res.status} ${txt}`);
       }
       let data = await res.json();
-      // If nothing and principal, try the alternate key
-      if (isPrincipal && Array.isArray(data) && data.length === 0) {
-        const altKey = firstKey === 'ra' ? 'pra' : 'ra';
+      
+      // If this is a parent assignment, also query child assignments and merge results
+      if (isParentAssignment && reportAssignmentId) {
+        const praUrl = buildUrl('pra');
+        console.log("[Consolidate] DEBUG - Also querying child assignments:", { key: 'pra', url: praUrl });
+        try {
+          const praRes = await fetch(praUrl, { credentials: "include" });
+          if (praRes.ok) {
+            const praData = await praRes.json();
+            if (Array.isArray(praData) && praData.length > 0) {
+              // Merge results by title
+              const mergedGroups = new Map();
+              
+              // Add groups from same assignment
+              if (Array.isArray(data)) {
+                data.forEach(group => {
+                  const key = (group.title || '').toLowerCase().trim();
+                  mergedGroups.set(key, { ...group, submissions: [...(group.submissions || [])] });
+                });
+              }
+              
+              // Merge groups from child assignments
+              praData.forEach(group => {
+                const key = (group.title || '').toLowerCase().trim();
+                if (mergedGroups.has(key)) {
+                  // Merge submissions from same title
+                  const existing = mergedGroups.get(key);
+                  const existingSubIds = new Set(existing.submissions.map(s => s.submission_id));
+                  group.submissions.forEach(sub => {
+                    if (!existingSubIds.has(sub.submission_id)) {
+                      existing.submissions.push(sub);
+                    }
+                  });
+                  // Merge images
+                  const allImages = new Set([...existing.images, ...(group.images || [])]);
+                  existing.images = Array.from(allImages);
+                } else {
+                  // New group
+                  mergedGroups.set(key, { ...group, submissions: [...(group.submissions || [])] });
+                }
+              });
+              
+              data = Array.from(mergedGroups.values());
+              console.log("[Consolidate] Merged results from ra and pra:", data.length, "groups");
+            }
+          }
+        } catch (err) {
+          console.warn('[Consolidate] Failed to fetch child assignments:', err);
+        }
+      } else if (Array.isArray(data) && data.length === 0) {
+        // If nothing found and not a parent, try the alternate key (pra)
+        const altKey = 'pra';
         url = buildUrl(altKey);
         console.log("[Consolidate] DEBUG - Retrying with alternate key:", { altKey, url });
         res = await fetch(url, { credentials: "include" });
         if (res.ok) {
-          data = await res.json();
+          const altData = await res.json();
+          // Merge results if we got data from alternate query
+          if (Array.isArray(altData) && altData.length > 0) {
+            data = altData;
+          }
         }
+      }
+      
+      // Debug: Log the actual submission count
+      if (Array.isArray(data) && data.length > 0) {
+        data.forEach((group, idx) => {
+          console.log(`[Consolidate] Group ${idx + 1} "${group.title}": ${group.submissions?.length || 0} submission(s)`, group.submissions?.map(s => s.submission_id));
+        });
       }
       try {
         console.log("[Consolidate] peers response:", data);
@@ -980,13 +1059,25 @@ function AccomplishmentReport() {
       const myTitle = norm(title);
       const matching = groups.filter(g => norm(g.title) === myTitle);
       setPeerGroups(matching.length ? matching : groups);
+      
+      // Auto-select submissions that were previously consolidated into this submission
+      const previouslyConsolidated = new Set();
+      const allSubs = (matching.length ? matching : groups).flatMap(g => g.submissions || []);
+      allSubs.forEach(sub => {
+        if (sub._consolidatedInto === submissionId) {
+          previouslyConsolidated.add(sub.submission_id);
+        }
+      });
+      
+      setSelectedSubmissions(previouslyConsolidated);
+      setIncludeAiSummary(false);
       setShowConsolidate(true);
     } catch (e) {
       setError(e.message || "Failed to load peers");
     }
   };
 
-  // Generate AI Summary for Consolidation
+  // Generate AI Summary for Consolidation (from all submissions in peer group)
   const generateConsolidationSummary = async (title, consolidatedData) => {
     console.log('🤖 [FRONTEND] AI Summary button clicked for title:', title);
     console.log('🤖 [FRONTEND] Consolidated data:', consolidatedData);
@@ -1060,7 +1151,92 @@ function AccomplishmentReport() {
     }
   };
 
-  const consolidateByTitle = async (title) => {
+  // Generate AI Summary from selected submissions only
+  const generateConsolidationSummaryFromSelected = async (title, selectedSubmissions) => {
+    console.log('🤖 [FRONTEND] AI Summary from selected submissions for title:', title);
+    console.log('🤖 [FRONTEND] Selected submissions count:', selectedSubmissions.length);
+    
+    try {
+      setIsGeneratingConsolidationSummary(true);
+      setConsolidationSummary("");
+      
+      // Extract narratives from selected submissions only
+      console.log('🔍 [FRONTEND] Extracting narratives from', selectedSubmissions.length, 'selected submissions');
+      const teacherNarratives = [];
+      
+      selectedSubmissions.forEach((submission, index) => {
+        try {
+          // Use the extractNarrative helper logic
+          let narrative = "";
+          if (submission?.narrative) {
+            narrative = String(submission.narrative).trim();
+          } else {
+            const f = parseFields(submission) || {};
+            const answers = f._answers || {};
+            const form = f._form || {};
+            const inner = form.fields || {};
+            
+            narrative = String(
+              submission?.text ||
+              answers.narrative ||
+              answers.text ||
+              f.narrative ||
+              f.text ||
+              form.narrative ||
+              form.text ||
+              inner.narrative ||
+              inner.text ||
+              ""
+            ).trim();
+          }
+          
+          console.log(`📝 [FRONTEND] Selected submission ${index + 1} (${submission.teacher_name || 'Unknown'}) narrative length:`, narrative.length);
+          
+          if (narrative && narrative.trim()) {
+            teacherNarratives.push({
+              teacherName: submission.teacher_name || submission.teacherName || `Teacher ${index + 1}`,
+              section: submission.section_name || "Unknown Section",
+              narrative: narrative.trim()
+            });
+            console.log(`✅ [FRONTEND] Added narrative from ${submission.teacher_name || submission.teacherName || `Teacher ${index + 1}`}`);
+          } else {
+            console.log(`⚠️ [FRONTEND] No narrative found for selected submission ${index + 1}`);
+          }
+        } catch (e) {
+          console.warn("❌ [FRONTEND] Failed to parse selected submission fields:", e);
+        }
+      });
+      
+      console.log('📊 [FRONTEND] Total narratives extracted from selected:', teacherNarratives.length);
+
+      if (teacherNarratives.length === 0) {
+        throw new Error("No narratives found in the selected submissions to summarize. Please select submissions that have narrative text.");
+      }
+
+      const summaryData = {
+        title,
+        teacherNarratives,
+        submissionCount: teacherNarratives.length
+      };
+
+      console.log('🚀 [FRONTEND] Calling AI SummarizationService with data:', summaryData);
+      const summary = await AISummarizationService.generateSummary(summaryData);
+      console.log('✅ [FRONTEND] AI Summary received, length:', summary.length);
+      
+      setConsolidationSummary(summary);
+      setShowSummaryModal(true);
+      
+      console.log('🎉 [FRONTEND] AI Summary modal opened successfully');
+      toast.success("AI Summary generated successfully from selected submissions!");
+    } catch (error) {
+      console.error("AI Consolidation Summary Error:", error);
+      toast.error(`Failed to generate AI summary: ${error.message}`);
+    } finally {
+      setIsGeneratingConsolidationSummary(false);
+    }
+  };
+
+  const consolidateByTitle = async (title, selectedSubmissionIds = null) => {
     try {
       const res = await fetch(`${API_BASE}/reports/accomplishment/${submissionId}/consolidate`, {
         method: "POST",
@@ -1068,6 +1244,11 @@ function AccomplishmentReport() {
         credentials: "include",
         body: JSON.stringify({
           title,
+          // If specific submission IDs are provided, only consolidate those
+          // Otherwise, consolidate all submissions with the same title (backward compatibility)
+          ...(selectedSubmissionIds && Array.isArray(selectedSubmissionIds) && selectedSubmissionIds.length > 0 
+            ? { submission_ids: selectedSubmissionIds }
+            : {}),
           // Principal/Teacher: consolidate within the same assignment
           report_assignment_id: (isTeacherSidebar || isPrincipalSidebar) ? (reportAssignmentId || undefined) : undefined,
           // Coordinator: consolidate across child teacher assignments under the coordinator's parent
@@ -1787,196 +1968,286 @@ function AccomplishmentReport() {
             <div style={{ maxHeight: 420, overflowY: "auto" }}>
               {peerGroups.length === 0 ? (
                 <p style={{ opacity: 0.8 }}>No submitted peer reports to consolidate.</p>
-              ) : (
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr>
-                      <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #e5e7eb" }}>Title</th>
-                      <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #e5e7eb" }}>Images</th>
-                      <th style={{ padding: 8, borderBottom: "1px solid #e5e7eb" }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {peerGroups.map((g, i) => {
-                      const extractNarrative = (submission) => {
-                        const f = parseFields(submission) || {};
-                        const form = f._form || {};
-                        const inner = form.fields || {};
-                        const t = submission?.narrative
-                          || submission?.text
-                          || f.narrative
-                          || f.text
-                          || form.narrative
-                          || form.text
-                          || inner.narrative
-                          || inner.text
-                          || "";
-                        return String(t).trim();
-                      };
+              ) : (() => {
+                // Flatten all submissions from all groups into a single list
+                const allSubmissions = peerGroups.flatMap(g => 
+                  (g.submissions || []).map(s => ({
+                    ...s,
+                    groupTitle: g.title,
+                    teacherName: s.teacher_name || s.submitted_by_name || "Unknown"
+                  }))
+                );
 
-                      // Check if all submissions in this group are already consolidated
-                      const allConsolidated = (g?.submissions || []).every(s => s._isConsolidated === true);
-                      const consolidatedCount = (g?.submissions || []).filter(s => s._isConsolidated === true).length;
-                      const consolidatedIntoId = (g?.submissions || []).find(s => s._isConsolidated)?._consolidatedInto;
-                      
-                      // Check if AI summary has been generated for this group
-                      // Check if current submission's narrative contains AI-generated content
-                      // We'll check if the narrative has substantial content that might indicate AI summary was generated
-                      const narrativeText = narrative || "";
-                      const hasAiSummary = (() => {
-                        // Check if narrative has content that suggests an AI summary was generated
-                        // This is a heuristic - in production, you'd track this in meta fields per group
-                        if (!narrativeText || narrativeText.trim().length < 100) return false;
+                if (allSubmissions.length === 0) {
+                  return <p style={{ opacity: 0.8 }}>No submissions available to consolidate.</p>;
+                }
+
+                const extractNarrative = (submission) => {
+                  // First check if narrative is already extracted by backend
+                  if (submission?.narrative) {
+                    return String(submission.narrative).trim();
+                  }
+                  
+                  const f = parseFields(submission) || {};
+                  const answers = f._answers || {};
+                  const form = f._form || {};
+                  const inner = form.fields || {};
+                  
+                  // Check all possible locations for narrative
+                  const t = submission?.text
+                    || answers.narrative
+                    || answers.text
+                    || f.narrative
+                    || f.text
+                    || form.narrative
+                    || form.text
+                    || inner.narrative
+                    || inner.text
+                    || "";
+                  return String(t).trim();
+                };
+
+                const getImages = (submission) => {
+                  const f = parseFields(submission) || {};
+                  const answers = f._answers || {};
+                  return (answers.images || []).filter(img => {
+                    if (typeof img === 'string' && img.startsWith('blob:')) return false;
+                    if (typeof img === 'object' && img.url && img.url.startsWith('blob:')) return false;
+                    return true;
+                  });
+                };
+
+                return (
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #e5e7eb", width: "40px" }}></th>
+                        <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #e5e7eb" }}>Submitted by</th>
+                        <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #e5e7eb" }}>Images</th>
+                        <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #e5e7eb" }}>Narrative</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allSubmissions.map((submission, idx) => {
+                        const subId = submission.submission_id;
+                        const isSelected = selectedSubmissions.has(subId);
+                        // Check if this submission was consolidated into the current submission
+                        const wasConsolidatedIntoThis = submission._consolidatedInto === submissionId;
+                        const narrative = extractNarrative(submission);
+                        const images = getImages(submission);
                         
-                        // Check if narrative contains patterns typical of AI-generated summaries
-                        // AI summaries often have structured content, bullet points, or key phrases
-                        const hasStructuredContent = 
-                          (narrativeText.includes('•') || 
-                           narrativeText.includes('Key') ||
-                           narrativeText.includes('Summary') ||
-                           narrativeText.includes('The following') ||
-                           narrativeText.split('\n\n').length > 2) &&
-                          narrativeText.trim().length > 100;
-                        
-                        return hasStructuredContent;
-                      })();
+                        // Debug: Log narrative extraction for troubleshooting
+                        if (idx === 0) {
+                          console.log('[Consolidate Modal] Narrative extraction debug:', {
+                            submissionId: subId,
+                            hasNarrativeField: !!submission.narrative,
+                            narrativeValue: submission.narrative,
+                            fields: submission.fields ? Object.keys(parseFields(submission) || {}) : 'no fields',
+                            extractedNarrative: narrative,
+                            narrativeLength: narrative.length,
+                            wasConsolidatedIntoThis,
+                            consolidatedInto: submission._consolidatedInto
+                          });
+                        }
+                        const narrativePreview = narrative 
+                          ? (narrative.length > 100 ? `${narrative.substring(0, 100)}...` : narrative)
+                          : "";
 
-                      const hasNarr = (g?.submissions || []).some(s => !!extractNarrative(s));
-
-                      const narrativeCount = (g?.submissions || []).reduce((count, s) => {
-                        return count + (extractNarrative(s) ? 1 : 0);
-                      }, 0);
-
-                      // Calculate image count from all submissions in this group
-                      const imageCount = (g?.submissions || []).reduce((count, s) => {
-                        const f = parseFields(s) || {};
-                        const answers = f._answers || {};
-                        const images = answers.images || [];
-                        console.log('Submission images:', { submission: s, fields: f, answers, images });
-                        return count + images.length;
-                      }, 0);
-
-                      const narrativePreviews = (g?.submissions || []).map((s) => {
-                        const t = extractNarrative(s);
-                        if (!t) return "";
-                        const trimmed = t.replace(/\s+/g, " ");
-                        return trimmed.length > 140 ? `${trimmed.slice(0, 140)}…` : trimmed;
-                      }).filter(Boolean);
-                      return (
-                        <tr key={g.title + i}>
-                          <td style={{ padding: 8, verticalAlign: "top" }}>
-                            <strong>{g.title}</strong>
-                            <div style={{ opacity: 0.7, fontSize: 12 }}>
-                              {(g.submissions?.length || 0)} submission(s)
-                              {narrativeCount ? ` \u2022 ${narrativeCount} narrative(s)` : ""}
-                              {allConsolidated && (
-                                <span style={{ marginLeft: 8, fontSize: 11, color: '#dc2626', fontStyle: 'italic' }}>
-                                  (All Consolidated{consolidatedIntoId ? ` into submission #${consolidatedIntoId}` : ''})
-                                </span>
+                        return (
+                          <tr key={subId || idx} style={{ 
+                            backgroundColor: isSelected ? '#f0f9ff' : 'transparent'
+                          }}>
+                            <td style={{ padding: 8, verticalAlign: "top" }}>
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={(e) => {
+                                  const newSelected = new Set(selectedSubmissions);
+                                  if (e.target.checked) {
+                                    newSelected.add(subId);
+                                  } else {
+                                    newSelected.delete(subId);
+                                  }
+                                  setSelectedSubmissions(newSelected);
+                                }}
+                                style={{ cursor: 'pointer' }}
+                              />
+                            </td>
+                            <td style={{ padding: 8, verticalAlign: "top" }}>
+                              {submission.teacherName}
+                              {wasConsolidatedIntoThis && (
+                                <div style={{ fontSize: 11, color: '#059669', fontStyle: 'italic', marginTop: 4 }}>
+                                  (Previously consolidated)
+                                </div>
                               )}
-                              {!allConsolidated && consolidatedCount > 0 && (
-                                <span style={{ marginLeft: 8, fontSize: 11, color: '#f59e0b', fontStyle: 'italic' }}>
-                                  ({consolidatedCount} already consolidated)
-                                </span>
-                              )}
-                            </div>
-                            {narrativePreviews.length > 0 && (
-                              <div style={{ marginTop: 6, maxHeight: 96, overflowY: 'auto', paddingRight: 4 }}>
-                                {narrativePreviews.slice(0, 3).map((p, idx) => (
-                                  <div key={idx} style={{ fontSize: 12, color: '#334155', lineHeight: 1.4, marginBottom: 4 }}>
-                                    — {p}
-                                  </div>
-                                ))}
-                                {narrativePreviews.length > 3 && (
-                                  <div style={{ fontSize: 12, color: '#64748b' }}>…and {narrativePreviews.length - 3} more</div>
-                                )}
-                              </div>
-                            )}
-                          </td>
-                          <td style={{ padding: 8 }}>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                              {(g?.submissions || []).map((s, sIdx) => {
-                                const f = parseFields(s) || {};
-                                const answers = f._answers || {};
-                                const images = (answers.images || []).filter(img => {
-                                  // Filter out blob URLs (temporary local URLs) from peer groups display
-                                  if (typeof img === 'string' && img.startsWith('blob:')) return false;
-                                  if (typeof img === 'object' && img.url && img.url.startsWith('blob:')) return false;
-                                  return true;
-                                });
-                                return images.map((img, imgIdx) => {
+                            </td>
+                            <td style={{ padding: 8, verticalAlign: "top" }}>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                                {images.length > 0 ? images.map((img, imgIdx) => {
                                   const imageUrl = getImageUrl(img);
                                   if (!imageUrl) return null;
                                   
                                   return (
-                                    <img 
-                                      key={`${sIdx}-${imgIdx}`} 
-                                      src={imageUrl} 
-                                      alt={`Image ${imgIdx + 1}`} 
-                                      style={{ 
-                                        width: 100, 
-                                        height: 75, 
-                                        objectFit: "cover", 
-                                        borderRadius: 4, 
-                                        border: "1px solid #e5e7eb"
+                                    <div
+                                      key={imgIdx}
+                                      style={{
+                                        width: 60,
+                                        height: 45,
+                                        backgroundColor: '#f3f4f6',
+                                        border: "1px solid #e5e7eb",
+                                        borderRadius: 4,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        overflow: 'hidden'
                                       }}
-                                      onError={(e) => {
-                                        console.error('Image failed to load:', imageUrl);
-                                        debugImageUrl(img, `Peer Group ${sIdx}-${imgIdx}`);
-                                        e.target.style.display = 'none';
-                                      }}
-                                    />
+                                    >
+                                      <img
+                                        src={imageUrl}
+                                        alt={`Image ${imgIdx + 1}`}
+                                        style={{
+                                          width: "100%",
+                                          height: "100%",
+                                          objectFit: "cover"
+                                        }}
+                                        onError={(e) => {
+                                          e.target.style.display = 'none';
+                                        }}
+                                      />
+                                    </div>
                                   );
-                                });
-                              }).flat()}
-                            </div>
-                          </td>
-                          <td style={{ padding: 8, width: 260, textAlign: "right", display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                            <button 
-                              className="btn" 
-                              onClick={() => generateConsolidationSummary(g.title, { images: g.submissions?.flatMap(s => {
-                                const f = parseFields(s) || {};
-                                const answers = f._answers || {};
-                                return (answers.images || []).filter(img => {
-                                  if (typeof img === 'string' && img.startsWith('blob:')) return false;
-                                  if (typeof img === 'object' && img.url && img.url.startsWith('blob:')) return false;
-                                  return true;
-                                });
-                              }) || [] }) } 
-                              disabled={isGeneratingConsolidationSummary || hasAiSummary}
-                              style={hasAiSummary ? { 
-                                opacity: 0.5, 
-                                cursor: 'not-allowed',
-                                backgroundColor: '#9ca3af',
-                                borderColor: '#9ca3af'
-                              } : {}}
-                              title={hasAiSummary ? "AI summary has already been generated for this group" : "Generate AI summary from teacher narratives"}
-                            >
-                              {isGeneratingConsolidationSummary ? 'Generating…' : 'AI Summary'}
-                            </button>
-                            <button 
-                              className="btn primary" 
-                              onClick={() => consolidateByTitle(g.title)}
-                              disabled={allConsolidated}
-                              style={allConsolidated ? { 
-                                opacity: 0.5, 
-                                cursor: 'not-allowed',
-                                backgroundColor: '#9ca3af',
-                                borderColor: '#9ca3af'
-                              } : {}}
-                              title={allConsolidated ? "All images in this group have already been consolidated" : `Consolidate ${imageCount} images`}
-                            >
-                              Consolidate Images ({imageCount})
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
+                                }) : (
+                                  <span style={{ fontSize: 12, color: '#9ca3af' }}>No images</span>
+                                )}
+                              </div>
+                            </td>
+                            <td style={{ padding: 8, verticalAlign: "top" }}>
+                              {narrativePreview ? (
+                                <div style={{ fontSize: 12, color: '#334155', lineHeight: 1.4 }}>
+                                  {narrativePreview}
+                                </div>
+                              ) : (
+                                <span style={{ fontSize: 12, color: '#9ca3af' }}>No narrative</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                );
+              })()}
             </div>
+            
+            {/* Bottom buttons */}
+            {peerGroups.length > 0 && (() => {
+              const allSubmissions = peerGroups.flatMap(g => g.submissions || []);
+              const selectedCount = selectedSubmissions.size;
+              const totalImageCount = Array.from(selectedSubmissions).reduce((count, subId) => {
+                const submission = allSubmissions.find(s => s.submission_id === subId);
+                if (!submission) return count;
+                const f = parseFields(submission) || {};
+                const answers = f._answers || {};
+                const images = (answers.images || []).filter(img => {
+                  if (typeof img === 'string' && img.startsWith('blob:')) return false;
+                  if (typeof img === 'object' && img.url && img.url.startsWith('blob:')) return false;
+                  return true;
+                });
+                return count + images.length;
+              }, 0);
 
+              // Check if current submission already has consolidated images
+              // Check if any submission was previously consolidated into this one
+              const hasPreviouslyConsolidated = allSubmissions.some(s => s._consolidatedInto === submissionId);
+              const hasConsolidatedImages = hasPreviouslyConsolidated || 
+                                           (existingImages.length > 0 && imagesConsolidated) ||
+                                           hasUnsavedConsolidation;
+              const isReconsolidate = hasConsolidatedImages;
+
+              const handleConsolidate = async () => {
+                if (selectedCount === 0) {
+                  toast.error("Please select at least one submission to consolidate.");
+                  return;
+                }
+
+                // Get the title from the first selected submission's group
+                const firstSelected = allSubmissions.find(s => selectedSubmissions.has(s.submission_id));
+                if (!firstSelected) return;
+
+                const groupTitle = firstSelected.groupTitle || title;
+                
+                // Get the selected submission IDs
+                const selectedIds = Array.from(selectedSubmissions);
+                
+                // Consolidate only the selected submissions
+                await consolidateByTitle(groupTitle, selectedIds);
+                
+                // Don't clear selections after consolidation - keep them checked for re-consolidation
+              };
+
+              const handleAiSummary = async () => {
+                if (selectedCount === 0) {
+                  toast.error("Please select at least one submission to generate AI summary.");
+                  return;
+                }
+
+                // Get selected submissions only
+                const selected = allSubmissions.filter(s => selectedSubmissions.has(s.submission_id));
+                const firstSelected = selected[0];
+                const groupTitle = firstSelected?.groupTitle || title;
+                
+                // Generate AI summary from selected submissions only
+                await generateConsolidationSummaryFromSelected(groupTitle, selected);
+              };
+
+              return (
+                <div style={{ marginTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 12, borderTop: "1px solid #e5e7eb" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      type="checkbox"
+                      id="aiSummaryCheckbox"
+                      checked={includeAiSummary}
+                      onChange={(e) => setIncludeAiSummary(e.target.checked)}
+                      style={{ cursor: "pointer" }}
+                    />
+                    <label htmlFor="aiSummaryCheckbox" style={{ cursor: "pointer", fontSize: 14 }}>
+                      AI Summary
+                    </label>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        setShowConsolidate(false);
+                        setSelectedSubmissions(new Set());
+                        setIncludeAiSummary(false);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="btn primary"
+                      onClick={async () => {
+                        if (includeAiSummary) {
+                          await handleAiSummary();
+                        }
+                        await handleConsolidate();
+                      }}
+                      disabled={selectedCount === 0}
+                      style={selectedCount === 0 ? {
+                        opacity: 0.5,
+                        cursor: 'not-allowed',
+                        backgroundColor: '#9ca3af',
+                        borderColor: '#9ca3af'
+                      } : {}}
+                    >
+                      {isReconsolidate ? 'Re-consolidate' : 'Consolidate'} {selectedCount > 0 ? `(${totalImageCount} images)` : ''}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+            
             {aiSummary && (
               <div style={{ marginTop: 12, background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8, padding: 12 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

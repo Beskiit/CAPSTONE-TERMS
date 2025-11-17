@@ -769,9 +769,23 @@ export const giveLAEMPLReport = (req, res) => {
     return res.status(400).send('number_of_submissions length must match assignees length.');
   }
 
-  // LAEMPL seed
+  // LAEMPL seed - Updated to new column structure
   const TRAITS = ["Masipag","Matulungin","Masunurin","Magalang","Matapat","Matiyaga"];
-  const COLS   = [{ key: "m" }, { key: "f" }, { key: "gmrc" }, { key: "math" }, { key: "lang" }, { key: "read" }, { key: "makabasa" }];
+  const COLS   = [
+    { key: "m" },
+    { key: "f" },
+    { key: "no_of_cases" },
+    { key: "no_of_items" },
+    { key: "total_score" },
+    { key: "highest_score" },
+    { key: "lowest_score" },
+    { key: "male_passed" },
+    { key: "male_mpl_percent" },
+    { key: "female_passed" },
+    { key: "female_mpl_percent" },
+    { key: "total_passed" },
+    { key: "total_mpl_percent" }
+  ];
   const emptyRow   = () => Object.fromEntries(COLS.map(c => [c.key, null]));
   const rowsSeed   = TRAITS.map(trait => ({ trait, ...emptyRow() }));
   const totalsSeed = Object.fromEntries(COLS.map(c => [c.key, 0]));

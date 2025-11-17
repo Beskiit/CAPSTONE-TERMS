@@ -60,6 +60,97 @@ body{
   width: 100%;
 }
 
+.top-deadlines-section {
+  padding: 1rem 1.5rem;
+  background-color: white;
+  border-radius: 1.5rem;
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  box-shadow: 0 6px 18px rgba(23, 26, 31, 0.08);
+}
+
+.top-deadlines-section h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.top-deadlines-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
+
+.top-deadline-card {
+  background: rgba(255, 255, 255, 0.88);
+  border-radius: 14px;
+  padding: 0.9rem 1.1rem;
+  box-shadow: 0 8px 18px rgba(30, 86, 160, 0.12);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  backdrop-filter: blur(4px);
+}
+
+.top-deadline-card:focus-visible {
+  outline: 2px solid #1E56A0;
+  outline-offset: 2px;
+}
+
+.top-deadline-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 22px rgba(30, 86, 160, 0.15);
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.deadline-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.35rem;
+  gap: 0.75rem;
+}
+
+.deadline-card-title {
+  margin: 0;
+  font-weight: 600;
+  color: #1E1E1E;
+}
+
+.deadline-card-category {
+  font-size: 0.8rem;
+  color: white;
+  background: #f0f4fa;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background-color: rgba(30, 86, 160, 0.8);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+
+.deadline-card-details {
+  font-size: 0.9rem;
+  color: #475467;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.top-deadline-empty {
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 12px;
+  text-align: center;
+  color: #6c757d;
+  font-style: italic;
+}
+
 .dashboard-sidebar{
   padding-left: 1rem;
 }
@@ -137,9 +228,12 @@ body{
   justify-content: space-between;
   border-radius: 1rem;
   padding: 1rem;
-  background-color: #FF8686;
+  background-color: rgba(30, 86, 160, 0.8);
+  opacity: 0.8;
   flex-shrink: 0;
   min-height: 60px;
+  color: white;
+  transition: background-color 0.15s ease;
 }
 
 .deadline-details{
@@ -217,12 +311,16 @@ body{
 }
 
 /* Rejected deadline items */
+.deadline-item:hover {
+  background-color: rgba(30, 86, 160, 0.95);
+}
+
 .deadline-item.rejected {
-  background-color: #FF8686 !important; /* keep same base color */
+  background-color: rgba(30, 86, 160, 0.85) !important; /* keep same base color */
 }
 
 .deadline-item.rejected:hover {
-  background-color: #FF8686 !important; /* no hover change */
+  background-color: rgba(30, 86, 160, 1) !important; /* no hover change */
 }
 
 .rejected-badge {

@@ -6,6 +6,7 @@ import SidebarPrincipal from "../../components/shared/SidebarPrincipal.jsx";
 import "../Teacher/LAEMPLReport.css";
 import "../Teacher/ViewSubmission.css";
 import { useAuth } from "../../context/AuthContext.jsx";
+import * as XLSX from "xlsx";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
 
@@ -46,7 +47,6 @@ function ViewCoordinatorSubmissions() {
   const [gradeLevelSections, setGradeLevelSections] = useState({}); // Cache sections by grade level
   const [gradeSubjectCache, setGradeSubjectCache] = useState({});
   const [availableSubjects, setAvailableSubjects] = useState([]);
-  const [subjectNames, setSubjectNames] = useState({}); // Map of subject_id -> subject_name
   
   const coordinatorName = location.state?.coordinatorName || 'Coordinator';
   const coordinatorId = location.state?.coordinatorId;
@@ -55,6 +55,8 @@ function ViewCoordinatorSubmissions() {
   const gradeGroups = Array.isArray(location.state?.gradeGroups) ? location.state.gradeGroups : null;
   const isAllGradesView = Array.isArray(gradeGroups) && gradeGroups.length > 0;
   const [sortMode, setSortMode] = useState("grade"); // 'grade' or 'subject'
+  const [selectedGradeFilter, setSelectedGradeFilter] = useState("all"); // 'all' or specific grade level
+  const [subjectFilter, setSubjectFilter] = useState("all");
 
   const parseSubmissionFields = useCallback((submission) => {
     if (!submission) return null;
@@ -254,6 +256,22 @@ function ViewCoordinatorSubmissions() {
     return result;
   }, [gradeSubjectCache, normalizeSubjectName]);
 
+  const FIXED_COL_WIDTH = 25;
+  const applySheetSizing = (worksheet, sheetData) => {
+    const maxCols = sheetData.reduce((max, row) => Math.max(max, row.length), 0);
+    worksheet["!cols"] = Array.from({ length: maxCols }, () => ({
+      wch: FIXED_COL_WIDTH,
+    }));
+    worksheet["!rows"] = sheetData.map((row) => {
+      const longest = row.reduce((max, cell) => {
+        if (cell == null) return max;
+        return Math.max(max, cell.toString().length);
+      }, 0);
+      const lines = Math.max(1, Math.ceil(longest / FIXED_COL_WIDTH));
+      return { hpt: Math.min(18 * lines, 120) };
+    });
+  };
+
   const subjectOrganizedData = React.useMemo(() => {
     if (!isAllGradesView) return [];
     const subjectMap = new Map();
@@ -411,28 +429,39 @@ function ViewCoordinatorSubmissions() {
     normalizeSubjectName,
   ]);
 
-  // Function to fetch subject names
-  const fetchSubjectNames = useCallback(async (subjectIds) => {
-    if (!subjectIds || subjectIds.length === 0) return;
-    
-    try {
-      const response = await fetch(`${API_BASE}/subjects`, {
-        credentials: "include"
-      });
-      
-      if (response.ok) {
-        const subjects = await response.json();
-        const subjectMap = {};
-        subjects.forEach(subject => {
-          subjectMap[subject.subject_id] = subject.subject_name;
-        });
-        setSubjectNames(prev => ({ ...prev, ...subjectMap }));
-        console.log('Subject names fetched:', subjectMap);
+  const subjectOptions = React.useMemo(() => {
+    const names = subjectOrganizedData
+      .map((subject) => subject.subject_name || "Unknown Subject")
+      .filter(Boolean);
+    const uniqueNormalized = [];
+    const seen = new Set();
+    names.forEach((name) => {
+      const normalized = normalizeSubjectName(name);
+      if (!seen.has(normalized)) {
+        seen.add(normalized);
+        uniqueNormalized.push(name);
       }
-    } catch (error) {
-      console.error('Error fetching subject names:', error);
-    }
-  }, []);
+    });
+    return uniqueNormalized.sort((a, b) => a.localeCompare(b));
+  }, [subjectOrganizedData, normalizeSubjectName]);
+
+  const filteredSubjects = React.useMemo(() => {
+    if (subjectFilter === "all") return subjectOrganizedData;
+    const normalizedSelected = normalizeSubjectName(subjectFilter);
+    return subjectOrganizedData.filter(
+      (subject) =>
+        normalizeSubjectName(subject.subject_name) === normalizedSelected
+    );
+  }, [subjectOrganizedData, subjectFilter, normalizeSubjectName]);
+
+  const filteredGradeGroups = React.useMemo(() => {
+    if (selectedGradeFilter === "all") return processedGradeGroups;
+    return processedGradeGroups.filter(
+      (gradeGroup) =>
+        String(gradeGroup.grade_level) === String(selectedGradeFilter)
+    );
+  }, [processedGradeGroups, selectedGradeFilter]);
+
 
   // Helper to get column label with subject name
   const getColumnLabel = useCallback((key, originalKey) => {
@@ -442,21 +471,25 @@ function ViewCoordinatorSubmissions() {
     // Handle subject IDs (e.g., subject_34)
     if (keyToCheck && keyToCheck.startsWith('subject_')) {
       const subjectId = keyToCheck.replace('subject_', '');
-      const subjectName = subjectNames[subjectId];
-      if (subjectName) {
-        return `${subjectName} (15 - 25 points)`;
-      }
-      return `Subject ${subjectId}`;
+      return `Subject ${subjectId} (15 - 25 points)`;
     }
     
     // Handle standard columns
     const labelMap = {
-      'm': 'M',
-      'f': 'F',
+      'm': 'No. of Male',
+      'f': 'No. of Female',
+      'no_of_cases': 'No. of Cases',
+      'no_of_items': 'No. of Items',
       'total_score': 'Total Score',
-      'hs': 'HS',
-      'ls': 'LS',
+      'hs': 'Highest Score',
+      'ls': 'Lowest Score',
       'total_items': 'Total no. of Items',
+      'male_passed': 'Number of Male Learners who Passed (MPL)',
+      'male_mpl_percent': '% MPL (MALE)',
+      'female_passed': 'Number of Female who passed(MPL)',
+      'female_mpl_percent': '% MPL(FEMALE)',
+      'total_passed': 'Number of Learners who Passed(MPL)',
+      'total_mpl_percent': '% MPL(TOTAL)',
       'gmrc': 'GMRC (15 - 25 points)',
       'math': 'Mathematics (15 - 25 points)',
       'lang': 'Language (15 - 25 points)',
@@ -472,214 +505,80 @@ function ViewCoordinatorSubmissions() {
     }
     
     return originalKey || key;
-  }, [subjectNames]);
+  }, []);
 
   // Helper to extract dynamic columns from fields
   const extractColumns = useCallback((rows, submission = null, fields = null) => {
+    // Always include required standard columns in the correct order
+    const requiredColumns = [
+      { key: "m", label: "No. of Male" },
+      { key: "f", label: "No. of Female" },
+      { key: "no_of_cases", label: "No. of Cases" },
+      { key: "no_of_items", label: "No. of Items" },
+      { key: "total_score", label: "Total Score" },
+      { key: "hs", label: "Highest Score" },
+      { key: "ls", label: "Lowest Score" },
+      { key: "male_passed", label: "Number of Male Learners who Passed (MPL)" },
+      { key: "male_mpl_percent", label: "% MPL (MALE)" },
+      { key: "female_passed", label: "Number of Female who passed(MPL)" },
+      { key: "female_mpl_percent", label: "% MPL(FEMALE)" },
+      { key: "total_passed", label: "Number of Learners who Passed(MPL)" },
+      { key: "total_mpl_percent", label: "% MPL(TOTAL)" },
+    ];
+    
     if (!rows || rows.length === 0) {
-      // If no rows, try to get columns from submission/fields
-      if (submission || fields) {
-        const assignmentTitle = submission?.assignment_title || submission?.title || '';
-        const subjectName = fields?.subject_name || 
-                           (assignmentTitle.includes(' - ') ? assignmentTitle.split(' - ').pop().trim() : null);
-        const subjectId = fields?.subject_id;
-        
-        const cols = [
-          { key: "m", label: "M" },
-          { key: "f", label: "F" }
-        ];
-        
-        if (subjectId) {
-          cols.push({
-            key: `subject_${subjectId}`,
-            originalKey: `subject_${subjectId}`,
-            label: getColumnLabel(`subject_${subjectId}`, `subject_${subjectId}`)
-          });
-        } else if (subjectName) {
-          cols.push({
-            key: subjectName.toLowerCase().replace(/[^a-z0-9]/g, ''),
-            originalKey: subjectName,
-            label: `${subjectName} (15 - 25 points)`
-          });
-        }
-        
-        cols.push(
-          { key: "total_score", label: "Total Score" },
-          { key: "hs", label: "HS" },
-          { key: "ls", label: "LS" },
-          { key: "total_items", label: "Total no. of Items" }
-        );
-        
-        return cols;
-      }
-      return DEFAULT_COLS;
+      // If no rows, return required columns only (no subject column)
+      return requiredColumns;
     }
     
     const firstRow = rows[0];
     const dataKeys = Object.keys(firstRow).filter(key => key !== 'trait');
     
-    // If rows exist but only have 'trait' key, create columns from submission/fields
-    if (dataKeys.length === 0) {
-      if (submission || fields) {
-        const assignmentTitle = submission?.assignment_title || submission?.title || '';
-        const subjectName = fields?.subject_name || 
-                           (assignmentTitle.includes(' - ') ? assignmentTitle.split(' - ').pop().trim() : null);
-        const subjectId = fields?.subject_id;
-        
-        const cols = [
-          { key: "m", label: "M" },
-          { key: "f", label: "F" }
-        ];
-        
-        if (subjectId) {
-          cols.push({
-            key: `subject_${subjectId}`,
-            originalKey: `subject_${subjectId}`,
-            label: getColumnLabel(`subject_${subjectId}`, `subject_${subjectId}`)
-          });
-        } else if (subjectName) {
-          cols.push({
-            key: subjectName.toLowerCase().replace(/[^a-z0-9]/g, ''),
-            originalKey: subjectName,
-            label: `${subjectName} (15 - 25 points)`
-          });
-        }
-        
-        cols.push(
-          { key: "total_score", label: "Total Score" },
-          { key: "hs", label: "HS" },
-          { key: "ls", label: "LS" },
-          { key: "total_items", label: "Total no. of Items" }
-        );
-        
-        return cols;
-      }
-      return DEFAULT_COLS;
-    }
-    
-    const cols = dataKeys.map(key => {
-      // Normalize key for matching (lowercase, remove special chars)
-      const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
-      
-      // Try to match with default columns by comparing normalized keys
-      const defaultCol = DEFAULT_COLS.find(c => {
-        const defaultNormalized = c.key.toLowerCase().replace(/[^a-z0-9]/g, '');
-        return defaultNormalized === normalizedKey || c.key === normalizedKey;
-      });
-      
-      if (defaultCol) {
-        // Return default column but keep originalKey for data access
-        return {
-          ...defaultCol,
-          originalKey: key,
-          label: getColumnLabel(defaultCol.key, key)
-        };
-      }
-      
-      // Otherwise create a new column with proper label
-      return {
-        key: normalizedKey,
+    // Extract columns from actual data, but ensure required columns are always included
+    const dataColsMap = new Map();
+    dataKeys.forEach(key => {
+      dataColsMap.set(key, {
+        key: key.toLowerCase().replace(/[^a-z0-9]/g, ''),
         originalKey: key,
-        label: getColumnLabel(normalizedKey, key)
-      };
+        label: getColumnLabel(key, key)
+      });
     });
     
-    // Ensure subject column is included if we have subject info from submission/fields
-    if (submission || fields) {
-      const assignmentTitle = submission?.assignment_title || submission?.title || '';
-      const subjectName = fields?.subject_name || 
-                         (assignmentTitle.includes(' - ') ? assignmentTitle.split(' - ').pop().trim() : null);
-      const subjectId = fields?.subject_id;
-      
-      // Check if subject column already exists
-      const hasSubjectColumn = cols.some(col => {
-        const colKey = col.originalKey || col.key;
-        if (subjectId) {
-          return colKey === `subject_${subjectId}` || colKey.startsWith('subject_');
-        }
-        if (subjectName) {
-          const normalizedSubject = subjectName.toLowerCase().replace(/[^a-z0-9]/g, '');
-          const normalizedColKey = colKey.toLowerCase().replace(/[^a-z0-9]/g, '');
-          return normalizedColKey === normalizedSubject || colKey.toLowerCase().includes(subjectName.toLowerCase());
-        }
-        return false;
-      });
-      
-      // If subject column doesn't exist, add it after M and F
-      if (!hasSubjectColumn) {
-        const mIndex = cols.findIndex(c => c.key === 'm' || c.originalKey === 'm');
-        const fIndex = cols.findIndex(c => c.key === 'f' || c.originalKey === 'f');
-        const insertIndex = fIndex >= 0 ? fIndex + 1 : (mIndex >= 0 ? mIndex + 1 : 0);
-        
-        if (subjectId) {
-          cols.splice(insertIndex, 0, {
-            key: `subject_${subjectId}`,
-            originalKey: `subject_${subjectId}`,
-            label: getColumnLabel(`subject_${subjectId}`, `subject_${subjectId}`)
-          });
-        } else if (subjectName) {
-          cols.splice(insertIndex, 0, {
-            key: subjectName.toLowerCase().replace(/[^a-z0-9]/g, ''),
-            originalKey: subjectName,
-            label: `${subjectName} (15 - 25 points)`
-          });
-        }
-      }
-    }
-    
-    // Ensure proper column order: M, F, Subject, then others
-    // Use a stable ordering approach based on column keys
-    const colKeys = new Set(cols.map(c => c.key));
-    const orderedCols = [];
+    // Start with required columns, using data if available, otherwise use defaults
+    const cols = [];
     const processedKeys = new Set();
     
-    // Helper to find and add column by key pattern
-    const addColByPattern = (pattern, label) => {
-      const col = cols.find(c => {
-        if (processedKeys.has(c.key)) return false;
-        const colKey = (c.originalKey || c.key).toLowerCase();
-        if (typeof pattern === 'string') {
-          return colKey === pattern.toLowerCase() || colKey.includes(pattern.toLowerCase());
-        }
-        return pattern.test(colKey);
+    // Add required columns first in the correct order
+    requiredColumns.forEach(reqCol => {
+      const normalizedReqKey = reqCol.key.toLowerCase().replace(/[^a-z0-9]/g, '');
+      // Check if this column exists in data (by normalized key)
+      const dataCol = Array.from(dataColsMap.entries()).find(([key, col]) => {
+        const normalizedDataKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+        return normalizedDataKey === normalizedReqKey;
       });
-      if (col) {
-        orderedCols.push(col);
-        processedKeys.add(col.key);
-      }
-    };
-    
-    // Add M, F, Subject in order
-    addColByPattern('^m$', 'M');
-    addColByPattern('^f$', 'F');
-    
-    // Add subject column (check for subject_ prefix or subject name match)
-    if (submission || fields) {
-      const subjectId = fields?.subject_id;
-      const subjectName = fields?.subject_name;
       
-      if (subjectId) {
-        addColByPattern(`^subject_${subjectId}$`, 'Subject');
-      } else if (subjectName) {
-        const normalizedSubject = subjectName.toLowerCase().replace(/[^a-z0-9]/g, '');
-        addColByPattern(new RegExp(`^subject_|${normalizedSubject}`), 'Subject');
+      if (dataCol) {
+        cols.push(dataCol[1]);
+        processedKeys.add(dataCol[0]);
       } else {
-        // Try to find any subject column
-        addColByPattern(/^subject_/, 'Subject');
+        cols.push(reqCol);
       }
-    } else {
-      // Try to find any subject column
-      addColByPattern(/^subject_/, 'Subject');
-    }
+      processedKeys.add(reqCol.key);
+    });
     
-    // Add remaining columns
-    cols.forEach(col => {
-      if (!processedKeys.has(col.key)) {
-        orderedCols.push(col);
+    // Add any remaining columns from data that aren't already processed (excluding subject columns)
+    dataKeys.forEach(key => {
+      // Skip subject columns
+      if (key.startsWith('subject_')) {
+        return;
+      }
+      if (!processedKeys.has(key)) {
+        cols.push(dataColsMap.get(key));
       }
     });
     
-    return orderedCols.length > 0 ? orderedCols : DEFAULT_COLS;
+    // Columns are already in the correct order from requiredColumns, so return them directly
+    return cols;
   }, [getColumnLabel]);
 
   const fetchSubjectsForGrade = useCallback(
@@ -891,14 +790,13 @@ function ViewCoordinatorSubmissions() {
     const rowsStr = React.useMemo(() => JSON.stringify(rows), [rows]);
     const submissionStr = React.useMemo(() => JSON.stringify(submission), [submission]);
     const fieldsStr = React.useMemo(() => JSON.stringify(fields), [fields]);
-    const subjectNamesStr = React.useMemo(() => JSON.stringify(subjectNames), [subjectNames]);
     
     // Cache for columns to prevent object recreation
     const colsCacheRef = React.useRef({ key: null, cols: null });
     
     // Memoize columns to prevent unnecessary re-renders
     const cols = React.useMemo(() => {
-      const cacheKey = `${rowsStr}|${submissionStr}|${fieldsStr}|${subjectNamesStr}`;
+      const cacheKey = `${rowsStr}|${submissionStr}|${fieldsStr}`;
       
       // Return cached columns if key matches
       if (colsCacheRef.current.key === cacheKey && colsCacheRef.current.cols) {
@@ -910,7 +808,7 @@ function ViewCoordinatorSubmissions() {
       colsCacheRef.current = { key: cacheKey, cols: computed };
       return computed;
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [rowsStr, submissionStr, fieldsStr, subjectNamesStr]);
+    }, [rowsStr, submissionStr, fieldsStr]);
     
     // Memoize row data map for efficient lookups
     const rowDataMap = React.useMemo(() => {
@@ -986,20 +884,9 @@ function ViewCoordinatorSubmissions() {
       prevGradeLevelRef.current = gradeLevel;
       
       const loadData = async () => {
-        setLoadingTraits(true);
+        // Only set loading if not already loading
+        setLoadingTraits(prev => prev ? prev : true);
         try {
-          // Extract subject IDs from rows to fetch subject names
-          if (rows && rows.length > 0) {
-            const firstRow = rows[0];
-            const subjectIds = Object.keys(firstRow)
-              .filter(key => key.startsWith('subject_'))
-              .map(key => key.replace('subject_', ''));
-            
-            if (subjectIds.length > 0) {
-              console.log('Found subject IDs in rows:', subjectIds);
-              fetchSubjectNames(subjectIds);
-            }
-          }
           
           // Extract traits from submission data or fetch from database
           let extractedTraits = DEFAULT_TRAITS;
@@ -1041,12 +928,13 @@ function ViewCoordinatorSubmissions() {
             return DEFAULT_TRAITS;
           });
         } finally {
-          setLoadingTraits(false);
+          // Only set loading to false if it was true
+          setLoadingTraits(prev => prev ? false : prev);
         }
       };
       
       loadData();
-    }, [rowsStr, gradeLevel, fetchSectionsForGrade, fetchSubjectNames]);
+    }, [rowsStr, gradeLevel, fetchSectionsForGrade]);
 
     
     // Check if we're using default traits (which means submission data might be missing)
@@ -1055,8 +943,8 @@ function ViewCoordinatorSubmissions() {
                                   JSON.stringify(traits) === JSON.stringify(DEFAULT_TRAITS);
 
     return (
-      <div className="laempl-report-display">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+      <div className="laempl-report-display" style={{ width: '100%', maxWidth: '100%', margin: 0, padding: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', padding: '0 20px' }}>
           <div>
             <h4>LAEMPL Report {gradeLevel && <span style={{ fontSize: '14px', fontWeight: 'normal', color: '#666' }}>(Grade {gradeLevel})</span>}</h4>
             {isUsingDefaultTraits && rows.length === 0 && (
@@ -1066,8 +954,8 @@ function ViewCoordinatorSubmissions() {
             )}
           </div>
         </div>
-        <div className="table-container">
-          <table className="laempl-table">
+        <div className="table-container" style={{ width: '100%', overflowX: 'auto', margin: 0, padding: 0 }}>
+          <table className="laempl-table" style={{ width: '100%', tableLayout: 'auto', margin: 0 }}>
             {gradeLevel && (
               <caption style={{ captionSide: 'top', textAlign: 'left', padding: '8px 0', fontWeight: 'bold', fontSize: '14px' }}>
                 Grade Level: {gradeLevel}
@@ -1187,8 +1075,8 @@ function ViewCoordinatorSubmissions() {
     const averages = calculateMPSAverages(rows, cols);
 
     return (
-      <div className="mps-report-display" style={{ marginTop: '2rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+      <div className="mps-report-display" style={{ marginTop: '2rem', width: '100%', maxWidth: '100%', margin: 0, padding: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', padding: '0 20px' }}>
           <div>
             <h4>MPS Report {gradeLevel && <span style={{ fontSize: '14px', fontWeight: 'normal', color: '#666' }}>(Grade {gradeLevel})</span>}</h4>
             {isUsingDefaultTraits && rows.length === 0 && (
@@ -1198,8 +1086,8 @@ function ViewCoordinatorSubmissions() {
             )}
           </div>
         </div>
-        <div className="table-container">
-          <table className="mps-table">
+        <div className="table-container" style={{ width: '100%', overflowX: 'auto', margin: 0, padding: 0 }}>
+          <table className="mps-table" style={{ width: '100%', tableLayout: 'auto', margin: 0 }}>
             {gradeLevel && (
               <caption style={{ captionSide: 'top', textAlign: 'left', padding: '8px 0', fontWeight: 'bold', fontSize: '14px' }}>
                 Grade Level: {gradeLevel}
@@ -1290,320 +1178,219 @@ function ViewCoordinatorSubmissions() {
     URL.revokeObjectURL(url);
   };
 
-  const exportGradeSortedToCSV = () => {
-    if (processedGradeGroups.length === 0) {
+  const exportGradeSortedToExcel = (gradeGroupsOverride) => {
+    const gradeGroupsToUse =
+      Array.isArray(gradeGroupsOverride) && gradeGroupsOverride.length > 0
+        ? gradeGroupsOverride
+        : processedGradeGroups;
+
+    const validGroups = gradeGroupsToUse.filter((group) =>
+      (group.coordinators || []).some(
+        (coord) => (coord.submissions || []).length > 0
+      )
+    );
+
+    if (validGroups.length === 0) {
       alert('No data to export');
       return;
     }
 
-    const csvRows = [];
-    
-    processedGradeGroups.forEach((gradeGroup) => {
+    const workbook = XLSX.utils.book_new();
+
+    validGroups.forEach((gradeGroup, idx) => {
       const gradeLevel = gradeGroup.grade_level || 'N/A';
       const coordinators = gradeGroup.coordinators || [];
-      
-      // Add grade level header
-      csvRows.push(`Grade ${gradeLevel}`);
-      csvRows.push('');
-      
+      const sheetData = [];
+
+      sheetData.push([`Grade ${gradeLevel}`]);
+      sheetData.push([]);
+
       coordinators.forEach((coordinator) => {
-        const coordinatorName = coordinator.coordinator_name || `Coordinator ${coordinator.coordinator_id}`;
+        const coordinatorName =
+          coordinator.coordinator_name || `Coordinator ${coordinator.coordinator_id}`;
         const coordinatorSubmissions = coordinator.submissions || [];
-        
+
+        if (coordinatorSubmissions.length === 0) {
+          return;
+        }
+
+        sheetData.push([`Coordinator: ${coordinatorName}`]);
+        sheetData.push([]);
+
         coordinatorSubmissions.forEach((submission) => {
           const subjectName = extractSubject(submission);
           const fields = submission.fields || {};
           const laemplRows = fields.rows || [];
           const mpsRows = fields.mps_rows || [];
-          
-          // Add coordinator and subject info
-          csvRows.push(`Coordinator: ${coordinatorName}`);
-          csvRows.push(`Subject: ${subjectName}`);
-          csvRows.push('');
-          
-          // Helper to get LAEMPL columns (same logic as LAEMPLReportDisplay)
-          const getLAEMPLColumns = () => {
-            if (laemplRows && laemplRows.length > 0) {
-              const extractedCols = extractColumns(laemplRows);
-              return extractedCols;
-            } else {
-              // No rows - try to extract subject from assignment title or fields
-              const assignmentTitle = submission?.assignment_title || submission?.title || '';
-              const subjectNameFromFields = fields?.subject_name || 
-                                           (assignmentTitle.includes(' - ') ? assignmentTitle.split(' - ').pop().trim() : null);
-              const subjectId = fields?.subject_id;
-              
-              const cols = [
-                { key: "m", label: "M" },
-                { key: "f", label: "F" }
+
+          sheetData.push([`Subject: ${subjectName}`]);
+          sheetData.push([]);
+
+          const laemplCols = extractColumns(laemplRows, submission, fields);
+          sheetData.push(['LAEMPL Report']);
+          const laemplHeader = ['Trait', ...laemplCols.map((col) => col.label)];
+          sheetData.push(laemplHeader);
+          if (laemplRows.length === 0) {
+            sheetData.push(['No LAEMPL data yet']);
+          } else {
+            laemplRows.forEach((row) => {
+              const rowData = [
+                row.trait || '',
+                ...laemplCols.map((col) => getValueForColumn(row, col) || ''),
               ];
-              
-              if (subjectId) {
-                cols.push({
-                  key: `subject_${subjectId}`,
-                  originalKey: `subject_${subjectId}`,
-                  label: `${subjectNameFromFields || 'Subject'} (15 - 25 points)`
-                });
-              } else if (subjectNameFromFields) {
-                const normalizedSubject = subjectNameFromFields.toLowerCase().replace(/[^a-z0-9]/g, '');
-                const defaultCol = DEFAULT_COLS.find(c => {
-                  const defaultNormalized = c.key.toLowerCase().replace(/[^a-z0-9]/g, '');
-                  return defaultNormalized === normalizedSubject || 
-                         subjectNameFromFields.toLowerCase().includes(c.key.toLowerCase()) ||
-                         c.key.toLowerCase().includes(normalizedSubject);
-                });
-                
-                if (defaultCol) {
-                  cols.push({
-                    ...defaultCol,
-                    originalKey: defaultCol.key,
-                    label: `${subjectNameFromFields} (15 - 25 points)`
-                  });
-                } else {
-                  cols.push({
-                    key: normalizedSubject,
-                    originalKey: subjectNameFromFields,
-                    label: `${subjectNameFromFields} (15 - 25 points)`
-                  });
-                }
-              }
-              
-              cols.push(
-                { key: "total_score", label: "Total Score" },
-                { key: "hs", label: "HS" },
-                { key: "ls", label: "LS" },
-                { key: "total_items", label: "Total no. of Items" }
-              );
-              
-              return cols;
-            }
-          };
-          
-          // Get traits for LAEMPL (use sections from database if no data)
-          const getLAEMPLTraits = () => {
-            if (laemplRows && laemplRows.length > 0) {
-              const traitsFromRows = laemplRows.map(row => row.trait).filter(Boolean);
-              if (traitsFromRows.length > 0) {
-                return traitsFromRows;
-              }
-            }
-            // If no traits, we'll use DEFAULT_TRAITS (in real display, it fetches from DB)
-            return DEFAULT_TRAITS;
-          };
-          
-          // Export LAEMPL Report
-          csvRows.push('LAEMPL Report (Grade ' + gradeLevel + ')');
-          const laemplCols = getLAEMPLColumns();
-          const laemplTraits = getLAEMPLTraits();
-          const laemplHeader = ['Trait', ...laemplCols.map(col => col.label)].map(escapeCSV).join(',');
-          csvRows.push(laemplHeader);
-          
-          laemplTraits.forEach((trait) => {
-            const rowData = laemplRows.find(r => {
-              if (!r.trait) return false;
-              return r.trait === trait || 
-                     r.trait.toLowerCase().trim() === trait.toLowerCase().trim();
-            }) || {};
-            
-            const csvRow = [
-              trait,
-              ...laemplCols.map(col => {
-                const dataKey = col.originalKey || col.key;
-                const value = rowData[dataKey] || 
-                             rowData[col.key] || 
-                             rowData[col.originalKey] || 
-                             rowData[dataKey.toLowerCase()] ||
-                             rowData[col.key.toLowerCase()] ||
-                             '';
-                return value;
-              })
-            ];
-            csvRows.push(csvRow.map(escapeCSV).join(','));
-          });
-          
-          csvRows.push(''); // Empty row separator
-          
-          // Export MPS Report
-          csvRows.push('MPS Report (Grade ' + gradeLevel + ')');
-          const mpsTraits = (mpsRows && mpsRows.length > 0) 
-            ? mpsRows.map(row => row.trait).filter(Boolean)
-            : DEFAULT_TRAITS;
-          const mpsHeader = ['Trait', ...DEFAULT_COLS_MPS.map(col => col.label)].map(escapeCSV).join(',');
-          csvRows.push(mpsHeader);
-          
-          mpsTraits.forEach((trait) => {
-            const rowData = mpsRows.find(r => r.trait === trait) || {};
-            const csvRow = [
-              trait,
-              ...DEFAULT_COLS_MPS.map(col => {
-                const value = rowData[col.key] || '';
-                return value;
-              })
-            ];
-            csvRows.push(csvRow.map(escapeCSV).join(','));
-          });
-          
-          csvRows.push(''); // Empty row separator between submissions
-          csvRows.push(''); // Extra separator
+              sheetData.push(rowData);
+            });
+          }
+
+          sheetData.push([]);
+
+          sheetData.push(['MPS Report']);
+          const mpsHeader = ['Trait', ...DEFAULT_COLS_MPS.map((col) => col.label)];
+          sheetData.push(mpsHeader);
+          if (mpsRows.length === 0) {
+            sheetData.push(['No MPS data yet']);
+          } else {
+            mpsRows.forEach((row) => {
+              const rowData = [
+                row.trait || '',
+                ...DEFAULT_COLS_MPS.map((col) => row[col.key] || ''),
+              ];
+              sheetData.push(rowData);
+            });
+            const averages = calculateMPSAverages(mpsRows, DEFAULT_COLS_MPS);
+            sheetData.push([
+              'Average',
+              ...DEFAULT_COLS_MPS.map((col) =>
+                ['mean', 'median', 'pl', 'mps', 'sd', 'target'].includes(col.key)
+                  ? averages[col.key] || ''
+                  : ''
+              ),
+            ]);
+          }
+
+          sheetData.push([]);
         });
+
+        sheetData.push([]);
       });
-      
-      csvRows.push(''); // Extra separator between grade levels
+
+      const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+      applySheetSizing(worksheet, sheetData);
+      const safeSheetName =
+        `Grade_${gradeLevel}`.replace(/[\[\]\*\/\\\?\:]/g, '').substring(0, 31) ||
+        `Grade${idx + 1}`;
+      XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName);
     });
-    
-    const csvContent = csvRows.join('\n');
+
     const timestamp = new Date().toISOString().split('T')[0];
-    downloadCSV(csvContent, `LAEMPL_MPS_Reports_By_Grade_${timestamp}.csv`);
+    XLSX.writeFile(workbook, `LAEMPL_MPS_Reports_By_Grade_${timestamp}.xlsx`);
   };
 
-  const exportSubjectSortedToCSV = () => {
-    const subjects = subjectOrganizedData;
+  const exportSubjectSortedToExcel = (subjectsOverride) => {
+    const subjects =
+      Array.isArray(subjectsOverride) && subjectsOverride.length > 0
+        ? subjectsOverride
+        : subjectOrganizedData;
     
     if (subjects.length === 0) {
       alert('No data to export');
       return;
     }
 
-    const csvRows = [];
-    
-    subjects.forEach((subject) => {
-      const subjectName = subject.subject_name || 'Unknown Subject';
+    const workbook = XLSX.utils.book_new();
+
+    subjects.forEach((subject, idx) => {
+      const subjectName = subject.subject_name || `Subject ${idx + 1}`;
       
-      // Helper to get columns for this subject (same logic as render)
-      const getSubjectColumn = () => {
-        const normalizedSubject = normalizeSubjectName(subjectName);
-        const subjectKey = `subject_${normalizedSubject.replace(/[^a-z0-9]/g, '')}`;
-        const defaultCol = DEFAULT_COLS.find(c => {
-          const defaultNormalized = normalizeSubjectName(c.key).replace(/[^a-z0-9]/g, '');
-          const subjectNormalized = normalizedSubject.replace(/[^a-z0-9]/g, '');
-          return defaultNormalized === subjectNormalized || 
-                 normalizedSubject.includes(normalizeSubjectName(c.key)) ||
-                 normalizeSubjectName(c.key).includes(normalizedSubject);
-        });
-        return {
-          key: subjectKey,
-          originalKey: defaultCol ? defaultCol.key : subjectName,
-          label: `${subjectName} (15 - 25 points)`
-        };
-      };
-      
-      const laemplHasData = subject.laemplRows.some(hasRowData);
-      let laemplCols = [];
-      
-      if (subject.laemplRows && subject.laemplRows.length > 0 && laemplHasData) {
-        laemplCols = extractColumns(subject.laemplRows);
-        const mCol = laemplCols.find(col => col.key === 'm');
-        const fCol = laemplCols.find(col => col.key === 'f');
-        const subjectCol = getSubjectColumn();
-        const normalizedSubject = normalizeSubjectName(subjectName);
-        const normalizedKey = normalizedSubject.replace(/[^a-z0-9]/g, '');
-        const subjectKeyPrefix = `subject_${normalizedKey}`;
-        
-        const hasSubjectCol = laemplCols.some(col => {
-          const colKey = (col.key || '').toLowerCase();
-          if (colKey === 'm' || colKey === 'f') return false;
-          const colNormalized = normalizeSubjectName(col.originalKey || col.key || '').replace(/[^a-z0-9]/g, '');
-          const colLabel = normalizeSubjectName(col.label || '');
-          return colKey.startsWith(subjectKeyPrefix) ||
-                 (colNormalized.length > 2 && colNormalized === normalizedKey) ||
-                 (colLabel.length > 2 && (colLabel === normalizedSubject || 
-                                         colLabel.includes(normalizedSubject) ||
-                                         normalizedSubject.includes(colLabel)));
-        });
-        
-        const existingSubjectCol = hasSubjectCol ? laemplCols.find(col => {
-          const colKey = (col.key || '').toLowerCase();
-          if (colKey === 'm' || colKey === 'f') return false;
-          const colNormalized = normalizeSubjectName(col.originalKey || col.key || '').replace(/[^a-z0-9]/g, '');
-          const colLabel = normalizeSubjectName(col.label || '');
-          return colKey.startsWith(subjectKeyPrefix) ||
-                 (colNormalized.length > 2 && colNormalized === normalizedKey) ||
-                 (colLabel.length > 2 && (colLabel === normalizedSubject || 
-                                          colLabel.includes(normalizedSubject) ||
-                                          normalizedSubject.includes(colLabel)));
-        }) : null;
-        
-        const otherCols = laemplCols.filter(col => {
-          const colKey = (col.key || '').toLowerCase();
-          if (colKey === 'm' || colKey === 'f') return false;
-          const colNormalized = normalizeSubjectName(col.originalKey || col.key || '').replace(/[^a-z0-9]/g, '');
-          const colLabel = normalizeSubjectName(col.label || '');
-          if (colKey.startsWith(subjectKeyPrefix) ||
-              (colNormalized.length > 2 && colNormalized === normalizedKey) ||
-              (colLabel.length > 2 && (colLabel === normalizedSubject || 
-                                      colLabel.includes(normalizedSubject) ||
-                                      normalizedSubject.includes(colLabel)))) {
-            return false;
+      // Find a representative submission to determine columns (same logic as render)
+      let sampleSubmission = null;
+      let sampleFields = null;
+      for (const gradeGroup of processedGradeGroups) {
+        for (const coordinator of (gradeGroup.coordinators || [])) {
+          for (const submission of (coordinator.submissions || [])) {
+            const subSubjectName = extractSubject(submission);
+            if (normalizeSubjectName(subSubjectName) === normalizeSubjectName(subjectName)) {
+              sampleSubmission = submission;
+              sampleFields = submission.fields || {};
+              break;
+            }
           }
-          return true;
-        });
-        
-        laemplCols = [];
-        if (mCol) laemplCols.push(mCol);
-        if (fCol) laemplCols.push(fCol);
-        if (existingSubjectCol) {
-          laemplCols.push({
-            ...existingSubjectCol,
-            label: `${subjectName} (15 - 25 points)`
-          });
-        } else {
-          laemplCols.push(subjectCol);
+          if (sampleSubmission) break;
         }
-        laemplCols.push(...otherCols);
-      } else {
-        laemplCols = [
-          { key: "m", label: "M" },
-          { key: "f", label: "F" },
-          getSubjectColumn(),
-          { key: "total_score", label: "Total Score" },
-          { key: "hs", label: "HS" },
-          { key: "ls", label: "LS" },
-          { key: "total_items", label: "Total no. of Items" }
-        ];
+        if (sampleSubmission) break;
       }
-      
-      // LAEMPL Report
-      csvRows.push(`Subject: ${subjectName}`);
-      csvRows.push('LAEMPL Report');
-      const laemplHeader = ['Grade Level', ...laemplCols.map(col => col.label)].map(escapeCSV).join(',');
-      csvRows.push(laemplHeader);
-      
-      subject.laemplRows.forEach((row) => {
-        const csvRow = [
-          row.trait || '',
-          ...laemplCols.map(col => {
-            const value = getValueForColumn(row, col);
-            return value || '';
-          })
-        ];
-        csvRows.push(csvRow.map(escapeCSV).join(','));
-      });
-      
-      csvRows.push(''); // Empty row separator
-      
-      // MPS Report
-      csvRows.push('MPS Report');
-      const mpsHeader = ['Grade Level', ...DEFAULT_COLS_MPS.map(col => col.label)].map(escapeCSV).join(',');
-      csvRows.push(mpsHeader);
-      
-      subject.mpsRows.forEach((row) => {
-        const csvRow = [
-          row.trait || '',
-          ...DEFAULT_COLS_MPS.map(col => {
-            const value = getValueForColumn(row, col);
-            return value || '';
-          })
-        ];
-        csvRows.push(csvRow.map(escapeCSV).join(','));
-      });
-      
-      csvRows.push(''); // Empty row separator between subjects
-      csvRows.push(''); // Extra separator
+      if (!sampleFields) {
+        sampleFields = {
+          subject_name: subjectName,
+          subject_id: availableSubjects.find(
+            (s) => normalizeSubjectName(s.subject_name) === normalizeSubjectName(subjectName)
+          )?.subject_id,
+        };
+      }
+
+      const laemplCols = extractColumns(
+        subject.laemplRows && subject.laemplRows.length > 0 ? subject.laemplRows : [],
+        sampleSubmission,
+        sampleFields
+      );
+
+      const sheetData = [];
+      sheetData.push([`Subject: ${subjectName}`]);
+      sheetData.push([]);
+
+      // LAEMPL section
+      sheetData.push(["LAEMPL Report"]);
+      const laemplHeader = ["Grade Level", ...laemplCols.map((col) => col.label)];
+      sheetData.push(laemplHeader);
+      if (subject.laemplRows.length === 0) {
+        sheetData.push(["No LAEMPL data yet"]);
+      } else {
+        subject.laemplRows.forEach((row) => {
+          const rowData = [
+            row.trait || "",
+            ...laemplCols.map((col) => getValueForColumn(row, col) || ""),
+          ];
+          sheetData.push(rowData);
+        });
+      }
+
+      sheetData.push([]);
+
+      // MPS section
+      sheetData.push(["MPS Report"]);
+      const mpsHeader = ["Grade Level", ...DEFAULT_COLS_MPS.map((col) => col.label)];
+      sheetData.push(mpsHeader);
+      if (subject.mpsRows.length === 0) {
+        sheetData.push(["No MPS data yet"]);
+      } else {
+        subject.mpsRows.forEach((row) => {
+          const rowData = [
+            row.trait || "",
+            ...DEFAULT_COLS_MPS.map((col) => getValueForColumn(row, col) || ""),
+          ];
+          sheetData.push(rowData);
+        });
+        const averages = calculateMPSAverages(subject.mpsRows, DEFAULT_COLS_MPS);
+        sheetData.push([
+          "Average",
+          ...DEFAULT_COLS_MPS.map((col) =>
+            ["mean", "median", "pl", "mps", "sd", "target"].includes(col.key)
+              ? averages[col.key] || ""
+              : ""
+          ),
+        ]);
+      }
+
+      const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+      applySheetSizing(worksheet, sheetData);
+      const safeSheetName =
+        subjectName.replace(/[\[\]\*\/\\\?\:]/g, "").substring(0, 31) ||
+        `Subject${idx + 1}`;
+      XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName);
     });
-    
-    const csvContent = csvRows.join('\n');
-    const timestamp = new Date().toISOString().split('T')[0];
-    downloadCSV(csvContent, `LAEMPL_MPS_Reports_By_Subject_${timestamp}.csv`);
+
+    const timestamp = new Date().toISOString().split("T")[0];
+    XLSX.writeFile(workbook, `LAEMPL_MPS_Reports_By_Subject_${timestamp}.xlsx`);
   };
 
   const renderSubmissionCard = (submission, index, coordinatorLabel = null) => {
@@ -1621,7 +1408,9 @@ function ViewCoordinatorSubmissions() {
           backgroundColor: '#fff',
           borderRadius: '8px',
           boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-          marginLeft: coordinatorLabel ? '1rem' : '0'
+          marginLeft: coordinatorLabel ? '1rem' : '0',
+          width: '100%',
+          maxWidth: '100%'
         }}
       >
         <div style={{ marginBottom: '1rem' }}>
@@ -1637,8 +1426,8 @@ function ViewCoordinatorSubmissions() {
             <strong>Grade Level:</strong> {gradeLevel}
           </p>
         </div>
-        <div className="submission-content">
-          <div className="content-section">
+        <div className="submission-content" style={{ width: '100%', maxWidth: '100%' }}>
+          <div className="content-section" style={{ width: '100%', maxWidth: '100%' }}>
             {renderSubmissionContent({ ...submission, fields })}
           </div>
         </div>
@@ -1647,7 +1436,7 @@ function ViewCoordinatorSubmissions() {
   };
 
   const renderGradeSortedView = () => {
-    if (processedGradeGroups.length === 0) {
+    if (filteredGradeGroups.length === 0) {
       return (
         <div style={{ textAlign: 'center', padding: '40px' }}>
           <p>No coordinator submissions found for any grade level.</p>
@@ -1655,24 +1444,57 @@ function ViewCoordinatorSubmissions() {
       );
     }
 
-    return processedGradeGroups.map((gradeGroup, gradeIdx) => {
+    return filteredGradeGroups.map((gradeGroup, gradeIdx) => {
       const gradeLevel = gradeGroup.grade_level || 'N/A';
       const coordinators = gradeGroup.coordinators || [];
 
       return (
         <div key={`grade-${gradeLevel}-${gradeIdx}`} style={{ marginBottom: '3rem' }}>
-          <h3
+          <div
             style={{
-              fontSize: '20px',
-              fontWeight: '600',
-              color: '#1e293b',
+              display: 'flex',
+              alignItems: 'center',
               marginBottom: '1.5rem',
               paddingBottom: '0.5rem',
               borderBottom: '2px solid #e2e8f0',
             }}
           >
-            Grade {gradeLevel}
-          </h3>
+            <h3
+              style={{
+                fontSize: '20px',
+                fontWeight: '600',
+                color: '#1e293b',
+                margin: 0,
+              }}
+            >
+              Grade {gradeLevel}
+            </h3>
+            <select
+              value={selectedGradeFilter}
+              onChange={(e) => setSelectedGradeFilter(e.target.value)}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '6px',
+                border: '1px solid #cbd5e1',
+                backgroundColor: '#fff',
+                color: '#1e293b',
+                fontSize: '14px',
+                fontWeight: '500',
+                marginLeft: '1rem',
+                cursor: 'pointer',
+                outline: 'none',
+                minWidth: '150px',
+              }}
+            >
+              <option value="all">All Grades</option>
+              <option value="1">Grade 1</option>
+              <option value="2">Grade 2</option>
+              <option value="3">Grade 3</option>
+              <option value="4">Grade 4</option>
+              <option value="5">Grade 5</option>
+              <option value="6">Grade 6</option>
+            </select>
+          </div>
 
           {coordinators.map((coordinator, coordIdx) => {
             const coordinatorSubmissions = coordinator.submissions || [];
@@ -1705,7 +1527,7 @@ function ViewCoordinatorSubmissions() {
   };
 
   const renderSubjectSortedView = () => {
-    const subjects = subjectOrganizedData;
+    const subjects = filteredSubjects;
 
     if (subjects.length === 0) {
       return (
@@ -1715,7 +1537,41 @@ function ViewCoordinatorSubmissions() {
       );
     }
 
-    return subjects.map((subject, subjectIdx) => {
+    return (
+      <>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            marginBottom: '1.5rem',
+          }}
+        >
+          <label style={{ fontWeight: 600, color: '#000000' }}>Subject</label>
+          <select
+            value={subjectFilter}
+            onChange={(e) => setSubjectFilter(e.target.value)}
+            style={{
+              padding: '10px 16px',
+              borderRadius: '6px',
+              border: '1px solid #cbd5e1',
+              backgroundColor: '#fff',
+              color: '#1f2937',
+              fontWeight: 500,
+              cursor: 'pointer',
+              minWidth: '220px',
+            }}
+          >
+            <option value="all">All Subjects</option>
+            {subjectOptions.map((subject) => (
+              <option key={subject} value={subject}>
+                {subject}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {subjects.map((subject, subjectIdx) => {
       const subjectName = subject.subject_name || "Unknown Subject";
       const laemplHasData = subject.laemplRows.some(hasRowData);
       const mpsHasData = subject.mpsRows.some(hasRowData);
@@ -1784,14 +1640,14 @@ function ViewCoordinatorSubmissions() {
               marginBottom: '2rem',
             }}
           >
-            <div className="laempl-report-display">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <div className="laempl-report-display" style={{ width: '100%', maxWidth: '100%', margin: 0, padding: 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', padding: '0 20px' }}>
                 <div>
                   <h4>LAEMPL Report</h4>
                 </div>
               </div>
-              <div className="table-container">
-                <table className="laempl-table">
+              <div className="table-container" style={{ width: '100%', overflowX: 'auto', margin: 0, padding: 0 }}>
+                <table className="laempl-table" style={{ width: '100%', tableLayout: 'auto', margin: 0 }}>
                   <thead>
                     <tr>
                       <th>Grade Level</th>
@@ -1821,14 +1677,14 @@ function ViewCoordinatorSubmissions() {
               )}
             </div>
 
-            <div className="mps-report-display" style={{ marginTop: '2rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <div className="mps-report-display" style={{ marginTop: '2rem', width: '100%', maxWidth: '100%', margin: 0, padding: 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', padding: '0 20px' }}>
                 <div>
                   <h4>MPS Report</h4>
                 </div>
               </div>
-              <div className="table-container">
-                <table className="mps-table">
+              <div className="table-container" style={{ width: '100%', overflowX: 'auto', margin: 0, padding: 0 }}>
+                <table className="mps-table" style={{ width: '100%', tableLayout: 'auto', margin: 0 }}>
                   <thead>
                     <tr>
                       <th>Grade Level</th>
@@ -1880,7 +1736,9 @@ function ViewCoordinatorSubmissions() {
           </div>
         </div>
       );
-    });
+    })}
+      </>
+    );
   };
 
   const renderSingleCoordinatorContent = () => {
@@ -1921,7 +1779,10 @@ function ViewCoordinatorSubmissions() {
         >
           <button
             type="button"
-            onClick={() => setSortMode('grade')}
+            onClick={() => {
+              setSortMode('grade');
+              setSubjectFilter('all');
+            }}
             style={{
               padding: '10px 20px',
               borderRadius: '6px',
@@ -1956,7 +1817,11 @@ function ViewCoordinatorSubmissions() {
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
             <button
               type="button"
-              onClick={sortMode === 'grade' ? exportGradeSortedToCSV : exportSubjectSortedToCSV}
+              onClick={
+                sortMode === 'grade'
+                  ? () => exportGradeSortedToExcel(filteredGradeGroups)
+                  : () => exportSubjectSortedToExcel(filteredSubjects)
+              }
               style={{
                 padding: '10px 20px',
                 borderRadius: '6px',
@@ -1969,10 +1834,10 @@ function ViewCoordinatorSubmissions() {
                 alignItems: 'center',
                 gap: '8px',
               }}
-              title={`Export ${sortMode === 'grade' ? 'Grade Sorted' : 'Subject Sorted'} View to CSV`}
+              title={`Export ${sortMode === 'grade' ? 'Grade Sorted' : 'Subject Sorted'} View to Excel`}
             >
               <span>📥</span>
-              <span>Export to CSV</span>
+              <span>Export to Excel</span>
             </button>
           </div>
         </div>

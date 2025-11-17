@@ -328,12 +328,22 @@
 }
 
 /* LAEMPL and MPS Report Table Styles */
+.submission-content,
+.content-section,
+.laempl-report-display,
+.mps-report-display {
+  width: 100%;
+  max-width: 100%;
+}
+
 .laempl-report-display, .mps-report-display {
   margin: 20px 0;
   background: white;
   border-radius: 8px;
   border: 1px solid #e0e0e0;
   overflow: hidden;
+  margin-left: 0;
+  margin-right: 0;
 }
 
 .laempl-report-display h4, .mps-report-display h4 {
@@ -348,6 +358,7 @@
 .table-container {
   overflow-x: auto;
   max-width: 100%;
+  width: 100%;
 }
 
 .laempl-table, .mps-table {

@@ -536,15 +536,38 @@ export const getAccomplishmentPeers = (req, res) => {
   console.log("getAccomplishmentPeers:", { id, ra, pra, includeConsolidated });
 
   const fetchSqlFromSubmission = `
-    SELECT s2.submission_id, s2.report_assignment_id, s2.value AS title, s2.status, s2.fields
+    SELECT s2.submission_id, s2.report_assignment_id, s2.value AS title, s2.status, s2.fields, ud.name AS teacher_name
     FROM submission s
     JOIN submission s2 ON s2.report_assignment_id = s.report_assignment_id
+    JOIN user_details ud ON s2.submitted_by = ud.user_id
     WHERE s.submission_id = ? AND s2.status >= 2
   `;
 
-  // Build role filter: principal can see coordinator+teacher; others only teacher
+  // Build role filter: 
+  // - Principal can see coordinator+teacher
+  // - Coordinators can see teacher + other coordinators (but exclude accomplishment coordinators)
+  // - Teachers can only see teachers
   const requesterRole = (req.user?.role || '').toLowerCase();
-  const roleClause = requesterRole === 'principal' ? "LOWER(ud.role) IN ('teacher','coordinator')" : "LOWER(ud.role) = 'teacher'";
+  let roleClause;
+  if (requesterRole === 'principal') {
+    roleClause = "LOWER(ud.role) IN ('teacher','coordinator')";
+  } else if (requesterRole === 'coordinator') {
+    // Coordinators can see teachers and other coordinators
+    // But exclude accomplishment coordinators (those with coordinator_user_id for category_id = 0)
+    roleClause = `(
+      LOWER(ud.role) = 'teacher' 
+      OR (
+        LOWER(ud.role) = 'coordinator' 
+        AND NOT EXISTS (
+          SELECT 1 FROM report_assignment ra_check 
+          WHERE ra_check.coordinator_user_id = ud.user_id 
+          AND ra_check.category_id = 0
+        )
+      )
+    )`;
+  } else {
+    roleClause = "LOWER(ud.role) = 'teacher'";
+  }
 
   // NOTE: exclude current submission when ra= is provided
   // Look for submitted peers from the specific report_assignment_id
@@ -554,7 +577,7 @@ export const getAccomplishmentPeers = (req, res) => {
     : `AND (JSON_EXTRACT(s.fields, '$.meta.consolidatedInto') IS NULL OR JSON_EXTRACT(s.fields, '$.meta.consolidatedInto') = 'null')`;
   
   const fetchSqlFromRA = `
-    SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields
+    SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields, ud.name AS teacher_name
     FROM submission s
     JOIN user_details ud ON s.submitted_by = ud.user_id
     JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
@@ -567,7 +590,7 @@ export const getAccomplishmentPeers = (req, res) => {
 
   // Parent-child query: get teacher submissions from child assignments of the parent
   const fetchSqlFromParent = `
-    SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields
+    SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields, ud.name AS teacher_name
     FROM submission s
     JOIN user_details ud ON s.submitted_by = ud.user_id
     JOIN report_assignment ra_child ON s.report_assignment_id = ra_child.report_assignment_id
@@ -764,16 +787,25 @@ export const getAccomplishmentPeers = (req, res) => {
             imgs.forEach((nm) => g.images.add(nm));
             const innerForm = fieldsObj?._form || {};
             const innerFields = innerForm.fields || {};
+            const answers = fieldsObj?._answers || {};
             const narrativeText = String(
               fieldsObj.narrative ||
               fieldsObj.text ||
+              answers.narrative ||
+              answers.text ||
               innerForm.narrative ||
               innerForm.text ||
               innerFields.narrative ||
               innerFields.text ||
               ""
             ).trim();
-            g.submissions.push({ submission_id: r.submission_id, images: imgs, narrative: narrativeText, fields: fieldsObj });
+            g.submissions.push({ 
+              submission_id: r.submission_id, 
+              images: imgs, 
+              narrative: narrativeText, 
+              fields: fieldsObj,
+              teacher_name: r.teacher_name || null
+            });
             groups.set(key, g);
           }
           const out = Array.from(groups.values()).map((g) => ({
@@ -806,16 +838,25 @@ export const getAccomplishmentPeers = (req, res) => {
           imgs.forEach((nm) => g.images.add(nm));
           const innerForm = fieldsObj?._form || {};
           const innerFields = innerForm.fields || {};
+          const answers = fieldsObj?._answers || {};
           const narrativeText = String(
             fieldsObj.narrative ||
             fieldsObj.text ||
+            answers.narrative ||
+            answers.text ||
             innerForm.narrative ||
             innerForm.text ||
             innerFields.narrative ||
             innerFields.text ||
             ""
           ).trim();
-          g.submissions.push({ submission_id: r.submission_id, images: imgs, narrative: narrativeText, fields: fieldsObj });
+          g.submissions.push({ 
+            submission_id: r.submission_id, 
+            images: imgs, 
+            narrative: narrativeText, 
+            fields: fieldsObj,
+            teacher_name: r.teacher_name || null
+          });
           groups.set(key, g);
         }
         const out = Array.from(groups.values()).map((g) => ({
@@ -841,18 +882,39 @@ export const getAccomplishmentPeers = (req, res) => {
  */
 export const consolidateAccomplishmentByTitle = (req, res) => {
   const { id } = req.params;
-  const { title, parent_assignment_id, report_assignment_id } = req.body || {};
+  const { title, parent_assignment_id, report_assignment_id, submission_ids } = req.body || {};
   if (!title) return res.status(400).json({ error: "title is required" });
+  
+  // If submission_ids is provided, only consolidate those specific submissions
+  // Otherwise, consolidate all submissions with the same title (backward compatibility)
+  const filterBySubmissionIds = Array.isArray(submission_ids) && submission_ids.length > 0;
 
   const requesterRole = (req.user?.role || '').toLowerCase();
-  const roleClause = requesterRole === 'principal'
-    ? "LOWER(ud.role) IN ('teacher','coordinator')"
-    : "LOWER(ud.role) = 'teacher'";
+  let roleClause;
+  if (requesterRole === 'principal') {
+    roleClause = "LOWER(ud.role) IN ('teacher','coordinator')";
+  } else if (requesterRole === 'coordinator') {
+    // Coordinators can see teachers and other coordinators
+    // But exclude accomplishment coordinators (those with coordinator_user_id for category_id = 0)
+    roleClause = `(
+      LOWER(ud.role) = 'teacher' 
+      OR (
+        LOWER(ud.role) = 'coordinator' 
+        AND NOT EXISTS (
+          SELECT 1 FROM report_assignment ra_check 
+          WHERE ra_check.coordinator_user_id = ud.user_id 
+          AND ra_check.category_id = 0
+        )
+      )
+    )`;
+  } else {
+    roleClause = "LOWER(ud.role) = 'teacher'";
+  }
 
   // Prefer exact same assignment when provided (principal single-assignment flow)
   // Fallback to parent-child filtering when parent_assignment_id is provided
   const peersSql = report_assignment_id ? `
-    SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields
+    SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields, ud.name AS teacher_name
     FROM submission s
     JOIN user_details ud ON s.submitted_by = ud.user_id
     JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
@@ -861,7 +923,7 @@ export const consolidateAccomplishmentByTitle = (req, res) => {
       AND ${roleClause}
       AND s.report_assignment_id = ?
   ` : parent_assignment_id ? `
-    SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields
+    SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields, ud.name AS teacher_name
     FROM submission s
     JOIN user_details ud ON s.submitted_by = ud.user_id
     JOIN report_assignment ra_child ON s.report_assignment_id = ra_child.report_assignment_id
@@ -870,7 +932,7 @@ export const consolidateAccomplishmentByTitle = (req, res) => {
       AND ${roleClause}
       AND ra_child.parent_report_assignment_id = ?
   ` : `
-    SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields
+    SELECT s.submission_id, s.report_assignment_id, s.value AS title, s.status, s.fields, ud.name AS teacher_name
     FROM submission s
     JOIN user_details ud ON s.submitted_by = ud.user_id
     JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
@@ -911,6 +973,14 @@ export const consolidateAccomplishmentByTitle = (req, res) => {
         .replace(/\s+/g, ' ')
         .trim()
         .toLowerCase();
+      
+      // Check if this submission should be included:
+      // 1. If submission_ids is provided, only include if it's in the list
+      // 2. Otherwise, include if title matches (backward compatibility)
+      const shouldInclude = filterBySubmissionIds 
+        ? submission_ids.includes(r.submission_id)
+        : t === targetKey;
+      
       console.log('[Consolidate] Row:', {
         submission_id: r.submission_id,
         report_assignment_id: r.report_assignment_id,
@@ -918,9 +988,12 @@ export const consolidateAccomplishmentByTitle = (req, res) => {
         parsedTitle: fieldsObj.title,
         normalizedTitle: t,
         matchesTarget: t === targetKey,
+        inSubmissionIds: filterBySubmissionIds ? submission_ids.includes(r.submission_id) : 'N/A',
+        shouldInclude,
         imgsCandidates: imgsArr,
       });
-      if (t === targetKey) {
+      
+      if (shouldInclude) {
         imgsArr.forEach((nm) => addImage(nm));
         // Mark this peer submission as consolidated into the current submission
         const peerFields = fieldsObj || {};
@@ -948,7 +1021,8 @@ export const consolidateAccomplishmentByTitle = (req, res) => {
   // Fallback: if no images matched by exact title (due to formatting/whitespace differences),
   // include all discovered images from the rows. This mirrors the coordinator experience where
   // a single peer row is typically the intended target.
-  if (combinedMap.size === 0 && Array.isArray(rows) && rows.length > 0) {
+  // Only apply fallback if not filtering by submission_ids
+  if (!filterBySubmissionIds && combinedMap.size === 0 && Array.isArray(rows) && rows.length > 0) {
     for (const r of rows) {
       let fieldsObj = {};
       try {
@@ -996,7 +1070,70 @@ export const consolidateAccomplishmentByTitle = (req, res) => {
       } catch {}
       const currImgs = Array.isArray(current.images) ? current.images : [];
       console.log('[Consolidate] Current submission images before merge:', currImgs);
-      currImgs.forEach((nm) => addImage(nm));
+      
+      // If filtering by submission_ids (re-consolidation), we need to:
+      // 1. Get images from all previously consolidated submissions
+      // 2. Remove images that came from unselected submissions
+      // 3. Keep only images from selected submissions + original images
+      if (filterBySubmissionIds) {
+        // Get all images from previously consolidated submissions that are NOT in the selected list
+        // First, get all submissions that were previously consolidated into this one
+        const previouslyConsolidatedIds = rows
+          .filter(r => {
+            let f = {};
+            try {
+              f = typeof r.fields === "string" ? JSON.parse(r.fields) : r.fields || {};
+            } catch {}
+            const consolidatedInto = f?.meta?.consolidatedInto;
+            return consolidatedInto === id;
+          })
+          .map(r => r.submission_id);
+        
+        // Find which of those are NOT selected
+        const unselectedSubmissionIds = previouslyConsolidatedIds.filter(subId => !submission_ids.includes(subId));
+        
+        console.log('[Consolidate] Previously consolidated IDs:', previouslyConsolidatedIds);
+        console.log('[Consolidate] Selected IDs:', submission_ids);
+        console.log('[Consolidate] Unselected IDs to remove:', unselectedSubmissionIds);
+        
+        // Get images from unselected previously consolidated submissions
+        const imagesToRemove = new Set();
+        rows.forEach(r => {
+          if (unselectedSubmissionIds.includes(r.submission_id)) {
+            let f = {};
+            try {
+              f = typeof r.fields === "string" ? JSON.parse(r.fields) : r.fields || {};
+            } catch {}
+            const imgsArr = Array.isArray(f?._answers?.images)
+              ? f._answers.images
+              : Array.isArray(f?.images)
+              ? f.images
+              : Array.isArray(f?.photos)
+              ? f.photos
+              : [];
+            imgsArr.forEach(img => {
+              const key = typeof img === 'string' ? img : (img.filename || img.url || JSON.stringify(img));
+              imagesToRemove.add(key);
+            });
+          }
+        });
+        
+        console.log('[Consolidate] Images to remove (from unselected):', Array.from(imagesToRemove));
+        
+        // Only add current images that are NOT from unselected consolidated submissions
+        currImgs.forEach((img) => {
+          const key = typeof img === 'string' ? img : (img.filename || img.url || JSON.stringify(img));
+          if (!imagesToRemove.has(key)) {
+            addImage(img);
+          } else {
+            console.log('[Consolidate] Skipping image (from unselected submission):', key);
+          }
+        });
+        console.log('[Consolidate] Removed images from unselected submissions:', imagesToRemove.size);
+      } else {
+        // Original behavior: add all current images
+        currImgs.forEach((nm) => addImage(nm));
+      }
 
       const next = {
         ...(current || {}),

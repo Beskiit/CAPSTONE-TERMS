@@ -37,7 +37,7 @@ app.set("trust proxy", 1);
 
 /* ----------------- MySQL pool ----------------- */
 const pool = mysql.createPool({
-  host: process.env.DB_HOST || "localhost",
+  host: process.env.DB_HOST || "127.0.0.1",
   user: process.env.DB_USER || "root",
   password: process.env.DB_PASSWORD || "",
   database: process.env.DB_NAME || "capstone_database",
@@ -1251,9 +1251,8 @@ app.get("/reports/submitted_by/:userId", async (req, res) => {
       LEFT JOIN user_details ud2 ON ra.given_by    = ud2.user_id
       LEFT JOIN school_year sy ON sy.year_id = ra.year
       LEFT JOIN quarter_enum qe ON qe.quarter_number = ra.quarter
-      WHERE ra.is_given = 0
-        AND s.status = 0
-        AND s.submitted_by = ?
+      WHERE s.submitted_by = ?
+        AND COALESCE(ra.is_archived, 0) = 0
     `;
     
     const params = [userId];

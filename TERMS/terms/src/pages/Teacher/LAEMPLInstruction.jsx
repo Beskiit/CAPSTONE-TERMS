@@ -340,24 +340,22 @@ function LAEMPLInstruction() {
                         <h2>LAEMPL</h2>
                     </div>
                     <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
-                        <div className="content" style={{ flex: 1 }}>
+                        <div className="content" style={{ flex: 1, backgroundColor: '#e0e0e0', borderRadius: '8px', padding: '16px', height: 'auto', minHeight: 'auto' }}>
                             <h3 className="header">Instructions</h3>
+                            {fromAssignedReport && (
+                                <div className="submission-btn-container">
+                                    <button className="view-submission" onClick={handleViewSubmission}>View Submission</button>
+                                </div>
+                            )}
                             <p className="instruction">{instruction || "No instruction provided."}</p>
-                            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                                {fromAssignedReport ? (
-                                    <>
-                                        <button className="instruction-btn" onClick={handleViewSubmission}>View Submission</button>
-                                        <button className="instruction-btn" onClick={handleEdit}>Edit</button>
-                                    </>
-                                ) : (
-                                    <>
-                                        <button className="instruction-btn" onClick={onPrepare}>+ Prepare Report</button>
-                                        {canSetReportToTeachers && (
-                                            <button className="instruction-btn" onClick={onSetAsReport}>Set as Report to Teachers</button>
-                                        )}
-                                    </>
-                                )}
-                            </div>
+                            {!fromAssignedReport && (
+                                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: '12px' }}>
+                                    <button className="instruction-btn" onClick={onPrepare}>+ Prepare Report</button>
+                                    {canSetReportToTeachers && (
+                                        <button className="instruction-btn" onClick={onSetAsReport}>Set as Report to Teachers</button>
+                                    )}
+                                </div>
+                            )}
                         </div>
                         <div style={{ width: '300px', backgroundColor: '#fff', borderRadius: '8px', padding: '16px', border: '1px solid #ccc' }}>
                             <div style={{ marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid #ccc' }}>
@@ -385,6 +383,11 @@ function LAEMPLInstruction() {
                                     <span style={{ fontWeight: '500' }}>Report Type:</span>{" "}
                                     <span>{state?.sub_category_name || state?.subject_name || 'LAEMPL & MPS'}</span>
                                 </div>
+                                {fromAssignedReport && (
+                                    <div style={{ marginTop: '12px' }}>
+                                        <button className="instruction-btn" onClick={handleEdit}>Edit</button>
+                                    </div>
+                                )}
                                 {state?.subject_name && (
                                     <div style={{ marginBottom: '8px' }}>
                                         <span style={{ fontWeight: '500' }}>Subject:</span>{" "}

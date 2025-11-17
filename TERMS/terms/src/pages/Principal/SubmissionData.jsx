@@ -4,6 +4,7 @@ import Breadcrumb from "../../components/Breadcrumb.jsx";
 import Sidebar from "../../components/shared/SidebarPrincipal.jsx";
 import SidebarCoordinator from "../../components/shared/SidebarCoordinator.jsx";
 import "../Teacher/LAEMPLReport.css";
+import * as XLSX from "xlsx";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com";
 
@@ -46,7 +47,40 @@ const clampVal = (k, v) => {
 const LOCK_STATUSES = new Set([1]); // e.g., 1=submitted
 
 function SubmissionData() {
+  const FIXED_COL_WIDTH = 25;
+  const applySheetSizing = (worksheet, data) => {
+    const maxCols = data.reduce((max, row) => Math.max(max, row.length), 0);
+    worksheet["!cols"] = Array.from({ length: maxCols }, () => ({
+      wch: FIXED_COL_WIDTH,
+    }));
+    worksheet["!rows"] = data.map((row) => {
+      const longest = row.reduce((max, cell) => {
+        if (cell == null) return max;
+        return Math.max(max, cell.toString().length);
+      }, 0);
+      const lines = Math.max(1, Math.ceil(longest / FIXED_COL_WIDTH));
+      return { hpt: Math.min(18 * lines, 120) };
+    });
+  };
   const [openPopup, setOpenPopup] = useState(false);
+  const parseSpreadsheet = async (file) => {
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      return XLSX.utils.sheet_to_json(sheet, { header: 1 });
+    }
+    const text = await file.text();
+    return text
+      .trim()
+      .split(/\r?\n/)
+      .map((l) =>
+        l
+          .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
+          .map((s) => s.replace(/^"|"$/g, "").replace(/""/g, '"'))
+      );
+  };
 
   // table state
   const [data, setData] = useState(() =>
@@ -204,56 +238,36 @@ function SubmissionData() {
     load();
   }, []);
 
-  // Export CSV
-  const toCSV = () => {
+  const exportToExcel = () => {
+    const workbook = XLSX.utils.book_new();
     const header = ["Trait", ...COLS.map((c) => c.label)];
     const rows = TRAITS.map((trait) => [
       trait,
       ...COLS.map((c) => data[trait][c.key] || ""),
     ]);
     const totalRow = ["Total", ...COLS.map((c) => totals[c.key])];
-
-    const lines = [header, ...rows, totalRow]
-      .map((r) => r.map((x) => `"${String(x).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
-
-    const blob = new Blob([lines], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "LAEMPL_Grade1.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+    const sheetData = [header, ...rows, totalRow];
+    const sheet = XLSX.utils.aoa_to_sheet(sheetData);
+    applySheetSizing(sheet, sheetData);
+    XLSX.utils.book_append_sheet(workbook, sheet, "LAEMPL");
+    XLSX.writeFile(workbook, "LAEMPL_Grade1.xlsx");
   };
 
-  // Generate blank template CSV
-  const handleGenerateTemplate = () => {
+  const exportTemplateExcel = () => {
+    const workbook = XLSX.utils.book_new();
     const header = ["Trait", ...COLS.map((c) => c.label)];
     const blank = TRAITS.map((trait) => [trait, ...COLS.map(() => "")]);
-    const csv = [header, ...blank].map((r) => r.join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "LAEMPL_Template.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+    const sheetData = [header, ...blank];
+    const sheet = XLSX.utils.aoa_to_sheet(sheetData);
+    applySheetSizing(sheet, sheetData);
+    XLSX.utils.book_append_sheet(workbook, sheet, "LAEMPL_Template");
+    XLSX.writeFile(workbook, "LAEMPL_Template.xlsx");
   };
 
-  // Import CSV (must match export shape)
   const onImport = async (file) => {
     try {
-      const text = await file.text();
-      const lines = text
-        .trim()
-        .split(/\r?\n/)
-        .map((l) =>
-          l
-            .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)     // split by commas outside quotes
-            .map((s) => s.replace(/^"|"$/g, "").replace(/""/g, '"'))
-        );
-
-      const body = lines.slice(1, 1 + TRAITS.length); // skip header
+      const lines = await parseSpreadsheet(file);
+      const body = lines.slice(1, 1 + TRAITS.length);
       const next = Object.fromEntries(
         TRAITS.map((t) => [
           t,
@@ -277,7 +291,7 @@ function SubmissionData() {
       setErr("");
       setOpenPopup(false);       // close modal after success (optional)
     } catch (e) {
-      setErr("Failed to import CSV. " + (e?.message || ""));
+      setErr("Failed to import file. " + (e?.message || ""));
     }
   };
 
@@ -334,7 +348,7 @@ function SubmissionData() {
 
           <div className="content">
             <div className="buttons">
-              <button onClick={handleGenerateTemplate}>Generate Template</button>
+              <button onClick={exportTemplateExcel}>Generate Template</button>
 
               {/* Import (disabled if locked without override) */}
               <button onClick={() => setOpenPopup(true)} disabled={isDisabled}>
@@ -372,7 +386,7 @@ function SubmissionData() {
                         id="fileInput"
                         ref={fileInput}
                         type="file"
-                        accept=".csv"
+                        accept=".csv,.xlsx"
                         style={{ display: "none" }}
                         onChange={(e) => {
                           const f = e.target.files?.[0];
@@ -396,7 +410,7 @@ function SubmissionData() {
               )}
 
               {/* Export */}
-              <button onClick={toCSV}>Export</button>
+              <button onClick={exportToExcel}>Export</button>
               {/* Clear */}
               <button onClick={handleClear}>Clear Table</button>
             </div>

@@ -44,6 +44,10 @@ function SetReport() {
   const [isPrincipalReportParam, setIsPrincipalReportParam] = useState(false); // Track isPrincipalReport query parameter
   const [originalReportData, setOriginalReportData] = useState(null);
   const [subjectToExtractFromTitle, setSubjectToExtractFromTitle] = useState(null);
+  
+  // Track unsaved changes for beforeunload warning
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [isFormSubmitted, setIsFormSubmitted] = useState(false);
 
   const [users, setUsers] = useState([]);
   const [usersWithGrades, setUsersWithGrades] = useState([]);
@@ -822,6 +826,8 @@ function SetReport() {
       
       // Store original data
       setOriginalReportData(reportData);
+      // Reset form submission flag when loading existing report
+      setIsFormSubmitted(false);
       
       // Check if this report is from a principal assignment
       // A report is from principal if it has parent_report_assignment_id or coordinator_user_id
@@ -1176,6 +1182,7 @@ function SetReport() {
         }
         
         toast.success(`Report schedule updated successfully!`);
+        setIsFormSubmitted(true);
         const redirectUrl = `/AssignedReport?year=${yearId}&quarter=${quarterId}`;
         navigate(redirectUrl);
         setSubmitting(false);
@@ -1340,6 +1347,7 @@ function SetReport() {
       }
 
       toast.success(`Report schedule updated successfully!`);
+      setIsFormSubmitted(true);
       
       // Redirect to Assigned Reports
       const redirectUrl = `/AssignedReport?year=${yearId}&quarter=${quarterId}`;
@@ -1836,6 +1844,7 @@ function SetReport() {
         
         const data = await response.json();
         toast.success(`Successfully created assignment with ${recipients.length} recipient(s)!`);
+        setIsFormSubmitted(true);
         
         // Mark coordinator's assignment as given
         try {
@@ -1913,6 +1922,7 @@ function SetReport() {
             // Only coordinator, no teachers
             toast.success('Successfully created coordinator assignment!');
           }
+          setIsFormSubmitted(true);
           
           // Redirect after creating all assignments
           const redirectUrl = `/AssignedReport?year=${yearId}&quarter=${quarterId}`;
@@ -2144,6 +2154,7 @@ function SetReport() {
         : "";
 
       toast.success(`Report has been set successfully!`);
+      setIsFormSubmitted(true);
 
       // Redirect to Assigned Reports with pre-selected school year and quarter
       const redirectUrl = `/AssignedReport?year=${yearId}&quarter=${quarterId}`;
@@ -2219,6 +2230,99 @@ function SetReport() {
   useEffect(() => {
     console.log('🔄 [SetReport] Location changed:', location.pathname);
   }, [location.pathname]);
+
+  // Track form changes to detect unsaved data
+  useEffect(() => {
+    // Don't track changes if form was just submitted successfully
+    if (isFormSubmitted) {
+      setHasUnsavedChanges(false);
+      return;
+    }
+
+    // Don't track changes until form data has been loaded (if editing)
+    // This prevents false positives when loading existing report data
+    if (editingReportId && !originalReportData) {
+      setHasUnsavedChanges(false);
+      return;
+    }
+
+    // Check if any form field has been modified from initial state
+    // For new reports, any filled field indicates unsaved changes
+    // For existing reports, compare with original data
+    let hasChanges = false;
+    
+    if (originalReportData) {
+      // Compare with original data when editing
+      hasChanges = 
+        title !== (originalReportData.title || "") ||
+        selectedCategory !== String(originalReportData.category_id || "") ||
+        selectedSubCategory !== String(originalReportData.sub_category_id || "") ||
+        startDate !== (originalReportData.from_date ? new Date(originalReportData.from_date).toISOString().split('T')[0] : "") ||
+        dueDate !== (originalReportData.to_date ? new Date(originalReportData.to_date).toISOString().split('T')[0] : "") ||
+        instruction !== (originalReportData.instruction || "") ||
+        allowLate !== (originalReportData.allow_late === 1) ||
+        attempts !== (originalReportData.number_of_submission === null ? "unlimited" : String(originalReportData.number_of_submission || ""));
+      // Note: selectedTeachers, selectedSchoolYear, selectedQuarter are loaded separately
+      // so we track them separately - if they change after loading, it's a modification
+    } else {
+      // For new reports, any filled field indicates unsaved changes
+      hasChanges = 
+        title !== "" ||
+        selectedCategory !== "" ||
+        selectedSubCategory !== "" ||
+        selectedSchoolYear !== "" ||
+        selectedQuarter !== "" ||
+        startDate !== "" ||
+        dueDate !== "" ||
+        instruction !== "" ||
+        selectedTeachers.length > 0 ||
+        selectedTeacher !== "" ||
+        selectedGradeLevel !== "" ||
+        selectedSubjects.length > 0 ||
+        selectedCoordinator !== "" ||
+        attempts !== "" ||
+        allowLate !== false;
+    }
+
+    setHasUnsavedChanges(hasChanges);
+  }, [
+    title,
+    selectedCategory,
+    selectedSubCategory,
+    selectedSchoolYear,
+    selectedQuarter,
+    startDate,
+    dueDate,
+    instruction,
+    selectedTeachers,
+    selectedTeacher,
+    selectedGradeLevel,
+    selectedSubjects,
+    selectedCoordinator,
+    attempts,
+    allowLate,
+    isFormSubmitted,
+    editingReportId,
+    originalReportData
+  ]);
+
+  // Add beforeunload warning for unsaved changes
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (hasUnsavedChanges && !isFormSubmitted) {
+        // Modern browsers ignore custom messages, but we still need to set returnValue
+        e.preventDefault();
+        e.returnValue = "You have unsaved changes. Are you sure you want to leave?";
+        return e.returnValue;
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [hasUnsavedChanges, isFormSubmitted]);
 
   return (
     <>
