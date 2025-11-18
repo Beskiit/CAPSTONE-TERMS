@@ -32,10 +32,14 @@ export const getUpcomingDeadlinesByUser = (req, res) => {
       ra.to_date,
       ra.category_id,
       ra.sub_category_id,
+      ra.coordinator_user_id,
       c.category_name,
       sc.sub_category_name,
       ud2.name AS given_by_name,
-      COALESCE(adc.recipients_count, sdc.sub_recipients, 0) AS recipients_count,
+      CASE 
+        WHEN ra.coordinator_user_id IS NOT NULL THEN 0
+        ELSE COALESCE(adc.recipients_count, sdc.sub_recipients, 0)
+      END AS recipients_count,
       st.value AS status_value,
       s.status,
       s.fields
@@ -51,9 +55,13 @@ export const getUpcomingDeadlinesByUser = (req, res) => {
       GROUP BY report_assignment_id
     ) adc ON adc.report_assignment_id = ra.report_assignment_id
     LEFT JOIN (
-      SELECT report_assignment_id, COUNT(DISTINCT submitted_by) AS sub_recipients
-      FROM submission
-      GROUP BY report_assignment_id
+      SELECT 
+        s.report_assignment_id, 
+        COUNT(DISTINCT s.submitted_by) AS sub_recipients
+      FROM submission s
+      INNER JOIN report_assignment ra2 ON ra2.report_assignment_id = s.report_assignment_id
+      WHERE ra2.coordinator_user_id IS NULL
+      GROUP BY s.report_assignment_id
     ) sdc ON sdc.report_assignment_id = ra.report_assignment_id
     WHERE s.submitted_by = ?
       AND DATE(ra.to_date) >= CURDATE()
