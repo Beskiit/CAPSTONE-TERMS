@@ -181,19 +181,29 @@ function Dashboard() {
     const kind = detectDeadlineType(deadline);
     const submissionId = getDeadlineSubmissionId(deadline);
 
+    // Include comprehensive state fields for consistency
     const commonState = {
       submission_id: submissionId,
+      report_assignment_id: deadline.report_assignment_id || deadline.id,
       title: deadline.title || deadline.assignment_title,
       instruction: deadline.instruction,
       from_date: deadline.from_date,
       to_date: deadline.to_date || deadline.due_date,
       number_of_submission: deadline.number_of_submission,
       allow_late: deadline.allow_late,
+      category_id: deadline.category_id,
+      category_name: deadline.category_name,
+      sub_category_id: deadline.sub_category_id,
+      sub_category_name: deadline.sub_category_name,
+      is_given: deadline.is_given,
+      recipients_count: deadline.recipients_count,
+      coordinator_user_id: deadline.coordinator_user_id != null ? Number(deadline.coordinator_user_id) : null,
+      grade_level_id: deadline.grade_level_id,
     };
 
-    if (kind === "laempl")         return navigate("/LAEMPLInstruction", { state: { ...commonState, fromDeadline: true } });
-    if (kind === "mps")            return navigate("/MPSInstruction", { state: { ...commonState, fromDeadline: true } });
-    if (kind === "accomplishment") return navigate("/AccomplishmentReportInstruction", { state: { ...commonState, fromDeadline: true } });
+    if (kind === "laempl")         return navigate("/LAEMPLInstruction", { state: commonState });
+    if (kind === "mps")            return navigate("/MPSInstruction", { state: commonState });
+    if (kind === "accomplishment") return navigate("/AccomplishmentReportInstruction", { state: commonState });
     if (kind === "cog")            return navigate("/ClassificationOfGradesInstruction", { state: commonState });
     return navigate("/SubmittedReport");
   };

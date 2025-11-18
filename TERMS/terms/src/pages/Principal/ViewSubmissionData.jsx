@@ -177,6 +177,8 @@ function ViewSubmissionData() {
   const [submissionLoading, setSubmissionLoading] = useState(true);
   const [submissionError, setSubmissionError] = useState(null);
   const [currentSubmissionId, setCurrentSubmissionId] = useState(SUBMISSION_ID);
+  const [submittedByName, setSubmittedByName] = useState(undefined);
+  const hasAttemptedFetch = useRef(false);
 
   // Dynamic data structure from database
   const [TRAITS, setTRAITS] = useState(DEFAULT_TRAITS);
@@ -230,6 +232,10 @@ function ViewSubmissionData() {
           setSubmissionLoading(false);
           return;
         }
+
+      // Reset the fetch attempt flag when submission ID changes
+      hasAttemptedFetch.current = false;
+      setSubmittedByName(undefined);
 
       try {
         setSubmissionLoading(true);
@@ -302,10 +308,8 @@ function ViewSubmissionData() {
           throw new Error(errorMessage);
         }
 
-        console.log('Submission data fetched successfully:', data);
-        console.log('Fields data:', data.fields);
-        console.log('Activity data:', data.fields?.activity);
         setSubmissionData(data);
+        // Note: User name fetching is handled in the useEffect hook below
 
         // Extract dynamic table structure from submission data
         const fields = data.fields || {};
@@ -387,6 +391,57 @@ function ViewSubmissionData() {
     fetchSubmissionData();
   }, [currentSubmissionId]);
 
+  // Fetch user name when submissionData changes
+  useEffect(() => {
+    if (!submissionData) return;
+    
+    // If we already have the name, use it
+    if (submissionData.submitted_by_name) {
+      if (submittedByName !== submissionData.submitted_by_name) {
+        setSubmittedByName(submissionData.submitted_by_name);
+        hasAttemptedFetch.current = true;
+      }
+      return;
+    }
+    
+    // If submitted_by_name is null, the user doesn't exist in the database
+    // Don't make an API call - just set to null and display the ID
+    if (submissionData.submitted_by_name === null) {
+      setSubmittedByName(null);
+      hasAttemptedFetch.current = true;
+      return;
+    }
+    
+    // Only fetch if submitted_by_name is undefined (missing from response)
+    // This handles edge cases where the field wasn't included in the response
+    if (submissionData.submitted_by && !hasAttemptedFetch.current && submissionData.submitted_by_name === undefined) {
+      hasAttemptedFetch.current = true;
+      const fetchUserName = async () => {
+        try {
+          const userRes = await fetch(`${API_BASE}/users/${submissionData.submitted_by}`, {
+            credentials: "include"
+          });
+          if (userRes.ok) {
+            const userData = await userRes.json();
+            const userName = userData.name || userData.user_name || null;
+            if (userName) {
+              setSubmittedByName(userName);
+            } else {
+              setSubmittedByName(null);
+            }
+          } else {
+            // User doesn't exist or other error - set to null
+            setSubmittedByName(null);
+          }
+        } catch (err) {
+          // Network error - set to null
+          setSubmittedByName(null);
+        }
+      };
+      fetchUserName();
+    }
+  }, [submissionData]);
+
   // Re-extract columns when subjectNames are updated
   useEffect(() => {
     if (submissionData && submissionData.fields && submissionData.fields.rows && Array.isArray(submissionData.fields.rows) && submissionData.fields.rows.length > 0) {
@@ -438,21 +493,6 @@ function ViewSubmissionData() {
     }
   }, [subjectNames, submissionData]);
 
-  useEffect(() => {
-    const fetchUser = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/auth/me`, {
-          credentials: "include",
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        setUser(data);
-      } catch (err) {
-        console.error("Failed to fetch user:", err);
-      }
-    };
-    fetchUser();
-  }, []);
 
   // Helper function to get status text
   const getStatusText = (status) => {
@@ -1082,6 +1122,30 @@ function ViewSubmissionData() {
     );
   }
 
+  // Format date helper
+  const formatDateOnly = (val) => {
+    if (!val) return 'N/A';
+    try {
+      const d = new Date(val);
+      if (Number.isNaN(d.getTime())) return String(val).split('T')[0] || String(val);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${mm}/${dd}/${yyyy}`;
+    } catch { 
+      return String(val).split('T')[0] || String(val); 
+    }
+  };
+
+  // Get assignment info from submission data
+  const assignmentInfo = submissionData ? {
+    assignment_title: submissionData.assignment_title || submissionData.title || submissionData.value,
+    from_date: submissionData.from_date,
+    to_date: submissionData.to_date,
+    category_name: submissionData.category_name,
+    sub_category_name: submissionData.sub_category_name
+  } : null;
+
   return (
     <>
       <Header userText={user ? user.name : "Guest"} />
@@ -1110,34 +1174,99 @@ function ViewSubmissionData() {
               <h2>Submitted Report Details</h2>
             </div>
             
-            <div className="submission-details">
-              <div className="detail-row">
-                <label>Title:</label>
-                <span>{submissionData.assignment_title || submissionData.title || submissionData.value || 'Report'}</span>
-              </div>
-              <div className="detail-row">
-                <label>Status:</label>
-                <span className={`status-badge status-${submissionData.status}`}>
-                  {getStatusText(submissionData.status)}
-                </span>
-              </div>
-              <div className="detail-row">
-                <label>Date Submitted:</label>
-                <span>{submissionData.date_submitted || 'Not submitted'}</span>
-              </div>
-              <div className="detail-row">
-                <label>Submitted By:</label>
-                <span>{submissionData.submitted_by_name || submissionData.submitted_by || 'Unknown'}</span>
-              </div>
-            </div>
-            
-            {submissionData.fields && (
-              <div className="submission-content">
-                <div className="content-section">
-                  {renderSubmissionContent(submissionData)}
-                </div>
+            {/* Assignment Info */}
+            {assignmentInfo && (
+              <div className="assignment-info" style={{ 
+                marginBottom: '20px',
+                backgroundColor: '#fff',
+                borderRadius: '8px',
+                padding: '16px',
+                border: '1px solid #e0e0e0',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+              }}>
+                <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '600' }}>
+                  {submissionData.assignment_title || submissionData.title || submissionData.value || 'Report'}
+                </h3>
+                <p style={{ color: '#2a3b5c', fontSize: '16px', marginTop: '2px', margin: 0 }}>
+                  Submitted by: <span style={{ fontWeight: '700' }}>
+                    {submittedByName || submissionData.submitted_by_name || submissionData.submitted_by || 'Unknown'}
+                  </span>
+                </p>
               </div>
             )}
+            
+            {/* Two-column layout: main content (left) + details panel (right) */}
+            <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
+              {/* LEFT: Main content */}
+              <div style={{ flex: 1 }}>
+                {submissionData.fields && (
+                  <div className="submission-content">
+                    {/* Export button for Accomplishment Reports */}
+                    {(submissionData.fields.type === 'ACCOMPLISHMENT' || submissionData.fields._answers) && (
+                      <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+                        <button
+                          onClick={() => exportToWord(submissionData)}
+                          style={{
+                            backgroundColor: '#3b82f6',
+                            color: 'white',
+                            border: 'none',
+                            padding: '10px 20px',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            fontSize: '14px',
+                            fontWeight: '500',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px'
+                          }}
+                        >
+                          <span>📄</span>
+                          Export to Word
+                        </button>
+                      </div>
+                    )}
+                    <div className="content-section">
+                      {renderSubmissionContent(submissionData)}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* RIGHT: Details panel */}
+              <div style={{ width: '300px', backgroundColor: '#fff', borderRadius: '8px', padding: '16px', border: '1px solid #ccc' }}>
+                <div style={{ marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid #ccc' }}>
+                  <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', fontWeight: 'bold' }}>Details</h3>
+                  <div style={{ marginBottom: '8px' }}>
+                    <span style={{ fontWeight: '500' }}>Title:</span>{" "}
+                    <span>{submissionData.assignment_title || submissionData.title || submissionData.value || 'Report'}</span>
+                  </div>
+                  <div style={{ marginBottom: '8px' }}>
+                    <span style={{ fontWeight: '500' }}>Status:</span>{" "}
+                    <span className={`status-badge status-${submissionData.status}`}>
+                      {getStatusText(submissionData.status)}
+                    </span>
+                  </div>
+                  <div style={{ marginBottom: '8px' }}>
+                    <span style={{ fontWeight: '500' }}>Start Date:</span>{" "}
+                    <span>{formatDateOnly(submissionData.from_date)}</span>
+                  </div>
+                  <div style={{ marginBottom: '8px' }}>
+                    <span style={{ fontWeight: '500' }}>Due Date:</span>{" "}
+                    <span>{formatDateOnly(submissionData.to_date)}</span>
+                  </div>
+                  <div style={{ marginBottom: '8px' }}>
+                    <span style={{ fontWeight: '500' }}>Report Type:</span>{" "}
+                    <span>{submissionData.sub_category_name || submissionData.category_name || 'N/A'}</span>
+                  </div>
+                </div>
+                <div>
+                  <div style={{ marginBottom: '8px' }}>
+                    <span style={{ fontWeight: '500' }}>Date Submitted:</span>{" "}
+                    <span>{formatDateOnly(submissionData.date_submitted)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
 
           </div>
         </div>

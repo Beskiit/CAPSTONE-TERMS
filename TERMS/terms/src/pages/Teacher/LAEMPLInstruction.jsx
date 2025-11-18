@@ -116,7 +116,9 @@ function LAEMPLInstruction() {
             navigate(`/AssignedReportData/${idToUse}`, { 
                 state: { 
                     assignmentTitle: title,
-                    report_assignment_id: reportAssignmentId
+                    report_assignment_id: reportAssignmentId,
+                    fromAssignedReport: fromAssignedReport,
+                    fromInstructionPage: 'LAEMPLInstruction'
                 } 
             });
         } else {
@@ -154,15 +156,25 @@ function LAEMPLInstruction() {
                         assignmentData,
                         assignees,
                         prefillData: true,
-                        fromAssignedReport: fromAssignedReport
+                        fromAssignedReport: fromAssignedReport,
+                        fromInstructionPage: 'LAEMPLInstruction',
+                        breadcrumbTitle: title || assignmentData?.title || 'Report'
                     }
                 });
             } else {
-                navigate(`/SetReport?reportId=${reportAssignmentId}&isPrincipalReport=true`);
+                navigate(`/SetReport?reportId=${reportAssignmentId}&isPrincipalReport=true`, {
+                    state: {
+                        breadcrumbTitle: title || 'Report'
+                    }
+                });
             }
         } catch (error) {
             console.error("Error fetching assignment data:", error);
-            navigate(`/SetReport?reportId=${reportAssignmentId}&isPrincipalReport=true`);
+            navigate(`/SetReport?reportId=${reportAssignmentId}&isPrincipalReport=true`, {
+                state: {
+                    breadcrumbTitle: title || 'Report'
+                }
+            });
         }
     };
 

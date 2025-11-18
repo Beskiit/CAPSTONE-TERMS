@@ -75,11 +75,16 @@ function AccomplishmentReportInstruction() {
         const res = await fetch(`${API_BASE}/auth/me`, {
           credentials: "include", // important so session cookie is sent
         });
-        if (!res.ok) return; // not logged in
+        if (!res.ok) {
+          setLoading(false);
+          return; // not logged in
+        }
         const data = await res.json();
         setUser(data);
+        setLoading(false);
       } catch (err) {
         console.error("Failed to fetch user:", err);
+        setLoading(false);
       }
     };
     fetchUser();
@@ -197,7 +202,9 @@ function AccomplishmentReportInstruction() {
             navigate(`/AssignedReportData/${idToUse}`, { 
                 state: { 
                     assignmentTitle: title,
-                    report_assignment_id: reportAssignmentId
+                    report_assignment_id: reportAssignmentId,
+                    fromAssignedReport: fromAssignedReport,
+                    fromInstructionPage: 'AccomplishmentReportInstruction'
                 } 
             });
         } else {
@@ -239,20 +246,28 @@ function AccomplishmentReportInstruction() {
                         assignmentData: assignmentData,
                         assignees: assignees,
                         prefillData: true, // Flag to indicate data should be pre-filled
-                        fromAssignedReport: fromAssignedReport // Pass the flag to allow editing even if is_given = 1
+                        fromAssignedReport: fromAssignedReport, // Pass the flag to allow editing even if is_given = 1
+                        fromInstructionPage: 'AccomplishmentReportInstruction',
+                        breadcrumbTitle: title || assignmentData.title || 'Report'
                     }
                 });
             } else {
                 // Fallback to just passing reportId
                 navigate(`/SetReport?reportId=${reportAssignmentId}&isPrincipalReport=true`, {
-                    state: { isEditAction: true } // Pass isEditAction: true to indicate this is "Edit" (UPDATE existing assignment)
+                    state: { 
+                        isEditAction: true, // Pass isEditAction: true to indicate this is "Edit" (UPDATE existing assignment)
+                        breadcrumbTitle: title || 'Report'
+                    }
                 });
             }
         } catch (error) {
             console.error("Error fetching assignment data:", error);
             // Fallback to just passing reportId
             navigate(`/SetReport?reportId=${reportAssignmentId}&isPrincipalReport=true`, {
-                state: { isEditAction: true } // Pass isEditAction: true to indicate this is "Edit" (UPDATE existing assignment)
+                state: { 
+                    isEditAction: true, // Pass isEditAction: true to indicate this is "Edit" (UPDATE existing assignment)
+                    breadcrumbTitle: title || 'Report'
+                }
             });
         }
     };
@@ -270,46 +285,54 @@ function AccomplishmentReportInstruction() {
                         <h2>Accomplishment Report</h2>
                     </div>
                     <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
-                        <div className="content" style={{ flex: 1 }}>
+                        <div className="content" style={{ flex: 1, backgroundColor: '#e0e0e0', borderRadius: '8px', padding: '16px', height: 'auto', minHeight: 'auto' }}>
                             <h3 className="header">Instructions</h3>
+                            {fromAssignedReport && (
+                                <div className="submission-btn-container">
+                                    <button className="view-submission" onClick={handleViewSubmission}>View Submission</button>
+                                </div>
+                            )}
                             <p className="instruction">{instruction || "No instruction provided."}</p>
-                            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                                {fromAssignedReport ? (
-                                    <>
-                                        <button className="instruction-btn" onClick={handleViewSubmission}>View Submission</button>
-                                        <button className="instruction-btn" onClick={handleEdit}>Edit</button>
-                                    </>
-                                ) : (
-                                    <>
-                                        <button className="instruction-btn" onClick={ensureAndOpenTemplate}>+ Prepare Report</button>
-                                        {isCoordinatorSidebar && !forceTeacherView && recipientsCount < 2 && isAssignedCoordinator && (
-                                            <button className="instruction-btn" onClick={handleSetAsReport}>Set as Report to Teachers</button>
-                                        )}
-                                    </>
-                                )}
-                            </div>
+                            {!fromAssignedReport && (
+                                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: '12px' }}>
+                                    <button className="instruction-btn" onClick={ensureAndOpenTemplate}>+ Prepare Report</button>
+                                    {isCoordinatorSidebar && !forceTeacherView && recipientsCount < 2 && isAssignedCoordinator && (
+                                        <button className="instruction-btn" onClick={handleSetAsReport}>Set as Report to Teachers</button>
+                                    )}
+                                </div>
+                            )}
                         </div>
                         <div style={{ width: '300px', backgroundColor: '#fff', borderRadius: '8px', padding: '16px', border: '1px solid #ccc' }}>
                             <div style={{ marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid #ccc' }}>
                                 <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', fontWeight: 'bold' }}>Assignment</h3>
                                 <div style={{ marginBottom: '8px' }}>
-                                    <span style={{ fontWeight: '500' }}>Type:</span> <span>{state?.category_name || 'N/A'}</span>
+                                    <span style={{ fontWeight: '500' }}>Type:</span>{" "}
+                                    <span>{state?.category_name || 'N/A'}</span>
                                 </div>
                             </div>
                             <div>
                                 <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', fontWeight: 'bold' }}>Details</h3>
                                 <div style={{ marginBottom: '8px' }}>
-                                    <span style={{ fontWeight: '500' }}>Title:</span> <span>{title || 'N/A'}</span>
+                                    <span style={{ fontWeight: '500' }}>Title:</span>{" "}
+                                    <span>{title || 'N/A'}</span>
                                 </div>
                                 <div style={{ marginBottom: '8px' }}>
-                                    <span style={{ fontWeight: '500' }}>Start Date:</span> <span>{formatDateOnly(fromDate)}</span>
+                                    <span style={{ fontWeight: '500' }}>Start Date:</span>{" "}
+                                    <span>{formatDateOnly(fromDate)}</span>
                                 </div>
                                 <div style={{ marginBottom: '8px' }}>
-                                    <span style={{ fontWeight: '500' }}>Due Date:</span> <span>{formatDateOnly(toDate)}</span>
+                                    <span style={{ fontWeight: '500' }}>Due Date:</span>{" "}
+                                    <span>{formatDateOnly(toDate)}</span>
                                 </div>
                                 <div style={{ marginBottom: '8px' }}>
-                                    <span style={{ fontWeight: '500' }}>Report Type:</span> <span>{state?.sub_category_name || 'N/A'}</span>
+                                    <span style={{ fontWeight: '500' }}>Report Type:</span>{" "}
+                                    <span>{state?.sub_category_name || 'N/A'}</span>
                                 </div>
+                                {fromAssignedReport && (
+                                    <div style={{ marginTop: '12px' }}>
+                                        <button className="instruction-btn" onClick={handleEdit}>Edit</button>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>

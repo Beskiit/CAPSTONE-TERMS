@@ -8,8 +8,39 @@ import "../../components/shared/StatusBadges.css";
 import "./ViewSubmission.css";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle, ImageRun } from "docx";
 import { saveAs } from "file-saver";
+import * as XLSX from "xlsx";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
+const FIXED_COL_WIDTH = 25;
+const applySheetSizing = (worksheet, data) => {
+  const maxCols = data.reduce((max, row) => Math.max(max, row.length), 0);
+  worksheet["!cols"] = Array.from({ length: maxCols }, () => ({
+    wch: FIXED_COL_WIDTH,
+  }));
+  worksheet["!rows"] = data.map((row) => {
+    const longest = row.reduce((max, cell) => {
+      if (cell == null) return max;
+      return Math.max(max, cell.toString().length);
+    }, 0);
+    const lines = Math.max(1, Math.ceil(longest / FIXED_COL_WIDTH));
+    return { hpt: Math.min(18 * lines, 120) };
+  });
+};
+
+const DEFAULT_COLS_MPS = [
+  { key: "m",      label: "Male" },
+  { key: "f",      label: "Female" },
+  { key: "total",  label: "Total no. of Pupils" },
+  { key: "total_score", label: "Total Score" },
+  { key: "mean",   label: "Mean" },
+  { key: "median", label: "Median" },
+  { key: "pl",     label: "PL" },
+  { key: "mps",    label: "MPS" },
+  { key: "sd",     label: "SD" },
+  { key: "target", label: "Target" },
+  { key: "hs",     label: "HS" },
+  { key: "ls",     label: "LS" },
+];
 
 /* ---------- helpers ---------- */
 const normalizeImages = (arr) => {
@@ -46,8 +77,22 @@ const sanitizeKey = (rawKey) => {
 // Helper function to get column labels
 const getColumnLabel = (key, subjectNames = {}) => {
   const labelMap = {
-    'm': 'M',
-    'f': 'F',
+    'm': 'No. of Male',
+    'f': 'No. of Female',
+    'no_of_cases': 'No. of Cases',
+    'no_of_items': 'No. of Items',
+    'total_score': 'Total Score',
+    'highest_score': 'Highest Score',
+    'lowest_score': 'Lowest Score',
+    'male_passed': 'Number of Male Learners who Passed (MPL)',
+    'male_mpl_percent': '% MPL (MALE)',
+    'female_passed': 'Number of Female who Passed (MPL)',
+    'female_mpl_percent': '% MPL (FEMALE)',
+    'total_passed': 'Number of Learners who Passed (MPL)',
+    'total_mpl_percent': '% MPL (TOTAL)',
+    'hs': 'Highest Score',
+    'ls': 'Lowest Score',
+    'total_items': 'Total no. of Items',
     'gmrc': 'GMRC (15 - 25 points)',
     'math': 'Mathematics (15 - 25 points)',
     'lang': 'Language (15 - 25 points)',
@@ -55,17 +100,13 @@ const getColumnLabel = (key, subjectNames = {}) => {
     'makabasa': 'MAKABASA (15 - 25 points)',
     'english': 'English (15 - 25 points)',
     'araling_panlipunan': 'Araling Panlipunan (15 - 25 points)',
-    'total_score': 'Total Score',
-    'hs': 'HS',
-    'ls': 'LS',
-    'total_items': 'Total no. of Items'
   };
   
   // Handle subject IDs (e.g., subject_8, subject_10)
   if (key.startsWith('subject_')) {
     const subjectId = key.replace('subject_', '');
     const subjectName = subjectNames[subjectId];
-    return subjectName || `Subject ${subjectId}`;
+    return subjectName ? `${subjectName} (15 - 25 points)` : `Subject ${subjectId} (15 - 25 points)`;
   }
   
   return labelMap[key] || key.toUpperCase();
@@ -312,6 +353,7 @@ function ViewSubmission() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [subjectNames, setSubjectNames] = useState({});
+  const [assignmentInfo, setAssignmentInfo] = useState(null);
   
 
   // Function to fetch subject names
@@ -368,6 +410,21 @@ function ViewSubmission() {
         }
         const data = await res.json();
         setSubmission(data);
+        
+        // Fetch assignment info if report_assignment_id exists
+        if (data.report_assignment_id) {
+          try {
+            const assignmentRes = await fetch(`${API_BASE}/reports/assignment/${data.report_assignment_id}`, {
+              credentials: "include"
+            });
+            if (assignmentRes.ok) {
+              const assignmentData = await assignmentRes.json();
+              setAssignmentInfo(assignmentData);
+            }
+          } catch (err) {
+            console.warn("Failed to fetch assignment info:", err);
+          }
+        }
         
         // Extract subject IDs and fetch subject names if this is a LAEMPL report
         if (data.fields && data.fields.rows && Array.isArray(data.fields.rows)) {
@@ -453,6 +510,146 @@ function ViewSubmission() {
     );
   };
 
+  const exportBothReportsToExcel = (fields) => {
+    const workbook = XLSX.utils.book_new();
+
+    if (fields.rows && fields.rows.length > 0) {
+      const rows = fields.rows;
+      const traits = rows.map(row => row.trait).filter(Boolean);
+      let cols = [];
+      if (rows.length > 0) {
+        const firstRow = rows[0];
+        cols = Object.keys(firstRow)
+          .filter(key => key !== 'trait')
+          .map(key => {
+            const cleanKey = sanitizeKey(key);
+            return {
+              key: cleanKey,
+              originalKey: key,
+              label: getColumnLabel(cleanKey, subjectNames)
+            };
+          });
+      }
+
+      const laemplHeader = ["Trait", ...cols.map(c => c.label)];
+      const laemplRows = traits.map(trait => {
+        const rowData = rows.find(r => r.trait === trait) || {};
+        return [
+          trait,
+          ...cols.map(c => rowData[c.originalKey || c.key] || "")
+        ];
+      });
+      const laemplData = [laemplHeader, ...laemplRows];
+      const laemplSheet = XLSX.utils.aoa_to_sheet(laemplData);
+      applySheetSizing(laemplSheet, laemplData);
+      XLSX.utils.book_append_sheet(workbook, laemplSheet, "LAEMPL");
+    }
+
+    const mpsRows = fields.mps_rows || fields.mpsRows || [];
+    if (mpsRows && mpsRows.length > 0) {
+      const mpsTraits = mpsRows.map(row => row.trait).filter(Boolean);
+      const mpsHeader = ["Trait", ...DEFAULT_COLS_MPS.map(c => c.label)];
+      const mpsSheetRows = mpsTraits.map(trait => {
+        const rowData = mpsRows.find(r => r.trait === trait) || {};
+        return [
+          trait,
+          ...DEFAULT_COLS_MPS.map(c => rowData[c.key] || "")
+        ];
+      });
+      const mpsData = [mpsHeader, ...mpsSheetRows];
+      const mpsSheet = XLSX.utils.aoa_to_sheet(mpsData);
+      applySheetSizing(mpsSheet, mpsData);
+      XLSX.utils.book_append_sheet(workbook, mpsSheet, "MPS");
+    }
+
+    if (workbook.SheetNames.length === 0) {
+      alert("No report data available to export.");
+      return;
+    }
+
+    XLSX.writeFile(workbook, `Combined_Reports_${submissionId || 'export'}.xlsx`);
+  };
+
+  const renderMPSReport = (fields) => {
+    const mpsRows = fields.mps_rows || fields.mpsRows || [];
+    const traits = mpsRows.map(row => row.trait).filter(Boolean);
+
+    // Calculate averages for MPS columns
+    const calculateMPSAverages = (rows, cols) => {
+      const avgColumns = ['mean', 'median', 'pl', 'mps', 'sd', 'target'];
+      const averages = {};
+      
+      avgColumns.forEach(colKey => {
+        const values = rows
+          .map(row => {
+            const val = row[colKey];
+            const num = typeof val === 'number' ? val : parseFloat(val);
+            return Number.isFinite(num) ? num : null;
+          })
+          .filter(v => v !== null);
+        
+        if (values.length > 0) {
+          const sum = values.reduce((acc, val) => acc + val, 0);
+          averages[colKey] = (sum / values.length).toFixed(2);
+        } else {
+          averages[colKey] = '';
+        }
+      });
+      
+      return averages;
+    };
+
+    const averages = calculateMPSAverages(mpsRows, DEFAULT_COLS_MPS);
+
+    return (
+      <div className="mps-report-display" style={{ marginTop: '2rem' }}>
+        <h4>MPS Report</h4>
+        <div className="table-container">
+          <table className="mps-table">
+            <thead>
+              <tr>
+                <th>Trait</th>
+                {DEFAULT_COLS_MPS.map((col) => (
+                  <th key={col.key}>{col.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {traits.map(trait => {
+                const rowData = mpsRows.find(r => r.trait === trait) || {};
+                return (
+                  <tr key={trait}>
+                    <td className="trait-cell">{trait}</td>
+                    {DEFAULT_COLS_MPS.map(col => (
+                      <td key={col.key} className="data-cell">
+                        {rowData[col.key] || ''}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+              {/* Average row */}
+              <tr style={{ fontWeight: 'bold', backgroundColor: '#f3f4f6' }}>
+                <td className="trait-cell">Average</td>
+                {DEFAULT_COLS_MPS.map(col => {
+                  const avgColumns = ['mean', 'median', 'pl', 'mps', 'sd', 'target'];
+                  if (avgColumns.includes(col.key)) {
+                    return (
+                      <td key={col.key} className="data-cell">
+                        {averages[col.key]}
+                      </td>
+                    );
+                  }
+                  return <td key={col.key} className="data-cell"></td>;
+                })}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
   const renderLAEMPLReport = (fields) => {
     const rows = fields.rows || [];
     
@@ -470,10 +667,26 @@ function ViewSubmission() {
       }) : [];
 
     return (
-      <div className="laempl-report-display">
-        <h4>LAEMPL Report</h4>
-        <div className="table-container">
-          <table className="laempl-table">
+      <div className="laempl-report-display" style={{ width: '100%', maxWidth: '100%', margin: 0, padding: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', padding: '0 20px' }}>
+          <h4>LAEMPL Report</h4>
+          <button 
+            onClick={() => exportBothReportsToExcel(fields)}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#007bff',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '14px'
+            }}
+          >
+            Export Both Reports
+          </button>
+        </div>
+        <div className="table-container" style={{ width: '100%', overflowX: 'auto', margin: 0, padding: 0 }}>
+          <table className="laempl-table" style={{ width: '100%', tableLayout: 'auto', margin: 0 }}>
             <thead>
               <tr>
                 <th>Trait</th>
@@ -535,9 +748,31 @@ function ViewSubmission() {
     if (fields.type === "ACCOMPLISHMENT" || fields._answers) {
       return renderAccomplishmentReport(fields);
     } else if (fields.rows && Array.isArray(fields.rows)) {
-      return renderLAEMPLReport(fields);
+      // For LAEMPL reports, show both LAEMPL and MPS tables
+      return (
+        <div>
+          {renderLAEMPLReport(fields)}
+          {(fields.mps_rows || fields.mpsRows) && Array.isArray(fields.mps_rows || fields.mpsRows) && (fields.mps_rows || fields.mpsRows).length > 0 && (
+            renderMPSReport(fields)
+          )}
+        </div>
+      );
     } else {
       return renderGenericContent(fields);
+    }
+  };
+
+  const formatDateOnly = (val) => {
+    if (!val) return 'N/A';
+    try {
+      const d = new Date(val);
+      if (Number.isNaN(d.getTime())) return String(val).split('T')[0] || String(val);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${mm}/${dd}/${yyyy}`;
+    } catch {
+      return String(val).split('T')[0] || String(val);
     }
   };
 
@@ -604,42 +839,75 @@ function ViewSubmission() {
               >
                 ← Back
               </button>
-              <h2>Submission Details</h2>
+              <h2>Submitted Report Details</h2>
             </div>
-            <div className="submission-details">
-              <div className="detail-row">
-                <label>Title:</label>
-                <span>{submission.value || "Report"}</span>
-              </div>
-              <div className="detail-row">
-                <label>Status:</label>
-                <span className={`status-badge status-${submission.status}`}>
-                  {getStatusText(submission.status)}
-                </span>
-              </div>
-              <div className="detail-row">
-                <label>Date Submitted:</label>
-                <span>{submission.date_submitted || "Not submitted"}</span>
-              </div>
-              <div className="detail-row">
-                <label>Submitted By:</label>
-                <span>{submission.submitted_by_name || submission.submitted_by || "Unknown"}</span>
-              </div>
-            </div>
-
-            {submission.fields && (
-              <div className="submission-content">
-                <div className="content-section">{renderSubmissionContent(submission)}</div>
+            
+            {/* Assignment Navigation */}
+            {assignmentInfo && (
+              <div className="assignment-navigation">
+                <div className="assignment-info">
+                  <h3>{submission.title || submission.value || assignmentInfo.assignment_title || "Report"}</h3>
+                  <p style={{ color: '#2a3b5c', fontSize: '16px', marginTop: '2px' }}>
+                    Submitted by: <span style={{ fontWeight: '700' }}>{submission.submitted_by_name || submission.submitted_by || 'Unknown'}</span>
+                  </p>
+                </div>
               </div>
             )}
+            
+            {/* Two-column layout: main content (left) + details panel (right) */}
+            <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
+              {/* LEFT: Main content */}
+              <div style={{ flex: 1 }}>
+                {submission.fields && (
+                  <div className="submission-content">
+                    <div className="content-section">{renderSubmissionContent(submission)}</div>
+                  </div>
+                )}
 
-            {isTeacher && submission.status < 2 && (
-              <div className="action-buttons">
-                <button onClick={() => navigate(`/AccomplishmentReport/${submissionId}`)}>
-                  Edit Submission
-                </button>
+                {isTeacher && submission.status < 2 && (
+                  <div className="action-buttons">
+                    <button onClick={() => navigate(`/AccomplishmentReport/${submissionId}`)}>
+                      Edit Submission
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
+
+              {/* RIGHT: Details panel */}
+              <div style={{ width: '300px', backgroundColor: '#fff', borderRadius: '8px', padding: '16px', border: '1px solid #ccc' }}>
+                <div style={{ marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid #ccc' }}>
+                  <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', fontWeight: 'bold' }}>Details</h3>
+                  <div style={{ marginBottom: '8px' }}>
+                    <span style={{ fontWeight: '500' }}>Title:</span>{" "}
+                    <span>{assignmentInfo?.assignment_title || submission.title || submission.value || 'Report'}</span>
+                  </div>
+                  <div style={{ marginBottom: '8px' }}>
+                    <span style={{ fontWeight: '500' }}>Status:</span>{" "}
+                    <span className={`status-badge status-${submission.status}`}>
+                      {getStatusText(submission.status)}
+                    </span>
+                  </div>
+                  <div style={{ marginBottom: '8px' }}>
+                    <span style={{ fontWeight: '500' }}>Start Date:</span>{" "}
+                    <span>{formatDateOnly(assignmentInfo?.from_date || submission.from_date)}</span>
+                  </div>
+                  <div style={{ marginBottom: '8px' }}>
+                    <span style={{ fontWeight: '500' }}>Due Date:</span>{" "}
+                    <span>{formatDateOnly(assignmentInfo?.to_date || submission.to_date)}</span>
+                  </div>
+                  <div style={{ marginBottom: '8px' }}>
+                    <span style={{ fontWeight: '500' }}>Report Type:</span>{" "}
+                    <span>{assignmentInfo?.sub_category_name || assignmentInfo?.category_name || submission.sub_category_name || submission.category_name || 'N/A'}</span>
+                  </div>
+                </div>
+                <div>
+                  <div style={{ marginBottom: '8px' }}>
+                    <span style={{ fontWeight: '500' }}>Date Submitted:</span>{" "}
+                    <span>{formatDateOnly(submission.date_submitted)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
