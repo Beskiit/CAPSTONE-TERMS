@@ -882,18 +882,33 @@ function AssignedReport() {
                                                             } else {
                                                                 console.log("[AssignedReport] Generic report type, using fallback");
                                                                 // Fallback to AssignedReportData for generic reports
-                                                                navigate(`/AssignedReportData/${report.first_submission_id}`, { state: { assignmentTitle: report.assignment_title } });
+                                                                navigate(`/AssignedReportData/${report.first_submission_id}`, { 
+                                                                    state: { 
+                                                                        assignmentTitle: report.assignment_title,
+                                                                        fromAssignedReport: true 
+                                                                    } 
+                                                                });
                                                             }
                                                         } else {
                                                             const errorText = await res.text().catch(() => 'Unknown error');
                                                             console.error("[AssignedReport] Fetch failed:", res.status, errorText);
                                                             // If fetch fails, fallback to original navigation
-                                                            navigate(`/AssignedReportData/${report.first_submission_id}`, { state: { assignmentTitle: report.assignment_title } });
+                                                            navigate(`/AssignedReportData/${report.first_submission_id}`, { 
+                                                                state: { 
+                                                                    assignmentTitle: report.assignment_title,
+                                                                    fromAssignedReport: true 
+                                                                } 
+                                                            });
                                                         }
                                                     } catch (error) {
                                                         console.error("[AssignedReport] Error fetching assignment details:", error);
                                                         // Fallback to original navigation
-                                                        navigate(`/AssignedReportData/${report.first_submission_id}`, { state: { assignmentTitle: report.assignment_title } });
+                                                        navigate(`/AssignedReportData/${report.first_submission_id}`, { 
+                                                            state: { 
+                                                                assignmentTitle: report.assignment_title,
+                                                                fromAssignedReport: true 
+                                                            } 
+                                                        });
                                                     }
                                                 };
                                                 

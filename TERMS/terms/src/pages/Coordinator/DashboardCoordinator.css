@@ -127,7 +127,8 @@ body{
   background: #f0f4fa;
   padding: 0.2rem 0.6rem;
   border-radius: 999px;
-  background-color: rgba(30, 86, 160, 0.8);
+  background-color: #ff5b5b;
+  opacity: 0.8;
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;

@@ -111,14 +111,14 @@ function DashboardPrincipal(){
     const handleApprovedReportClick = (report) => {
         // Navigate to ViewSubmissionData for approved reports
     if (report.submission_id) {
-            navigate(`/ViewSubmissionData?id=${report.submission_id}`, { state: { breadcrumbTitle: (report.title || report.assignment_title) } });
+            navigate(`/ViewSubmissionData?id=${report.submission_id}`, { state: { breadcrumbTitle: (report.title || report.assignment_title), fromViewSubmission: true } });
         }
     };
 
     const handlePendingReportClick = (report) => {
         // Navigate to ForApprovalData for pending reports
     if (report.submission_id) {
-            navigate(`/ForApprovalData?id=${report.submission_id}`, { state: { breadcrumbTitle: (report.title || report.assignment_title) } });
+            navigate(`/ForApprovalData?id=${report.submission_id}`, { state: { breadcrumbTitle: (report.title || report.assignment_title), fromForApproval: true } });
         }
     };
 

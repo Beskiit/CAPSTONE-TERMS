@@ -1447,6 +1447,21 @@ function ForApprovalData() {
     );
   }
 
+  // Format date helper
+  const formatDateOnly = (val) => {
+    if (!val) return 'N/A';
+    try {
+      const d = new Date(val);
+      if (Number.isNaN(d.getTime())) return String(val).split('T')[0] || String(val);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${mm}/${dd}/${yyyy}`;
+    } catch { 
+      return String(val).split('T')[0] || String(val); 
+    }
+  };
+
   return (
     <>
       <Header userText={user ? user.name : "Guest"} />
@@ -1472,60 +1487,95 @@ function ForApprovalData() {
               >
                 ← Back
               </button>
-              <h2>Submitted Report Details</h2>
+              <h2>For Approval Report Details</h2>
             </div>
             
-            <div className="submission-details">
-              <div className="detail-row">
-                <label>Title:</label>
-                <span>{submissionData.assignment_title || submissionData.title || submissionData.value || 'Report'}</span>
-              </div>
-              <div className="detail-row">
-                <label>Status:</label>
-                <span className={`status-badge status-${submissionData.status}`}>
-                  {getStatusText(submissionData.status)}
+            {/* Assignment Info */}
+            <div className="assignment-info" style={{ 
+              marginBottom: '20px',
+              backgroundColor: '#fff',
+              borderRadius: '8px',
+              padding: '16px',
+              border: '1px solid #e0e0e0',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+            }}>
+              <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '600' }}>
+                {submissionData.assignment_title || submissionData.title || submissionData.value || 'Report'}
+              </h3>
+              <p style={{ color: '#2a3b5c', fontSize: '16px', marginTop: '2px', margin: 0 }}>
+                Submitted by: <span style={{ fontWeight: '700' }}>
+                  {submissionData.submitted_by_name || submissionData.submitted_by || 'Unknown'}
                 </span>
-              </div>
-              <div className="detail-row">
-                <label>Date Submitted:</label>
-                <span>{submissionData.date_submitted || 'Not submitted'}</span>
-              </div>
-              <div className="detail-row">
-                <label>Submitted By:</label>
-                <span>{submissionData.submitted_by_name || submissionData.submitted_by || 'Unknown'}</span>
-              </div>
-              {submissionData.fields?.subject_name && (
-                <div className="detail-row">
-                  <label>Subject:</label>
-                  <span>{submissionData.fields.subject_name}</span>
-                </div>
-              )}
-              {submissionData.fields?.subject_id && !submissionData.fields?.subject_name && (
-                <div className="detail-row">
-                  <label>Subject ID:</label>
-                  <span>{submissionData.fields.subject_id}</span>
-                </div>
-              )}
-              {(submissionData.rejection_reason || submissionData.fields?.rejection_reason) && (
-                <div className="detail-row">
-                  <label>Rejection Reason:</label>
-                  <span style={{ color: '#e74c3c', fontStyle: 'italic' }}>
-                    {submissionData.rejection_reason || submissionData.fields?.rejection_reason}
-                  </span>
-                </div>
-              )}
+              </p>
             </div>
             
-            {submissionData.fields && (
-              <div className="submission-content">
-                <div className="content-section">
-                  {renderSubmissionContent(submissionData)}
+            {/* Two-column layout: main content (left) + details panel (right) */}
+            <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
+              {/* LEFT: Main content */}
+              <div style={{ flex: 1 }}>
+                {submissionData.fields && (
+                  <div className="submission-content">
+                    <div className="content-section">
+                      {renderSubmissionContent(submissionData)}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* RIGHT: Details panel */}
+              <div style={{ width: '300px', backgroundColor: '#fff', borderRadius: '8px', padding: '16px', border: '1px solid #ccc' }}>
+                <div style={{ marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid #ccc' }}>
+                  <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', fontWeight: 'bold' }}>Details</h3>
+                  <div style={{ marginBottom: '8px' }}>
+                    <span style={{ fontWeight: '500' }}>Title:</span>{" "}
+                    <span>{submissionData.assignment_title || submissionData.title || submissionData.value || 'Report'}</span>
+                  </div>
+                  <div style={{ marginBottom: '8px' }}>
+                    <span style={{ fontWeight: '500' }}>Status:</span>{" "}
+                    <span className={`status-badge status-${submissionData.status}`}>
+                      {getStatusText(submissionData.status)}
+                    </span>
+                  </div>
+                  <div style={{ marginBottom: '8px' }}>
+                    <span style={{ fontWeight: '500' }}>Start Date:</span>{" "}
+                    <span>{submissionData.from_date ? formatDateOnly(submissionData.from_date) : 'N/A'}</span>
+                  </div>
+                  <div style={{ marginBottom: '8px' }}>
+                    <span style={{ fontWeight: '500' }}>Due Date:</span>{" "}
+                    <span>{submissionData.to_date ? formatDateOnly(submissionData.to_date) : 'N/A'}</span>
+                  </div>
+                  <div style={{ marginBottom: '8px' }}>
+                    <span style={{ fontWeight: '500' }}>Report Type:</span>{" "}
+                    <span>{submissionData.sub_category_name || submissionData.category_name || 'N/A'}</span>
+                  </div>
+                </div>
+                <div>
+                  <div style={{ marginBottom: '8px' }}>
+                    <span style={{ fontWeight: '500' }}>Date Submitted:</span>{" "}
+                    <span>{submissionData.date_submitted || 'Not submitted'}</span>
+                  </div>
+                  {submissionData.fields?.subject_name && (
+                    <div style={{ marginBottom: '8px' }}>
+                      <span style={{ fontWeight: '500' }}>Subject:</span>{" "}
+                      <span>{submissionData.fields.subject_name}</span>
+                    </div>
+                  )}
+                  {(submissionData.rejection_reason || submissionData.fields?.rejection_reason) && (
+                    <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #ccc' }}>
+                      <div style={{ marginBottom: '8px' }}>
+                        <span style={{ fontWeight: '500', color: '#e74c3c' }}>Rejection Reason:</span>
+                      </div>
+                      <span style={{ color: '#e74c3c', fontStyle: 'italic', fontSize: '14px' }}>
+                        {submissionData.rejection_reason || submissionData.fields?.rejection_reason}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
-            )}
+            </div>
             
             {/* Approve and Reject Section */}
-            <div className="approval-section">
+            <div className="approval-section" style={{ marginTop: '20px' }}>
               <h3>Review Submission</h3>
               <p>Review the submission details above and choose to approve or reject.</p>
               {msg && (
@@ -1553,9 +1603,8 @@ function ForApprovalData() {
                 >
                   {saving ? 'Processing...' : 'Approve'}
                 </button>
-          </div>
-        </div>
-
+              </div>
+            </div>
           </div>
         </div>
       </div>

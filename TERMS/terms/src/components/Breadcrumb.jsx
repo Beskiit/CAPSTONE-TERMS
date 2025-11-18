@@ -100,11 +100,28 @@ const Breadcrumb = () => {
 
   // Flows for accomplishment creation
   if (location.pathname === '/AccomplishmentReportInstruction') {
-    if (s.fromReports) {
+    if (s.fromAssignedReport) {
+      pushLink('Assigned Report', '/AssignedReport');
+    } else if (s.fromReports) {
       pushLink('Reports', '/Accomplishment');
       pushLink('Accomplishment', '/Accomplishment');
     }
     pushText('Accomplishment Report Instruction');
+  } else if (location.pathname === '/LAEMPLInstruction') {
+    if (s.fromAssignedReport) {
+      pushLink('Assigned Report', '/AssignedReport');
+    }
+    pushText('LAEMPL Instruction');
+  } else if (location.pathname === '/MPSInstruction') {
+    if (s.fromAssignedReport) {
+      pushLink('Assigned Report', '/AssignedReport');
+    }
+    pushText('MPS Instruction');
+  } else if (location.pathname === '/ClassificationOfGradesInstruction') {
+    if (s.fromAssignedReport) {
+      pushLink('Assigned Report', '/AssignedReport');
+    }
+    pushText('Classification of Grades Instruction');
   } else if (location.pathname === '/AccomplishmentReport') {
     if (s.fromReports) {
       pushLink('Reports', '/Accomplishment');
@@ -136,14 +153,74 @@ const Breadcrumb = () => {
     const t = s.breadcrumbTitle;
     pushText(t ? `Accomplishment Report - ${t}` : 'Accomplishment Report');
   } else if (location.pathname.startsWith('/submission/')) {
+    // If coming from SubmittedReport, show it in breadcrumb
+    if (s.fromSubmittedReport) {
+      pushLink('Submitted Report', '/SubmittedReport');
+    }
     const t = s.breadcrumbTitle;
     pushText(t ? `Submitted Report - ${t}` : 'Submitted Report Details');
   } else if (location.pathname.startsWith('/ViewSubmissionData')) {
+    // If coming from ViewSubmission, show it in breadcrumb
+    if (s.fromViewSubmission) {
+      pushLink('View Submission', '/ViewSubmission');
+    }
     const t = s.breadcrumbTitle;
     pushText(t ? `View Report - ${t}` : 'View Report Details');
   } else if (location.pathname.startsWith('/ForApprovalData')) {
+    // If coming from For Approval list, show it in breadcrumb
+    if (s.fromForApproval) {
+      pushLink('For Approval', '/ForApproval');
+    }
     const t = s.breadcrumbTitle;
     pushText(t ? `For Approval - ${t}` : 'For Approval Details');
+  } else if (location.pathname.startsWith('/AssignedReportData/')) {
+    // If coming from AssignedReport, show it in breadcrumb
+    if (s.fromAssignedReport) {
+      pushLink('Assigned Report', '/AssignedReport');
+      
+      // If coming from an instruction page, add it to the breadcrumb
+      if (s.fromInstructionPage) {
+        const instructionPageNames = {
+          'AccomplishmentReportInstruction': 'Accomplishment Report Instruction',
+          'LAEMPLInstruction': 'LAEMPL Instruction',
+          'MPSInstruction': 'MPS Instruction',
+          'ClassificationOfGradesInstruction': 'Classification of Grades Instruction'
+        };
+        const instructionName = instructionPageNames[s.fromInstructionPage] || s.fromInstructionPage;
+        pushLink(instructionName, `/${s.fromInstructionPage}`, {
+          ...s,
+          fromAssignedReport: true
+        });
+      }
+    }
+    const t = s.assignmentTitle || s.breadcrumbTitle;
+    pushText(t ? `Assigned Report - ${t}` : 'Assigned Report Details');
+  } else if (location.pathname === '/SetReport') {
+    // If there's a breadcrumbTitle in state, show "Set Report - {title}"
+    if (s.breadcrumbTitle) {
+      // If coming from AssignedReport, show it in breadcrumb
+      if (s.fromAssignedReport) {
+        pushLink('Assigned Report', '/AssignedReport');
+        
+        // If coming from an instruction page, add it to the breadcrumb
+        if (s.fromInstructionPage) {
+          const instructionPageNames = {
+            'AccomplishmentReportInstruction': 'Accomplishment Report Instruction',
+            'LAEMPLInstruction': 'LAEMPL Instruction',
+            'MPSInstruction': 'MPS Instruction',
+            'ClassificationOfGradesInstruction': 'Classification of Grades Instruction'
+          };
+          const instructionName = instructionPageNames[s.fromInstructionPage] || s.fromInstructionPage;
+          pushLink(instructionName, `/${s.fromInstructionPage}`, {
+            ...s,
+            fromAssignedReport: true
+          });
+        }
+      }
+      pushText(`Set Report - ${s.breadcrumbTitle}`);
+    } else {
+      pushText('Set Report');
+    }
   } else if (!isDashboard) {
     pushText(displayName);
   }

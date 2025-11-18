@@ -1233,7 +1233,7 @@ function SetReport() {
       };
       
       // For Accomplishment Report: Set coordinator_user_id if principal assigns to exactly 1 coordinator
-      // AND that coordinator is not exclusively a LAEMPL/MPS coordinator
+      // AND that coordinator is actually the coordinator for Accomplishment Reports
       if (isPrincipal && reportType === "accomplishment" && recipients.length === 1) {
         const singleRecipientId = recipients[0];
         // Check if the single recipient is a coordinator
@@ -1246,62 +1246,82 @@ function SetReport() {
             });
             if (checkRes.ok) {
               const assignments = await checkRes.json();
-              // Check if coordinator has any Accomplishment Report assignments (category_id = 0)
-              const hasAccomplishmentAssignments = assignments.some(assignment => 
-                Number(assignment.category_id) === 0
-              );
-              
-              // Also check if they have coordinator_user_id set for Accomplishment Reports
-              const hasAccomplishmentCoordinatorRole = assignments.some(assignment => 
-                Number(assignment.category_id) === 0 && 
+              // Check if this coordinator is the assigned coordinator for Accomplishment Reports (category_id = 0)
+              const isAccomplishmentCoordinator = assignments.some(assignment => 
+                Number(assignment.category_id) === 0 &&
                 assignment.coordinator_user_id != null &&
                 Number(assignment.coordinator_user_id) === Number(singleRecipientId)
               );
               
-              // Check if they are exclusively a LAEMPL/MPS coordinator
-              const hasLaemplMpsCoordinatorRole = assignments.some(assignment => 
-                Number(assignment.category_id) === 1 && 
-                Number(assignment.sub_category_id) === 3 &&
-                assignment.coordinator_user_id != null &&
-                Number(assignment.coordinator_user_id) === Number(singleRecipientId)
-              );
-              
-              // Only set coordinator_user_id if:
-              // 1. They have Accomplishment Report assignments/coordinator role, AND
-              // 2. They are NOT exclusively a LAEMPL/MPS coordinator
-              // If they are exclusively a LAEMPL/MPS coordinator (has LAEMPL/MPS role but no Accomplishment role), don't set it
-              // If they have both roles, allow it (they can coordinate both)
-              // If they have neither role, don't set it (let them act as teacher)
-              const shouldSet = 
-                (hasAccomplishmentAssignments || hasAccomplishmentCoordinatorRole) &&
-                !(hasLaemplMpsCoordinatorRole && !hasAccomplishmentCoordinatorRole && !hasAccomplishmentAssignments);
-              
-              if (shouldSet) {
+              if (isAccomplishmentCoordinator) {
                 updateData.coordinator_user_id = Number(singleRecipientId);
+                console.log("🔍 [SetReport] Update Accomplishment coordinator check:", {
+                  singleRecipientId,
+                  shouldSet: true,
+                  reason: "Coordinator is assigned coordinator for Accomplishment Reports"
+                });
+              } else {
+                console.log("🔍 [SetReport] Update Accomplishment coordinator check:", {
+                  singleRecipientId,
+                  shouldSet: false,
+                  reason: "Coordinator is NOT the assigned coordinator for Accomplishment Reports - will act as teacher"
+                });
               }
-              
-              console.log("🔍 [SetReport] Update Accomplishment coordinator check:", {
-                singleRecipientId,
-                hasAccomplishmentAssignments,
-                hasAccomplishmentCoordinatorRole,
-                hasLaemplMpsCoordinatorRole,
-                shouldSet
-              });
             } else {
               // If we can't check, default to NOT setting it (safer - let them act as teacher)
-              // Don't set coordinator_user_id
+              console.log("🔍 [SetReport] Update Accomplishment coordinator check:", {
+                singleRecipientId,
+                shouldSet: false,
+                reason: "Failed to fetch coordinator assignments - defaulting to teacher role"
+              });
             }
           } catch (err) {
-            console.warn("Failed to check coordinator assignments:", err);
+            console.warn("🔍 [SetReport] Failed to check coordinator assignments:", err);
             // Default to NOT setting it if check fails (safer - let them act as teacher)
-            // Don't set coordinator_user_id
           }
         }
       }
       
-      // For LAEMPL: Set coordinator_user_id if principal assigns to a coordinator (existing logic)
+      // For LAEMPL: Set coordinator_user_id if principal assigns to a coordinator
+      // AND that coordinator is actually the coordinator for LAEMPL & MPS
       if (isPrincipal && selectedSubCategory === "3" && selectedCoordinatorId) {
-        updateData.coordinator_user_id = Number(selectedCoordinatorId);
+        // Check if this coordinator is the assigned coordinator for LAEMPL & MPS
+        try {
+          const checkRes = await fetch(`${API_BASE}/reports/given_to/${selectedCoordinatorId}`, {
+            credentials: "include"
+          });
+          if (checkRes.ok) {
+            const assignments = await checkRes.json();
+            // Check if this coordinator is the assigned coordinator for LAEMPL & MPS
+            const isLaemplMpsCoordinator = assignments.some(assignment => 
+              Number(assignment.category_id) === 1 &&
+              Number(assignment.sub_category_id) === 3 &&
+              assignment.coordinator_user_id != null &&
+              Number(assignment.coordinator_user_id) === Number(selectedCoordinatorId)
+            );
+            
+            if (isLaemplMpsCoordinator) {
+              updateData.coordinator_user_id = Number(selectedCoordinatorId);
+              console.log("✅ [SetReport] Update - Setting coordinator_user_id for LAEMPL & MPS:", {
+                coordinator_user_id: updateData.coordinator_user_id,
+                reason: "Coordinator is assigned coordinator for LAEMPL & MPS"
+              });
+            } else {
+              console.log("🔍 [SetReport] Update - NOT setting coordinator_user_id for LAEMPL & MPS:", {
+                coordinatorId: selectedCoordinatorId,
+                reason: "Coordinator is NOT the assigned coordinator for LAEMPL & MPS - will act as teacher"
+              });
+            }
+          } else {
+            console.log("🔍 [SetReport] Update - NOT setting coordinator_user_id for LAEMPL & MPS:", {
+              coordinatorId: selectedCoordinatorId,
+              reason: "Failed to fetch coordinator assignments - defaulting to teacher role"
+            });
+          }
+        } catch (err) {
+          console.warn("🔍 [SetReport] Update - Failed to check coordinator assignments for LAEMPL & MPS:", err);
+          // Default to NOT setting it if check fails (safer - let them act as teacher)
+        }
       }
 
       const res = await fetch(`${API_BASE}/reports/assignment/${assignmentIdToUpdate}`, {
@@ -1496,7 +1516,7 @@ function SetReport() {
       });
       
       // For Accomplishment Report: Check if coordinator recipient should get coordinator_user_id
-      // If principal assigns Accomplishment Report to a coordinator, set coordinator_user_id
+      // Only set coordinator_user_id if the coordinator is actually the coordinator for Accomplishment Reports
       let shouldSetAccomplishmentCoordinatorId = false;
       if (isPrincipal && reportType === "accomplishment") {
         // Check if any recipient is a coordinator
@@ -1506,15 +1526,233 @@ function SetReport() {
           return recipientUser?.role?.toLowerCase() === 'coordinator';
         });
         
-        // If there's exactly one coordinator recipient, set coordinator_user_id
-        // This matches the behavior for LAEMPL & MPS where we set coordinator_user_id when principal assigns to coordinator
+        // If there's exactly one coordinator recipient, check if they're the coordinator for Accomplishment Reports
         if (coordinatorRecipients.length === 1) {
-          shouldSetAccomplishmentCoordinatorId = true;
-          console.log("🔍 [SetReport] Accomplishment coordinator check:", {
-            coordinatorRecipient: coordinatorRecipients[0],
-            shouldSetAccomplishmentCoordinatorId: true,
-            reason: "Principal assigning Accomplishment Report to single coordinator"
-          });
+          const coordinatorId = coordinatorRecipients[0];
+          try {
+            console.log("🔍 [SetReport] Checking coordinator assignments for:", coordinatorId);
+            
+            // Check if this coordinator is the assigned coordinator for Accomplishment Reports
+            // The issue: /reports/given_to/ returns assignments where coordinator is a RECIPIENT,
+            // not where they are coordinator_user_id. 
+            
+            // Strategy: If a principal is assigning an Accomplishment Report to a coordinator,
+            // and that coordinator has the coordinator role, we should set them as coordinator_user_id.
+            // This is the correct behavior - when a principal assigns to a coordinator, they become the coordinator_user_id.
+            
+            let isAccomplishmentCoordinator = false;
+            const recipientUser = usersWithGrades.find(u => String(u.user_id) === String(coordinatorId)) ||
+              coordinators.find(u => String(u.user_id) === String(coordinatorId));
+            
+            if (recipientUser?.role?.toLowerCase() === 'coordinator') {
+              // Check if this coordinator is the actual coordinator for Accomplishment Reports
+              // by checking their past Accomplishment Report assignments
+              // The issue: /reports/given_to/ returns assignments where coordinator is a RECIPIENT,
+              // not where they are coordinator_user_id. We need to check assignments where coordinator_user_id matches.
+              
+              try {
+                // First, try to get assignments where they are recipients (might include coordinator_user_id info)
+                const checkRes = await fetch(`${API_BASE}/reports/given_to/${coordinatorId}`, {
+                  credentials: "include"
+                });
+                
+                let allAssignments = [];
+                if (checkRes.ok) {
+                  const recipientAssignments = await checkRes.json();
+                  console.log("🔍 [SetReport] Assignments where coordinator is recipient:", recipientAssignments);
+                  allAssignments = recipientAssignments;
+                }
+                
+                // The API responses might not include coordinator_user_id field
+                // Also, /reports/given_to/ only returns assignments where coordinator is a RECIPIENT,
+                // not where they are coordinator_user_id. We need to check assignments assigned by the principal.
+                
+                // First, check assignments assigned by the principal (these should include coordinator_user_id)
+                let foundCoordinatorAssignment = false;
+                
+                if (user?.user_id) {
+                  try {
+                    const assignedByRes = await fetch(`${API_BASE}/reports/assigned_by/${user.user_id}`, {
+                      credentials: "include"
+                    });
+                    if (assignedByRes.ok) {
+                      const assignedByPrincipal = await assignedByRes.json();
+                      console.log("🔍 [SetReport] Assignments assigned by principal:", assignedByPrincipal);
+                      
+                      // Get Accomplishment Report assignments and fetch their details to check coordinator_user_id
+                      const accomplishmentAssignmentsFromPrincipal = assignedByPrincipal.filter(assignment => 
+                        Number(assignment.category_id) === 0
+                      );
+                      
+                      console.log("🔍 [SetReport] Accomplishment Reports assigned by principal:", accomplishmentAssignmentsFromPrincipal);
+                      
+                      if (accomplishmentAssignmentsFromPrincipal.length > 0) {
+                        // Fetch assignment details for each to get coordinator_user_id
+                        const assignmentChecks = await Promise.all(
+                          accomplishmentAssignmentsFromPrincipal.map(async (assignment) => {
+                            const assignmentId = assignment.report_assignment_id || assignment.id;
+                            if (!assignmentId) return null;
+                            
+                            try {
+                              const assignmentDetailRes = await fetch(`${API_BASE}/reports/assignment/${assignmentId}`, {
+                                credentials: "include"
+                              });
+                              if (assignmentDetailRes.ok) {
+                                const assignmentDetail = await assignmentDetailRes.json();
+                                return {
+                                  ...assignment,
+                                  coordinator_user_id: assignmentDetail.coordinator_user_id,
+                                  assignmentDetail: assignmentDetail
+                                };
+                              }
+                            } catch (err) {
+                              console.warn(`🔍 [SetReport] Failed to fetch assignment ${assignmentId} details:`, err);
+                            }
+                            return assignment;
+                          })
+                        );
+                        
+                        console.log("🔍 [SetReport] Accomplishment assignments with details (from assigned_by):", assignmentChecks);
+                        
+                        // Check if any have coordinator_user_id matching
+                        const assignmentsWhereCoordinator = assignmentChecks.filter(assignment => {
+                          if (!assignment) return false;
+                          const assignmentCoordinatorId = assignment.coordinator_user_id != null 
+                            ? Number(assignment.coordinator_user_id) 
+                            : null;
+                          const matches = assignmentCoordinatorId === Number(coordinatorId);
+                          
+                          console.log("🔍 [SetReport] Checking assignment (from assigned_by):", {
+                            assignment_id: assignment.report_assignment_id || assignment.id,
+                            coordinator_user_id: assignment.coordinator_user_id,
+                            assignmentCoordinatorId,
+                            coordinatorId: Number(coordinatorId),
+                            matches
+                          });
+                          
+                          return matches;
+                        });
+                        
+                        console.log("🔍 [SetReport] Accomplishment assignments where coordinator_user_id matches (from assigned_by):", assignmentsWhereCoordinator);
+                        
+                        if (assignmentsWhereCoordinator.length > 0) {
+                          foundCoordinatorAssignment = true;
+                          isAccomplishmentCoordinator = true;
+                          console.log("✅ [SetReport] Coordinator is the actual Accomplishment Report coordinator (from assigned_by):", {
+                            matchingAssignments: assignmentsWhereCoordinator.length
+                          });
+                        }
+                      }
+                    }
+                  } catch (assignedByErr) {
+                    console.warn("🔍 [SetReport] Error fetching assignments assigned by principal:", assignedByErr);
+                  }
+                }
+                
+                // If not found in assigned_by, check assignments where coordinator is recipient
+                if (!foundCoordinatorAssignment) {
+                  const accomplishmentAssignments = allAssignments.filter(assignment => 
+                    Number(assignment.category_id) === 0
+                  );
+                  
+                  console.log("🔍 [SetReport] Accomplishment Report assignments (from given_to):", accomplishmentAssignments);
+                  
+                  if (accomplishmentAssignments.length > 0) {
+                    // Fetch assignment details for each Accomplishment Report to get coordinator_user_id
+                    const assignmentChecks = await Promise.all(
+                      accomplishmentAssignments.map(async (assignment) => {
+                        const assignmentId = assignment.report_assignment_id || assignment.id;
+                        if (!assignmentId) return null;
+                        
+                        try {
+                          const assignmentDetailRes = await fetch(`${API_BASE}/reports/assignment/${assignmentId}`, {
+                            credentials: "include"
+                          });
+                          if (assignmentDetailRes.ok) {
+                            const assignmentDetail = await assignmentDetailRes.json();
+                            return {
+                              ...assignment,
+                              coordinator_user_id: assignmentDetail.coordinator_user_id,
+                              assignmentDetail: assignmentDetail
+                            };
+                          }
+                        } catch (err) {
+                          console.warn(`🔍 [SetReport] Failed to fetch assignment ${assignmentId} details:`, err);
+                        }
+                        return assignment;
+                      })
+                    );
+                    
+                    console.log("🔍 [SetReport] Accomplishment assignments with details (from given_to):", assignmentChecks);
+                    
+                    // Check if any have coordinator_user_id matching
+                    const assignmentsWhereCoordinator = assignmentChecks.filter(assignment => {
+                      if (!assignment) return false;
+                      const assignmentCoordinatorId = assignment.coordinator_user_id != null 
+                        ? Number(assignment.coordinator_user_id) 
+                        : null;
+                      const matches = assignmentCoordinatorId === Number(coordinatorId);
+                      
+                      console.log("🔍 [SetReport] Checking assignment (from given_to):", {
+                        assignment_id: assignment.report_assignment_id || assignment.id,
+                        coordinator_user_id: assignment.coordinator_user_id,
+                        assignmentCoordinatorId,
+                        coordinatorId: Number(coordinatorId),
+                        matches
+                      });
+                      
+                      return matches;
+                    });
+                    
+                    console.log("🔍 [SetReport] Accomplishment assignments where coordinator_user_id matches (from given_to):", assignmentsWhereCoordinator);
+                    
+                    if (assignmentsWhereCoordinator.length > 0) {
+                      isAccomplishmentCoordinator = true;
+                      console.log("✅ [SetReport] Coordinator is the actual Accomplishment Report coordinator (from given_to):", {
+                        matchingAssignments: assignmentsWhereCoordinator.length,
+                        totalAccomplishmentAssignments: accomplishmentAssignments.length
+                      });
+                    } else {
+                      // They have Accomplishment Report assignments, but coordinator_user_id is NULL or different
+                      isAccomplishmentCoordinator = false;
+                      console.log("❌ [SetReport] Coordinator has Accomplishment Report assignments but coordinator_user_id doesn't match - will act as teacher:", {
+                        totalAccomplishmentAssignments: accomplishmentAssignments.length,
+                        assignmentsWhereCoordinator: assignmentsWhereCoordinator.length
+                      });
+                    }
+                  } else {
+                    // No Accomplishment Report assignments found - act as teacher
+                    isAccomplishmentCoordinator = false;
+                    console.log("❌ [SetReport] No Accomplishment Report assignments found - will act as teacher");
+                  }
+                }
+              } catch (fetchErr) {
+                // If fetch fails, don't set them as coordinator_user_id (safer)
+                isAccomplishmentCoordinator = false;
+                console.warn("❌ [SetReport] Error checking assignments - NOT setting as coordinator_user_id:", fetchErr);
+              }
+            } else {
+              console.log("🔍 [SetReport] User is not a coordinator role");
+            }
+              
+            if (isAccomplishmentCoordinator) {
+              shouldSetAccomplishmentCoordinatorId = true;
+              console.log("✅ [SetReport] Accomplishment coordinator check:", {
+                coordinatorRecipient: coordinatorId,
+                shouldSetAccomplishmentCoordinatorId: true,
+                reason: "Coordinator is assigned coordinator for Accomplishment Reports"
+              });
+            } else {
+              console.log("❌ [SetReport] Accomplishment coordinator check:", {
+                coordinatorRecipient: coordinatorId,
+                shouldSetAccomplishmentCoordinatorId: false,
+                reason: "Coordinator is NOT the assigned coordinator for Accomplishment Reports - will act as teacher"
+              });
+            }
+          } catch (err) {
+            console.error("❌ [SetReport] Failed to check coordinator assignments:", err);
+            // Default to NOT setting it if check fails (safer - let them act as teacher)
+          }
         } else if (coordinatorRecipients.length > 1) {
           // Multiple coordinators - don't set coordinator_user_id (ambiguous)
           console.log("🔍 [SetReport] Accomplishment coordinator check:", {
@@ -1703,12 +1941,56 @@ function SetReport() {
       };
       
       // Only add coordinator_user_id if principal is assigning to a coordinator
+      // AND that coordinator is actually the coordinator for LAEMPL & MPS (category_id = 1, sub_category_id = 3)
       // Never add it when coordinator is assigning to avoid conflicts
       if (isPrincipal && selectedSubCategory === "3" && selectedCoordinatorId) {
-        base.coordinator_user_id = Number(selectedCoordinatorId);
+        // Check if this coordinator is the assigned coordinator for LAEMPL & MPS
+        try {
+          const checkRes = await fetch(`${API_BASE}/reports/given_to/${selectedCoordinatorId}`, {
+            credentials: "include"
+          });
+          if (checkRes.ok) {
+            const assignments = await res.json();
+            // Check if this coordinator is the assigned coordinator for LAEMPL & MPS
+            const isLaemplMpsCoordinator = assignments.some(assignment => 
+              Number(assignment.category_id) === 1 &&
+              Number(assignment.sub_category_id) === 3 &&
+              assignment.coordinator_user_id != null &&
+              Number(assignment.coordinator_user_id) === Number(selectedCoordinatorId)
+            );
+            
+            if (isLaemplMpsCoordinator) {
+              base.coordinator_user_id = Number(selectedCoordinatorId);
+              console.log("✅ [SetReport] Setting coordinator_user_id for LAEMPL & MPS:", {
+                coordinator_user_id: base.coordinator_user_id,
+                reason: "Coordinator is assigned coordinator for LAEMPL & MPS"
+              });
+            } else {
+              console.log("🔍 [SetReport] NOT setting coordinator_user_id for LAEMPL & MPS:", {
+                coordinatorId: selectedCoordinatorId,
+                reason: "Coordinator is NOT the assigned coordinator for LAEMPL & MPS - will act as teacher"
+              });
+            }
+          } else {
+            console.log("🔍 [SetReport] NOT setting coordinator_user_id for LAEMPL & MPS:", {
+              coordinatorId: selectedCoordinatorId,
+              reason: "Failed to fetch coordinator assignments - defaulting to teacher role"
+            });
+          }
+        } catch (err) {
+          console.warn("🔍 [SetReport] Failed to check coordinator assignments for LAEMPL & MPS:", err);
+          // Default to NOT setting it if check fails (safer - let them act as teacher)
+        }
       }
       
       // For Accomplishment Report: Set coordinator_user_id if principal assigns to exactly 1 coordinator
+      console.log("🔍 [SetReport] Before setting coordinator_user_id for Accomplishment Report:", {
+        isPrincipal,
+        reportType,
+        shouldSetAccomplishmentCoordinatorId,
+        finalRecipients
+      });
+      
       if (isPrincipal && reportType === "accomplishment" && shouldSetAccomplishmentCoordinatorId) {
         // Find the coordinator recipient
         const coordinatorRecipient = finalRecipients.find(recipientId => {
@@ -1721,9 +2003,24 @@ function SetReport() {
           base.coordinator_user_id = Number(coordinatorRecipient);
           console.log("✅ [SetReport] Setting coordinator_user_id for Accomplishment Report:", {
             coordinator_user_id: base.coordinator_user_id,
+            coordinatorRecipient,
+            baseObject: base
+          });
+        } else {
+          console.log("❌ [SetReport] Coordinator recipient not found in finalRecipients:", {
+            finalRecipients,
             coordinatorRecipient
           });
         }
+      } else {
+        console.log("❌ [SetReport] NOT setting coordinator_user_id for Accomplishment Report:", {
+          isPrincipal,
+          reportType,
+          shouldSetAccomplishmentCoordinatorId,
+          reason: !isPrincipal ? "Not principal" : 
+                  reportType !== "accomplishment" ? "Not accomplishment report" :
+                  !shouldSetAccomplishmentCoordinatorId ? "shouldSetAccomplishmentCoordinatorId is false" : "Unknown"
+        });
       }
 
       let endpoint = "";
@@ -1938,15 +2235,27 @@ function SetReport() {
           title: fallbackTitle,
         };
         
+        // Ensure coordinator_user_id is included if it was set
+        if (base.coordinator_user_id) {
+          body.coordinator_user_id = base.coordinator_user_id;
+          console.log("✅ [SetReport] Including coordinator_user_id in body:", {
+            coordinator_user_id: body.coordinator_user_id,
+            base_coordinator_user_id: base.coordinator_user_id
+          });
+        }
+        
         // For principal assigning to coordinator: ensure parent_report_assignment_id is null (it's the parent)
         if (isPrincipal && base.coordinator_user_id) {
           body.parent_report_assignment_id = null;
           console.log("✅ [SetReport] Principal creating parent assignment for coordinator:", {
             coordinator_user_id: base.coordinator_user_id,
             parent_report_assignment_id: null,
-            is_given: base.is_given
+            is_given: base.is_given,
+            body: body
           });
         }
+        
+        console.log("🔍 [SetReport] Final body for Accomplishment Report:", body);
       } else if (reportType === "laempl") {
         // Check if this is LAEMPL & MPS with subject selection
         const isLAEMPLMPS = selectedSubCategory === "3"; // LAEMPL & MPS sub-category ID
@@ -2402,6 +2711,30 @@ function SetReport() {
                   ))}
                 </select>
 
+                {/* Sub-Category appears directly after Category when Category is selected and not Accomplishment Report */}
+                {selectedCategory && String(selectedCategory) !== "0" && (
+                  <>
+                    <label>Sub-Category:</label>
+                    <select
+                      value={selectedSubCategory}
+                      onChange={(e) => setSelectedSubCategory(e.target.value)}
+                      disabled={isCoordinator && isFromPrincipalAssignment}
+                    >
+                      <option value="">Select Sub-Category</option>
+                      {subCategories.map((sub) => (
+                        <option
+                          key={sub.sub_category_id}
+                          value={sub.sub_category_id}
+                        >
+                          {sub.sub_category_name}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
+              </div>
+
+              <div className="form-row">
                 {/* Teachers multi-select dropdown placed in same row */}
                 <label>Teachers & Coordinators:</label>
                 <div ref={teacherMenuRef} style={{ position: "relative", width: "100%" }}>
@@ -2498,33 +2831,10 @@ function SetReport() {
                     </div>
                   )}
                 </div>
-              </div>
 
-              {selectedCategory && String(selectedCategory) !== "0" && (
-                <div className="form-row">
-                  <label>Sub-Category:</label>
-                  <select
-                    value={selectedSubCategory}
-                    onChange={(e) => setSelectedSubCategory(e.target.value)}
-                    disabled={isCoordinator && isFromPrincipalAssignment}
-                  >
-                    <option value="">Select Sub-Category</option>
-                    {subCategories.map((sub) => (
-                      <option
-                        key={sub.sub_category_id}
-                        value={sub.sub_category_id}
-                      >
-                        {sub.sub_category_name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {/* Grade Level and Subject Selection for LAEMPL & MPS */}
-              {selectedSubCategory === "3" && (
-                <>
-                  <div className="form-row">
+                {/* Grade Level appears side-by-side with Teachers & Coordinators when Sub-Category is LAEMPL & MPS */}
+                {selectedSubCategory === "3" && (
+                  <>
                     <label>Grade Level:</label>
                     <select
                       value={selectedGradeLevel}
@@ -2538,6 +2848,7 @@ function SetReport() {
                         }
                       }}
                       disabled={(isCoordinator && isFromPrincipalAssignment) || shouldLockGradeLevel}
+                      style={{ minWidth: '200px', width: '200px' }}
                     >
                       <option value="">Select Grade Level</option>
                       {gradeLevels.map((grade) => (
@@ -2546,86 +2857,88 @@ function SetReport() {
                         </option>
                       ))}
                     </select>
+                  </>
+                )}
+              </div>
 
-                    {selectedGradeLevel && (
-                      <>
-                        <label>Subjects:</label>
-                        <div ref={subjectMenuRef} style={{ position: "relative", width: "100%" }}>
-                        <button
-                          className="teacher-trigger"
-                          type="button"
-                          onClick={() => setSubjectMenuOpen((v) => !v)}
-                          aria-haspopup="listbox"
-                          aria-expanded={subjectMenuOpen}
-                          title={
-                            selectedSubjects.length
-                              ? subjects
-                                  .filter(s => selectedSubjects.includes(s.subject_id))
-                                  .map(s => s.subject_name)
-                                  .join(", ")
-                              : "Select Subjects"
-                          }
-                        >
-                          <span className="teacher-trigger-label">
-                            {selectedSubjects.length
-                              ? subjects
-                                  .filter(s => selectedSubjects.includes(s.subject_id))
-                                  .map(s => s.subject_name)
-                                  .join(", ")
-                              : "Select Subjects"}
+              {/* Subject Selection for LAEMPL & MPS - appears in its own full row when Teachers & Coordinators has selected users */}
+              {selectedSubCategory === "3" && selectedGradeLevel && selectedTeachers.length > 0 && (
+                <div className="form-row" style={{ display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "center", columnGap: "12px" }}>
+                  <label>Subjects:</label>
+                  <div ref={subjectMenuRef} style={{ position: "relative", width: "100%" }}>
+                    <button
+                      className="teacher-trigger"
+                      type="button"
+                      onClick={() => setSubjectMenuOpen((v) => !v)}
+                      aria-haspopup="listbox"
+                      aria-expanded={subjectMenuOpen}
+                      title={
+                        selectedSubjects.length
+                          ? subjects
+                              .filter(s => selectedSubjects.includes(s.subject_id))
+                              .map(s => s.subject_name)
+                              .join(", ")
+                          : "Select Subjects"
+                      }
+                      style={{ width: "100%", maxWidth: "none" }}
+                    >
+                      <span className="teacher-trigger-label">
+                        {selectedSubjects.length
+                          ? subjects
+                              .filter(s => selectedSubjects.includes(s.subject_id))
+                              .map(s => s.subject_name)
+                              .join(", ")
+                          : "Select Subjects"}
+                      </span>
+                    </button>
+                    {subjectMenuOpen && (
+                      <div
+                        role="listbox"
+                        className="teacher-menu"
+                        style={{ position: "absolute", zIndex: 10, background: "white", border: "1px solid #ccc", borderRadius: "4px", width: "100%", maxHeight: "200px", overflowY: "auto" }}
+                      >
+                        <div className="teacher-menu-header">
+                          <label>
+                            <input
+                              className="menu-checkbox"
+                              type="checkbox"
+                              checked={selectedSubjects.length === subjects.length && subjects.length > 0}
+                              onChange={(e) => (e.target.checked ? selectAllSubjects() : clearAllSubjects())}
+                            />
+                            <span>Select all</span>
+                          </label>
+                          <span className="teacher-menu-count">
+                            {selectedSubjects.length} selected
                           </span>
-                        </button>
-                        {subjectMenuOpen && (
-                          <div
-                            role="listbox"
-                            className="teacher-menu"
-                            style={{ position: "absolute", zIndex: 10, background: "white", border: "1px solid #ccc", borderRadius: "4px", width: "100%", maxHeight: "200px", overflowY: "auto" }}
-                          >
-                            <div className="teacher-menu-header">
-                              <label>
+                          <button type="button" onClick={clearAllSubjects} className="teacher-menu-clear">
+                            Clear
+                          </button>
+                        </div>
+
+                        <div className="teacher-menu-content">
+                          {subjects.map((subject) => {
+                            const checked = selectedSubjects.includes(subject.subject_id);
+                            return (
+                              <div
+                                key={subject.subject_id}
+                                onClick={() => toggleSubject(subject.subject_id)}
+                                className={`teacher-menu-item ${checked ? 'selected' : ''}`}
+                              >
                                 <input
                                   className="menu-checkbox"
                                   type="checkbox"
-                                  checked={selectedSubjects.length === subjects.length && subjects.length > 0}
-                                  onChange={(e) => (e.target.checked ? selectAllSubjects() : clearAllSubjects())}
+                                  readOnly
+                                  checked={checked}
                                 />
-                                <span>Select all</span>
-                              </label>
-                              <span className="teacher-menu-count">
-                                {selectedSubjects.length} selected
-                              </span>
-                              <button type="button" onClick={clearAllSubjects} className="teacher-menu-clear">
-                                Clear
-                              </button>
-                            </div>
-
-                            <div className="teacher-menu-content">
-                              {subjects.map((subject) => {
-                                const checked = selectedSubjects.includes(subject.subject_id);
-                                return (
-                                  <div
-                                    key={subject.subject_id}
-                                    onClick={() => toggleSubject(subject.subject_id)}
-                                    className={`teacher-menu-item ${checked ? 'selected' : ''}`}
-                                  >
-                                    <input
-                                      className="menu-checkbox"
-                                      type="checkbox"
-                                      readOnly
-                                      checked={checked}
-                                    />
-                                    <span>{subject.subject_name}</span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
+                                <span>{subject.subject_name}</span>
+                              </div>
+                            );
+                          })}
                         </div>
-                      </>
+                      </div>
                     )}
                   </div>
-                </>
+                </div>
               )}
 
               <div className="form-row">

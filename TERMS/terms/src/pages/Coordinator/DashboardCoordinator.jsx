@@ -385,23 +385,120 @@ reportQuarter === selectedQuarterObj?.label;
   const getDeadlineSubmissionId = (d) =>
     d?.submission_id ?? d?.id ?? d?.report_assignment_id ?? null;
 
-  const handleDeadlineNavigation = (deadline) => {
+  // Handle clicking on a deadline - same logic as CoordinatorDeadlineComponent
+  const handleDeadlineNavigation = async (deadline) => {
+    const recipientsCount = Number(deadline?.recipients_count || 0);
+    
+    // For LAEMPL & MPS reports, check if coordinator should act as coordinator or teacher
+    const reportType = detectDeadlineType(deadline);
+    const isLAEMPLMPS = reportType === "laempl" || reportType === "mps";
+    const isCoordinator = user?.role?.toLowerCase() === "coordinator";
+    
+    let shouldForceTeacherView = recipientsCount >= 2;
+    
+    // For both LAEMPL/MPS and Accomplishment Reports, check if coordinator should act as coordinator or teacher
+    if (isCoordinator) {
+      const currentUserId = user?.user_id;
+      let assignmentCoordinatorId = deadline?.coordinator_user_id; // Check if already in deadline object
+      let assignmentGradeLevelId = deadline?.grade_level_id;
+      
+      // If coordinator_user_id is not in deadline object, fetch assignment data
+      if (assignmentCoordinatorId == null) {
+        try {
+          const assignmentId = deadline?.report_assignment_id || deadline?.id;
+          if (assignmentId) {
+            const res = await fetch(`${API_BASE}/reports/assignment/${assignmentId}`, {
+              credentials: "include"
+            });
+            if (res.ok) {
+              const assignment = await res.json();
+              assignmentCoordinatorId = assignment?.coordinator_user_id;
+              assignmentGradeLevelId = assignment?.grade_level_id;
+              
+              // Store assignment data in deadline for use in instruction page
+              deadline.coordinator_user_id = assignmentCoordinatorId;
+              deadline.grade_level_id = assignmentGradeLevelId;
+            }
+          }
+        } catch (err) {
+          console.warn("[DashboardCoordinator] Failed to fetch assignment data:", err);
+        }
+      }
+      
+      // For Accomplishment Reports: If coordinator_user_id matches current user, they should see "Set as Report to Teachers"
+      // For LAEMPL/MPS: If coordinator_user_id is null OR doesn't match current user, act as teacher
+      if (reportType === "accomplishment") {
+        // For Accomplishment Reports, if coordinator_user_id matches, they're the assigned coordinator
+        // Don't force teacher view - let them see the coordinator view with "Set as Report to Teachers" button
+        if (assignmentCoordinatorId != null && Number(assignmentCoordinatorId) === Number(currentUserId)) {
+          shouldForceTeacherView = false;
+          console.log("[DashboardCoordinator] Accomplishment Report - Coordinator is assigned coordinator", {
+            coordinatorUserId: assignmentCoordinatorId,
+            currentUserId: currentUserId
+          });
+        } else {
+          // Not the assigned coordinator, act as teacher
+          shouldForceTeacherView = true;
+          console.log("[DashboardCoordinator] Accomplishment Report - Coordinator acting as teacher:", {
+            assignmentCoordinatorId: assignmentCoordinatorId,
+            currentUserId: currentUserId,
+            reason: assignmentCoordinatorId == null ? "coordinator_user_id is null" : "coordinator_user_id doesn't match"
+          });
+        }
+      } else if (isLAEMPLMPS) {
+        // For LAEMPL/MPS, use existing logic
+        if (assignmentCoordinatorId == null || Number(assignmentCoordinatorId) !== Number(currentUserId)) {
+          shouldForceTeacherView = true;
+          console.log("[DashboardCoordinator] LAEMPL/MPS - Coordinator acting as teacher:", {
+            assignmentCoordinatorId: assignmentCoordinatorId,
+            currentUserId: currentUserId,
+            reason: assignmentCoordinatorId == null ? "coordinator_user_id is null" : "coordinator_user_id doesn't match"
+          });
+        } else {
+          // coordinator_user_id matches current user - act as coordinator
+          shouldForceTeacherView = false;
+          console.log("[DashboardCoordinator] LAEMPL/MPS - Coordinator is assigned coordinator - coordinator view", {
+            coordinatorUserId: assignmentCoordinatorId,
+            currentUserId: currentUserId
+          });
+        }
+      }
+    }
+    
+    // Navigate with comprehensive state - same as CoordinatorDeadlineComponent.handleAccessDirectly
     const kind = detectDeadlineType(deadline);
     const submissionId = getDeadlineSubmissionId(deadline);
 
     const commonState = {
       submission_id: submissionId,
+      report_assignment_id: deadline.report_assignment_id || deadline.id,
       title: deadline.title || deadline.assignment_title,
       instruction: deadline.instruction,
       from_date: deadline.from_date,
       to_date: deadline.to_date || deadline.due_date,
       number_of_submission: deadline.number_of_submission,
       allow_late: deadline.allow_late,
+      category_id: deadline.category_id,
+      category_name: deadline.category_name,
+      sub_category_id: deadline.sub_category_id,
+      sub_category_name: deadline.sub_category_name,
+      is_given: deadline.is_given,
+      recipients_count: deadline.recipients_count,
+      forceTeacherView: shouldForceTeacherView,
+      coordinator_user_id: deadline.coordinator_user_id != null ? Number(deadline.coordinator_user_id) : null,
+      grade_level_id: deadline.grade_level_id,
     };
+    
+    console.log("🔍 [DashboardCoordinator] Navigating with state:", {
+      coordinator_user_id: commonState.coordinator_user_id,
+      report_assignment_id: commonState.report_assignment_id,
+      forceTeacherView: commonState.forceTeacherView,
+      recipients_count: commonState.recipients_count
+    });
 
-    if (kind === "laempl")         return navigate("/LAEMPLInstruction", { state: { ...commonState, fromDeadline: true } });
-    if (kind === "mps")            return navigate("/MPSInstruction", { state: { ...commonState, fromDeadline: true } });
-    if (kind === "accomplishment") return navigate("/AccomplishmentReportInstruction", { state: { ...commonState, fromDeadline: true } });
+    if (kind === "laempl")         return navigate("/LAEMPLInstruction", { state: commonState });
+    if (kind === "mps")            return navigate("/MPSInstruction", { state: commonState });
+    if (kind === "accomplishment") return navigate("/AccomplishmentReportInstruction", { state: commonState });
     if (kind === "cog")            return navigate("/ClassificationOfGradesInstruction", { state: commonState });
     return navigate("/AssignedReport");
   };

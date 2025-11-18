@@ -195,7 +195,7 @@ function ViewSubmission() {
   const isPrincipal = role === "principal";
 
   const handleSubmissionClick = (submission) => {
-    navigate(`/ViewSubmissionData?id=${submission.submission_id}`, { state: { breadcrumbTitle: (submission.title || submission.assignment_title) } });
+    navigate(`/ViewSubmissionData?id=${submission.submission_id}`, { state: { breadcrumbTitle: (submission.title || submission.assignment_title), fromViewSubmission: true } });
   };
 
   return (

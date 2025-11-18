@@ -62,6 +62,9 @@ function AssignedReportData() {
     
     // Subject names for dynamic column labels
     const [subjectNames, setSubjectNames] = useState({});
+    
+    // Coordinator categories for debugging
+    const [coordinatorCategories, setCoordinatorCategories] = useState(null);
     const getMpsRows = (fields = {}) => {
         if (Array.isArray(fields.mps_rows)) return fields.mps_rows;
         if (Array.isArray(fields.mpsRows)) return fields.mpsRows;
@@ -493,6 +496,92 @@ const collectCoordinatorSectionsFromFields = (fields = {}, allSections = []) => 
             // This will trigger a re-render with updated subject names
         }
     }, [subjectNames]);
+
+    // Fetch coordinator's assigned categories/subcategories for debugging
+    useEffect(() => {
+        const fetchCoordinatorCategories = async () => {
+            if (!submission || !assignmentInfo) return;
+            
+            const submittedById = cleanNumber(submission?.submitted_by);
+            const assignmentCoordinatorId = cleanNumber(assignmentInfo?.coordinator_user_id);
+            
+            // Only fetch if this is a coordinator submission and they're the assigned coordinator
+            if (submittedById && assignmentCoordinatorId && submittedById === assignmentCoordinatorId) {
+                try {
+                    const API_BASE = (import.meta.env.VITE_API_BASE || "https://terms-api.kiri8tives.com").replace(/\/$/, "");
+                    console.log('📋 [Coordinator Categories] Fetching assignments for coordinator:', submittedById);
+                    const res = await fetch(`${API_BASE}/reports/given_to/${submittedById}`, {
+                        credentials: "include"
+                    });
+                    if (res.ok) {
+                        const assignments = await res.json();
+                        console.log('📋 [Coordinator Categories] All assignments received:', assignments);
+                        console.log('📋 [Coordinator Categories] Total assignments:', assignments.length);
+                        
+                        // Filter assignments where this coordinator is the assigned coordinator
+                        const coordinatorAssignments = assignments.filter(assignment => 
+                            assignment.coordinator_user_id != null &&
+                            Number(assignment.coordinator_user_id) === submittedById
+                        );
+                        
+                        console.log('📋 [Coordinator Categories] Filtered coordinator assignments:', coordinatorAssignments);
+                        console.log('📋 [Coordinator Categories] Coordinator assignments count:', coordinatorAssignments.length);
+                        
+                        // Also check assignments where they are recipients (for Accomplishment Reports)
+                        // Accomplishment Reports might not always have coordinator_user_id set
+                        const accomplishmentAssignments = assignments.filter(assignment => 
+                            (Number(assignment.category_id) === 0 || 
+                             assignment.category_name?.toLowerCase().includes('accomplishment')) &&
+                            assignment.coordinator_user_id != null &&
+                            Number(assignment.coordinator_user_id) === submittedById
+                        );
+                        
+                        console.log('📋 [Coordinator Categories] Accomplishment assignments:', accomplishmentAssignments);
+                        
+                        // Combine both sets
+                        const allCoordinatorAssignments = [...new Set([
+                            ...coordinatorAssignments.map(a => JSON.stringify(a)),
+                            ...accomplishmentAssignments.map(a => JSON.stringify(a))
+                        ])].map(str => JSON.parse(str));
+                        
+                        // Extract unique categories and subcategories
+                        const categories = allCoordinatorAssignments.map(assignment => ({
+                            category_id: assignment.category_id,
+                            category_name: assignment.category_name,
+                            sub_category_id: assignment.sub_category_id,
+                            sub_category_name: assignment.sub_category_name,
+                            coordinator_user_id: assignment.coordinator_user_id
+                        }));
+                        
+                        // Remove duplicates based on category_id and sub_category_id
+                        const uniqueCategories = categories.filter((category, index, self) =>
+                            index === self.findIndex(c => 
+                                c.category_id === category.category_id && 
+                                c.sub_category_id === category.sub_category_id
+                            )
+                        );
+                        
+                        console.log('📋 [Coordinator Categories] Final unique categories:', uniqueCategories);
+                        setCoordinatorCategories(uniqueCategories);
+                    } else {
+                        console.warn('📋 [Coordinator Categories] Failed to fetch assignments:', res.status, res.statusText);
+                        setCoordinatorCategories([]);
+                    }
+                } catch (err) {
+                    console.warn('📋 [Coordinator Categories] Error fetching coordinator categories:', err);
+                    setCoordinatorCategories([]);
+                }
+            } else {
+                console.log('📋 [Coordinator Categories] Skipping fetch - not coordinator submission:', {
+                    submittedById,
+                    assignmentCoordinatorId,
+                    match: submittedById === assignmentCoordinatorId
+                });
+                setCoordinatorCategories(null);
+            }
+        };
+        fetchCoordinatorCategories();
+    }, [submission, assignmentInfo]);
 
     useEffect(() => {
         const ensureSectionList = async () => {
@@ -1160,8 +1249,47 @@ const collectCoordinatorSectionsFromFields = (fields = {}, allSections = []) => 
         console.log('🔍 [DEBUG] Images:', answers.images);
         
         // Check if this is coordinator's own assignment
-        const isCoordinatorOwnSubmission = isCoordinator && submission && 
-            Number(submission.submitted_by) === Number(user?.user_id);
+        // For Principal view: Check if submitter is the coordinator for this specific report type
+        // For Coordinator view: Check if it's the current user's own submission
+        const submittedById = cleanNumber(submission?.submitted_by);
+        const assignmentCoordinatorId = cleanNumber(assignmentInfo?.coordinator_user_id);
+        const currentUserId = cleanNumber(user?.user_id);
+        
+        // Check if this is an Accomplishment Report (category_id = 0 or category_name includes "Accomplishment")
+        const isAccomplishmentReport = assignmentInfo?.category_name?.toLowerCase().includes('accomplishment') ||
+            assignmentInfo?.sub_category_name?.toLowerCase().includes('accomplishment') ||
+            submission?.category_name?.toLowerCase().includes('accomplishment') ||
+            submission?.sub_category_name?.toLowerCase().includes('accomplishment');
+        
+        // Check if submission was made by a coordinator who is the assigned coordinator for this report
+        const isCoordinatorForThisReport = isAccomplishmentReport &&
+            assignmentCoordinatorId != null && 
+            submittedById != null && 
+            assignmentCoordinatorId === submittedById;
+        
+        // For coordinator view: also check if it's their own submission
+        // For principal view: check if submitter is the coordinator for this report type
+        const isCoordinatorOwnSubmission = isPrincipal 
+            ? isCoordinatorForThisReport
+            : (isCoordinator && submittedById != null && currentUserId != null && submittedById === currentUserId);
+        
+        console.log('🔍 [AccomplishmentReport] Coordinator check:', {
+            isPrincipal,
+            isAccomplishmentReport,
+            submittedById,
+            submittedBy: submission?.submitted_by,
+            assignmentCoordinatorId,
+            assignmentInfo: assignmentInfo,
+            currentUserId,
+            isCoordinatorForThisReport,
+            isCoordinatorOwnSubmission,
+            category_name: assignmentInfo?.category_name,
+            sub_category_name: assignmentInfo?.sub_category_name,
+            submission_category: submission?.category_name,
+            submission_sub_category: submission?.sub_category_name,
+            willShowCoordinatorTemplate: isCoordinatorOwnSubmission,
+            coordinatorCategories: coordinatorCategories || 'Loading...'
+        });
         
         // Try different possible field names for title
         const title = answers.activityName || answers.title || answers.activity_title || answers.program_title || '';

@@ -156,6 +156,11 @@ function AccomplishmentReport() {
             // Set title from assignment
             if (assignmentData?.title) {
               setTitle(assignmentData.title);
+              // Also set activityName from assignment title if not already set
+              setActivity((prev) => ({
+                ...prev,
+                activityName: prev.activityName || assignmentData.title
+              }));
             }
           }
         } catch (err) {
@@ -254,6 +259,9 @@ function AccomplishmentReport() {
         setSubmissionStatus(statusFromApi);
         setReportAssignmentId(data?.report_assignment_id ?? null); // <-- NEW
 
+        // Store assignment title for use in activityName
+        let fetchedAssignmentTitle = data?.assignment_title || "";
+
         // Check if this assignment is from a principal
         // A report is from principal if:
         // 1. It has parent_report_assignment_id (and it's not the coordinator's own assignment), OR
@@ -266,6 +274,9 @@ function AccomplishmentReport() {
             });
             if (assignmentRes.ok) {
               const assignmentData = await assignmentRes.json();
+              
+              // Store assignment title for use later
+              fetchedAssignmentTitle = assignmentData?.title || fetchedAssignmentTitle;
               
               // Store assignment details for display
               // API returns: title, from_date, to_date, category_name, sub_category_name
@@ -338,12 +349,14 @@ function AccomplishmentReport() {
         console.log('Loading submission data:', {
           fields: data?.fields,
           answers: answers,
-          assignment_title: data?.assignment_title
+          assignment_title: data?.assignment_title,
+          fetchedAssignmentTitle: fetchedAssignmentTitle
         });
         
         setActivity((prev) => ({
           ...prev,
-          activityName: answers.activityName || "",
+          // Use existing activityName from answers, or fallback to assignment title, or keep previous value
+          activityName: answers.activityName || fetchedAssignmentTitle || prev.activityName || "",
           facilitators: answers.facilitators || "",
           objectives: answers.objectives || "",
           date: answers.date || "",
@@ -387,6 +400,22 @@ function AccomplishmentReport() {
   useEffect(() => {
     cleanupBlobUrls();
   }, []);
+
+  // Update activityName when assignmentDetails title is available
+  useEffect(() => {
+    if (assignmentDetails?.title) {
+      setActivity((prev) => {
+        // Only update if activityName is empty or hasn't been set yet
+        if (!prev.activityName || prev.activityName === "") {
+          return {
+            ...prev,
+            activityName: assignmentDetails.title
+          };
+        }
+        return prev;
+      });
+    }
+  }, [assignmentDetails?.title]);
 
   // --- Handlers ---
   const handleFiles = (e) => {
@@ -1704,7 +1733,9 @@ function AccomplishmentReport() {
                         value={activity.activityName}
                         onChange={(e) => setActivity((p) => ({ ...p, activityName: e.target.value }))}
                         required
+                        readOnly={assignmentDetails?.title ? true : false}
                         disabled={submissionStatus >= 2 && submissionStatus !== 4}
+                        style={assignmentDetails?.title ? { backgroundColor: '#f3f4f6', cursor: 'not-allowed' } : {}}
                       />
                     </div>
 
@@ -2210,7 +2241,7 @@ function AccomplishmentReport() {
                       onChange={(e) => setIncludeAiSummary(e.target.checked)}
                       style={{ cursor: "pointer" }}
                     />
-                    <label htmlFor="aiSummaryCheckbox" style={{ cursor: "pointer", fontSize: 14 }}>
+                    <label htmlFor="aiSummaryCheckbox" style={{ cursor: "pointer", fontSize: 14, fontWeight: "bold" }}>
                       AI Summary
                     </label>
                   </div>

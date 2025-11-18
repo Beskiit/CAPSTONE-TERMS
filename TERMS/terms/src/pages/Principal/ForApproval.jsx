@@ -268,7 +268,7 @@ function ForApproval() {
                                 </thead>
                                 <tbody>
                                     {filteredSubmissions.map((submission) => (
-                                        <tr key={submission.submission_id} onClick={() => navigate(`/ForApprovalData?id=${submission.submission_id}`, { state: { breadcrumbTitle: (submission.title || submission.assignment_title) } })}>
+                                        <tr key={submission.submission_id} onClick={() => navigate(`/ForApprovalData?id=${submission.submission_id}`, { state: { breadcrumbTitle: (submission.title || submission.assignment_title), fromForApproval: true } })}>
                                             <td className="file-cell">
                                                 <span className="file-name">{submission.title || submission.assignment_title || 'Report'}</span>
                                             </td>
