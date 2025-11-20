@@ -1243,7 +1243,7 @@ function ViewSubmissionData() {
                   <div style={{ marginBottom: '8px' }}>
                     <span style={{ fontWeight: '500' }}>Status:</span>{" "}
                     <span className={`status-badge status-${submissionData.status}`}>
-                      {getStatusText(submissionData.status)}
+                      {submissionData.status_text ? submissionData.status_text.charAt(0).toUpperCase() + submissionData.status_text.slice(1) : getStatusText(submissionData.status)}
                     </span>
                   </div>
                   <div style={{ marginBottom: '8px' }}>

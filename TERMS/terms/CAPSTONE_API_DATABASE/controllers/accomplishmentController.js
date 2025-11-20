@@ -327,9 +327,11 @@ export const getAccomplishmentSubmission = (req, res) => {
   const sql = `
     SELECT s.submission_id, s.report_assignment_id, s.category_id, s.submitted_by, s.status, s.number_of_submission,
            s.value, DATE_FORMAT(s.date_submitted,'%Y-%m-%d %H:%i:%s') AS date_submitted,
-           s.fields, ud.name AS submitted_by_name
+           s.fields, ud.name AS submitted_by_name,
+           st.value AS status_text
     FROM submission s
     LEFT JOIN user_details ud ON s.submitted_by = ud.user_id
+    LEFT JOIN status st ON s.status = st.status_id
     WHERE s.submission_id = ?
   `;
   db.query(sql, [id], (err, rows) => {

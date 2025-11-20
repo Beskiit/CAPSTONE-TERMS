@@ -39,6 +39,42 @@ const COL_RULES = {
   makabasa: [0, 9999], // Allow small numbers (count of students who got that score)
 };
 
+const FIXED_COL_WIDTH = 25;
+
+const applySheetSizing = (worksheet, data) => {
+  const maxCols = data.reduce((max, row) => Math.max(max, row.length), 0);
+  worksheet["!cols"] = Array.from({ length: maxCols }, () => ({
+    wch: FIXED_COL_WIDTH,
+  }));
+  worksheet["!rows"] = data.map((row) => {
+    const longest = row.reduce((max, cell) => {
+      if (cell == null) return max;
+      return Math.max(max, cell.toString().length);
+    }, 0);
+    const lines = Math.max(1, Math.ceil(longest / FIXED_COL_WIDTH));
+    return { hpt: Math.min(18 * lines, 120) };
+  });
+};
+
+const parseSpreadsheet = async (file) => {
+  const lower = file.name.toLowerCase();
+  if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: "array" });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    return XLSX.utils.sheet_to_json(sheet, { header: 1 });
+  }
+  const text = await file.text();
+  return text
+    .trim()
+    .split(/\r?\n/)
+    .map((l) =>
+      l
+        .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
+        .map((s) => s.replace(/^"|"$/g, "").replace(/""/g, '"'))
+    );
+};
+
 const clampVal = (k, v, colRules = COL_RULES) => {
   if (v === "" || v == null) return "";
   const n = Number(v);

@@ -2648,7 +2648,7 @@ function SetReport() {
           <div className="dashboard-main">
 
             <form className="schedule-form" onSubmit={handleSubmit}>
-              <div className="form-row allow-late-row">
+              <div className="form-row form-row-title">
                 <label>Title:</label>
                 <input
                   type="text"
@@ -2658,7 +2658,7 @@ function SetReport() {
                 />
               </div>
 
-              <div className="form-row">
+              <div className="form-row form-row-school-quarter">
                 <label>School Year:</label>
                 <select
                   value={selectedSchoolYear}
@@ -2690,7 +2690,7 @@ function SetReport() {
                 </select>
               </div>
 
-              <div className="form-row">
+              <div className="form-row form-row-category">
                 <label>Category:</label>
                 <select
                   value={selectedCategory}
@@ -2734,7 +2734,7 @@ function SetReport() {
                 )}
               </div>
 
-              <div className="form-row">
+              <div className={`form-row form-row-recipients ${selectedSubCategory === "3" ? "with-grade" : ""}`}>
                 {/* Teachers multi-select dropdown placed in same row */}
                 <label>Teachers & Coordinators:</label>
                 <div ref={teacherMenuRef} style={{ position: "relative", width: "100%" }}>
@@ -2835,7 +2835,7 @@ function SetReport() {
                 {/* Grade Level appears side-by-side with Teachers & Coordinators when Sub-Category is LAEMPL & MPS */}
                 {selectedSubCategory === "3" && (
                   <>
-                    <label>Grade Level:</label>
+                    <label style={{ marginLeft: '12px' }}>Grade Level:</label>
                     <select
                       value={selectedGradeLevel}
                       onChange={(e) => {
@@ -2848,7 +2848,6 @@ function SetReport() {
                         }
                       }}
                       disabled={(isCoordinator && isFromPrincipalAssignment) || shouldLockGradeLevel}
-                      style={{ minWidth: '200px', width: '200px' }}
                     >
                       <option value="">Select Grade Level</option>
                       {gradeLevels.map((grade) => (
@@ -2863,7 +2862,7 @@ function SetReport() {
 
               {/* Subject Selection for LAEMPL & MPS - appears in its own full row when Teachers & Coordinators has selected users */}
               {selectedSubCategory === "3" && selectedGradeLevel && selectedTeachers.length > 0 && (
-                <div className="form-row" style={{ display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "center", columnGap: "12px" }}>
+                <div className="form-row form-row-subjects">
                   <label>Subjects:</label>
                   <div ref={subjectMenuRef} style={{ position: "relative", width: "100%" }}>
                     <button
@@ -2941,7 +2940,7 @@ function SetReport() {
                 </div>
               )}
 
-              <div className="form-row">
+              <div className="form-row form-row-dates">
                 <label>Start Date:</label>
                 <input
                   type="date"
@@ -2963,33 +2962,37 @@ function SetReport() {
                 />
               </div>
 
-              <div className="form-row allow-late-row">
-                <label>Allow Late:</label>
-                <input
-                  type="checkbox"
-                  checked={allowLate}
-                  onChange={(e) => setAllowLate(e.target.checked)}
-                />
+              <div className="form-row form-row-allow-late allow-late-row">
+                <div className="inline-field">
+                  <label>Allow Late:</label>
+                  <input
+                    type="checkbox"
+                    checked={allowLate}
+                    onChange={(e) => setAllowLate(e.target.checked)}
+                  />
+                </div>
 
-                <label>Number of Attempts:</label>
-                <select
-                  className="attempts-select"
-                  value={attempts}
-                  onChange={(e) => setAttempts(e.target.value)}
-                >
-                  <option value="" disabled>
-                    Select Number of Attempts
-                  </option>
-                  <option value="1">1</option>
-                  <option value="2">2</option>
-                  <option value="3">3</option>
-                  <option value="4">4</option>
-                  <option value="5">5</option>
-                  <option value="unlimited">Unlimited</option>
-                </select>
+                <div className="inline-field attempts-field">
+                  <label>Number of Attempts:</label>
+                  <select
+                    className="attempts-select"
+                    value={attempts}
+                    onChange={(e) => setAttempts(e.target.value)}
+                  >
+                    <option value="" disabled>
+                      Select Number of Attempts
+                    </option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                    <option value="unlimited">Unlimited</option>
+                  </select>
+                </div>
               </div>
 
-              <div className="form-row-ins form-row textarea-row">
+              <div className="form-row form-row-instructions textarea-row">
                 <label>Instructions:</label>
                 <textarea
                   placeholder="Enter instructions for the report"

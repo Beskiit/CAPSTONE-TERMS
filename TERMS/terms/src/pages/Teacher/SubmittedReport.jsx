@@ -387,7 +387,8 @@ function SubmittedReport() {
                                                     <td>{submission.school_year || 'N/A'}</td>
                                                     <td>
                                                         <span className={`status-badge status-${submission.status}`}>
-                                                            {submission.status === 0 ? 'Draft' : 
+                                                            {submission.status_text ? submission.status_text.charAt(0).toUpperCase() + submission.status_text.slice(1) : 
+                                                             submission.status === 0 ? 'Draft' : 
                                                              submission.status === 1 ? 'Pending' : 
                                                              submission.status === 2 ? 'Submitted' : 
                                                              submission.status === 3 ? 'Approved' : 

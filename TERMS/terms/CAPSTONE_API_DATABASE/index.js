@@ -1242,7 +1242,8 @@ app.get("/reports/submitted_by/:userId", async (req, res) => {
         COALESCE(sc.sub_category_name, c.category_name) AS report_name,
 
         ud.name  AS submitted_by_name,   -- coordinator
-        ud2.name AS given_by_name        -- principal
+        ud2.name AS given_by_name,        -- principal
+        st.value AS status_text
       FROM submission s
       JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
       JOIN category c           ON ra.category_id = c.category_id
@@ -1251,6 +1252,7 @@ app.get("/reports/submitted_by/:userId", async (req, res) => {
       LEFT JOIN user_details ud2 ON ra.given_by    = ud2.user_id
       LEFT JOIN school_year sy ON sy.year_id = ra.year
       LEFT JOIN quarter_enum qe ON qe.quarter_number = ra.quarter
+      LEFT JOIN status st ON s.status = st.status_id
       WHERE s.submitted_by = ?
         AND COALESCE(ra.is_archived, 0) = 0
     `;
@@ -1361,6 +1363,9 @@ app.get("/reports/assigned_by/:userId", async (req, res) => {
   }
 });
 
+// Mount submissions router BEFORE specific routes to ensure router routes take precedence
+app.use("/submissions", submissionsRouter);
+
 // Get approved submissions by principal
 app.get("/submissions/approved-by-principal", async (req, res) => {
   try {
@@ -1386,17 +1391,19 @@ app.get("/submissions/approved-by-principal", async (req, res) => {
         ra.title as assignment_title,
         ra.to_date as due_date,
         ra.given_by as assigned_by_principal,
-        ra.year as assignment_year,
-        ra.quarter as assignment_quarter,
-        sy.school_year,
-        qe.quarter_name,
-        qe.quarter_short_name
-      FROM submission s
-      LEFT JOIN user_details ud ON s.submitted_by = ud.user_id
-      LEFT JOIN category c ON s.category_id = c.category_id
-      LEFT JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
-      LEFT JOIN school_year sy ON sy.year_id = ra.year
-      LEFT JOIN quarter_enum qe ON qe.quarter_number = ra.quarter
+      ra.year as assignment_year,
+      ra.quarter as assignment_quarter,
+      sy.school_year,
+      qe.quarter_name,
+      qe.quarter_short_name,
+      st.value AS status_text
+    FROM submission s
+    LEFT JOIN user_details ud ON s.submitted_by = ud.user_id
+    LEFT JOIN category c ON s.category_id = c.category_id
+    LEFT JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
+    LEFT JOIN school_year sy ON sy.year_id = ra.year
+    LEFT JOIN quarter_enum qe ON qe.quarter_number = ra.quarter
+    LEFT JOIN status st ON s.status = st.status_id
       WHERE s.status = 3 
         AND ra.given_by = ?
       ORDER BY s.date_submitted DESC
@@ -1478,6 +1485,64 @@ app.get("/submissions/user/:userId", async (req, res) => {
   } catch (error) {
     console.error("Error fetching submitted reports:", error);
     res.status(500).json({ error: "Failed to fetch submitted reports", details: error.message });
+  }
+});
+
+// Get single submission by ID
+app.get("/submissions/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const sql = `
+      SELECT 
+        s.submission_id,
+        s.report_assignment_id,
+        s.category_id,
+        s.submitted_by,
+        s.status,
+        s.number_of_submission,
+        s.value,
+        DATE_FORMAT(s.date_submitted, '%Y-%m-%d %H:%i:%s') AS date_submitted,
+        s.fields,
+        ud.name AS submitted_by_name,
+        st.value AS status_text,
+        ra.title AS assignment_title,
+        ra.from_date,
+        ra.to_date,
+        c.category_name,
+        sc.sub_category_name
+      FROM submission s
+      LEFT JOIN user_details ud ON s.submitted_by = ud.user_id
+      LEFT JOIN status st ON s.status = st.status_id
+      LEFT JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
+      LEFT JOIN category c ON s.category_id = c.category_id
+      LEFT JOIN sub_category sc ON ra.sub_category_id = sc.sub_category_id
+      WHERE s.submission_id = ?
+    `;
+    
+    const result = await new Promise((resolve, reject) => {
+      db.query(sql, [id], (err, results) => {
+        if (err) reject(err);
+        else resolve(results);
+      });
+    });
+    
+    if (!result || result.length === 0) {
+      return res.status(404).json({ error: "Submission not found" });
+    }
+    
+    const row = result[0];
+    let parsed;
+    try {
+      parsed = typeof row.fields === 'string' ? JSON.parse(row.fields || "{}") : (row.fields || {});
+    } catch {
+      parsed = {};
+    }
+    
+    res.json({ ...row, fields: parsed });
+  } catch (error) {
+    console.error("Error fetching submission:", error);
+    res.status(500).json({ error: "Failed to fetch submission", details: error.message });
   }
 });
 
@@ -3777,7 +3842,7 @@ app.get("/admin/check-coordinator-grade/:userId", async (req, res) => {
 app.use("/reports", reportAssignmentRouter);
 app.use("/categories", categoryRouter);
 app.use("/subcategories", subCategoryRouter);
-app.use("/submissions", submissionsRouter);
+// submissionsRouter is mounted earlier (before specific routes) to ensure proper route matching
 app.use("/mps", mpsRoutes);
 
 // 🔹 This is the base your React uses: `${API_BASE}/reports/accomplishment`

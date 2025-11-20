@@ -2059,7 +2059,7 @@ const collectCoordinatorSectionsFromFields = (fields = {}, allSections = []) => 
                                     <div style={{ marginBottom: '8px' }}>
                                         <span style={{ fontWeight: '500' }}>Status:</span>{" "}
                                         <span className={`status-badge status-${submission.status}`}>
-                                            {getStatusText(submission.status)}
+                                            {submission.status_text ? submission.status_text.charAt(0).toUpperCase() + submission.status_text.slice(1) : getStatusText(submission.status)}
                                         </span>
                                     </div>
                                     <div style={{ marginBottom: '8px' }}>

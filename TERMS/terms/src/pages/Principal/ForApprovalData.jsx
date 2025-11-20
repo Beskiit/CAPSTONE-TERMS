@@ -1533,7 +1533,7 @@ function ForApprovalData() {
                   <div style={{ marginBottom: '8px' }}>
                     <span style={{ fontWeight: '500' }}>Status:</span>{" "}
                     <span className={`status-badge status-${submissionData.status}`}>
-                      {getStatusText(submissionData.status)}
+                      {submissionData.status_text ? submissionData.status_text.charAt(0).toUpperCase() + submissionData.status_text.slice(1) : getStatusText(submissionData.status)}
                     </span>
                   </div>
                   <div style={{ marginBottom: '8px' }}>
@@ -1571,38 +1571,60 @@ function ForApprovalData() {
                     </div>
                   )}
                 </div>
-              </div>
-            </div>
-            
-            {/* Approve and Reject Section */}
-            <div className="approval-section" style={{ marginTop: '20px' }}>
-              <h3>Review Submission</h3>
-              <p>Review the submission details above and choose to approve or reject.</p>
-              {msg && (
-                <div className={`message ${msg.includes('Error') ? 'error' : 'success'}`}>
-                  {msg}
+                
+                {/* Approve and Reject Section */}
+                <div className="approval-section" style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #ccc' }}>
+                  <h3 style={{ margin: '0 0 8px 0', fontSize: '16px', fontWeight: 'bold' }}>Review Submission</h3>
+                  <p style={{ margin: '0 0 12px 0', fontSize: '14px', color: '#666' }}>Review the submission details above and choose to approve or reject.</p>
+                  {msg && (
+                    <div className={`message ${msg.includes('Error') ? 'error' : 'success'}`} style={{ marginBottom: '12px', padding: '8px', borderRadius: '4px', fontSize: '13px' }}>
+                      {msg}
+                    </div>
+                  )}
+                  {err && (
+                    <div className="error-message" style={{ marginBottom: '12px', padding: '8px', borderRadius: '4px', fontSize: '13px', color: '#e74c3c', backgroundColor: '#fee' }}>
+                      {err}
+                    </div>
+                  )}
+                  <div className="approval-buttons" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <button 
+                      onClick={openRejectModal}
+                      disabled={saving || submissionLoading}
+                      className="reject-button"
+                      style={{
+                        width: '100%',
+                        padding: '10px',
+                        fontSize: '14px',
+                        borderRadius: '4px',
+                        border: 'none',
+                        cursor: saving || submissionLoading ? 'not-allowed' : 'pointer',
+                        backgroundColor: saving || submissionLoading ? '#ccc' : '#e74c3c',
+                        color: 'white',
+                        fontWeight: '500'
+                      }}
+                    >
+                      {saving ? 'Processing...' : 'Reject'}
+                    </button>
+                    <button 
+                      onClick={openApproveModal}
+                      disabled={saving || submissionLoading}
+                      className="approve-button"
+                      style={{
+                        width: '100%',
+                        padding: '10px',
+                        fontSize: '14px',
+                        borderRadius: '4px',
+                        border: 'none',
+                        cursor: saving || submissionLoading ? 'not-allowed' : 'pointer',
+                        backgroundColor: saving || submissionLoading ? '#ccc' : '#28a745',
+                        color: 'white',
+                        fontWeight: '500'
+                      }}
+                    >
+                      {saving ? 'Processing...' : 'Approve'}
+                    </button>
+                  </div>
                 </div>
-              )}
-              {err && (
-                <div className="error-message">
-                  {err}
-                </div>
-              )}
-              <div className="approval-buttons">
-                <button 
-                  onClick={openRejectModal}
-                  disabled={saving || submissionLoading}
-                  className="reject-button"
-                >
-                  {saving ? 'Processing...' : 'Reject'}
-                </button>
-                <button 
-                  onClick={openApproveModal}
-                  disabled={saving || submissionLoading}
-                  className="approve-button"
-                >
-                  {saving ? 'Processing...' : 'Approve'}
-                </button>
               </div>
             </div>
           </div>

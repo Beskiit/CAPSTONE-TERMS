@@ -144,14 +144,16 @@ function ForApproval() {
         });
         
         if (!res.ok) {
-          throw new Error('Failed to fetch submissions');
+          const errorText = await res.text();
+          console.error("Failed to fetch submissions:", res.status, errorText);
+          throw new Error(`Failed to fetch submissions: ${res.status} ${errorText}`);
         }
         
         const data = await res.json();
         setSubmissions(data);
       } catch (err) {
         console.error("Error fetching submissions:", err);
-        setError("Failed to load submissions");
+        setError(`Failed to load submissions: ${err.message}`);
       } finally {
         setLoading(false);
       }
@@ -275,8 +277,8 @@ function ForApproval() {
                                             <td>{submission.submitted_by_name || 'Unknown'}</td>
                                             <td>{submission.due_date || 'No due date'}</td>
                                             <td>
-                                                <span className="status-badge status-completed">
-                                                    Completed
+                                                <span className={`status-badge status-${submission.status || 2}`}>
+                                                    {submission.status_text ? submission.status_text.charAt(0).toUpperCase() + submission.status_text.slice(1) : 'Completed'}
                                                 </span>
                                             </td>
                                         </tr>

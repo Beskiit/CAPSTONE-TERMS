@@ -158,12 +158,14 @@ export const getSubmission = (req, res) => {
            ra.allow_late,
            c.category_name,
            sc.sub_category_name,
-           ud.name AS submitted_by_name
+           ud.name AS submitted_by_name,
+           st.value AS status_text
     FROM submission s
     JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
     LEFT JOIN category c ON ra.category_id = c.category_id
     LEFT JOIN sub_category sc ON ra.sub_category_id = sc.sub_category_id
     LEFT JOIN user_details ud ON s.submitted_by = ud.user_id
+    LEFT JOIN status st ON s.status = st.status_id
     WHERE s.submission_id = ?
   `;
   db.query(sql, [id], (err, results) => {
@@ -801,18 +803,23 @@ export const getSubmissionsForPrincipalApproval = (req, res) => {
       ra.to_date as due_date,
       ra.given_by as assigned_by_principal,
       ra.year as assignment_year,
-      ra.quarter as assignment_quarter
+      ra.quarter as assignment_quarter,
+      st.value AS status_text
     FROM submission s
     LEFT JOIN user_details ud ON s.submitted_by = ud.user_id
     LEFT JOIN category c ON s.category_id = c.category_id
     LEFT JOIN report_assignment ra ON s.report_assignment_id = ra.report_assignment_id
+    LEFT JOIN status st ON s.status = st.status_id
     WHERE s.status = 2 
       AND ra.given_by = ?
     ORDER BY s.date_submitted DESC
   `;
 
   db.query(sql, [principalId], (err, results) => {
-    if (err) return res.status(500).send('Database error: ' + err);
+    if (err) {
+      console.error('Error fetching submissions for principal approval:', err);
+      return res.status(500).json({ error: 'Database error', details: err.message });
+    }
     
     // Parse fields for each submission
     const submissions = results.map(row => {
