@@ -1,5 +1,5 @@
 import React, {useEffect, useState} from "react";
-import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import Header from '../../components/shared/Header.jsx';
 import Breadcrumb from '../../components/Breadcrumb.jsx';
 import Sidebar from '../../components/shared/SidebarTeacher.jsx';
@@ -55,11 +55,99 @@ function Accomplishment() {
                     setDeadlines([]);
                     return;
                 }
-                const data = await res.json();
+                let data = await res.json();
                 const filtered = isTeacher
                   ? (data || []).filter(d => (d?.category_name || '').toLowerCase() === 'accomplishment report')
                   : (data || []);
-                setDeadlines(filtered);
+                
+                // For coordinators, also fetch their own assignments (Accomplishment Report only)
+                if (isCoordinator) {
+                    try {
+                        // Fetch all reports given to coordinator
+                        const ownAssignmentsRes = await fetch(`${API_BASE}/reports/given_to/${user.user_id}`, {
+                            credentials: "include"
+                        });
+                        
+                        if (ownAssignmentsRes.ok) {
+                            const allOwnReports = await ownAssignmentsRes.json();
+                            
+                            // Filter for Accomplishment Reports only
+                            const accomplishmentOwnReports = allOwnReports.filter(report => 
+                                (report?.category_id === 0 || 
+                                 report?.category_name?.toLowerCase() === 'accomplishment report' ||
+                                 report?.category_name?.toLowerCase().includes('accomplishment'))
+                            );
+                            
+                            // For each report, fetch assignment details to check if it's coordinator's own assignment
+                            const assignmentChecks = await Promise.all(
+                                accomplishmentOwnReports.map(async (report) => {
+                                    try {
+                                        const assignmentRes = await fetch(`${API_BASE}/reports/assignment/${report.report_assignment_id}`, {
+                                            credentials: "include"
+                                        });
+                                        if (assignmentRes.ok) {
+                                            const assignmentData = await assignmentRes.json();
+                                            return {
+                                                report,
+                                                assignment: assignmentData
+                                            };
+                                        }
+                                    } catch (err) {
+                                        console.warn(`Failed to fetch assignment ${report.report_assignment_id}:`, err);
+                                    }
+                                    return null;
+                                })
+                            );
+                            
+                            // Filter to only include coordinator's own assignments:
+                            // 1. The coordinator created it (given_by = coordinator_id)
+                            // 2. It's the coordinator's own assignment (parent_report_assignment_id IS NULL)
+                            // 3. Category is Accomplishment Report (category_id = 0)
+                            const coordinatorOwnAssignments = assignmentChecks
+                                .filter(item => item && item.assignment)
+                                .filter(item => {
+                                    const assignment = item.assignment;
+                                    const isCoordinatorCreated = Number(assignment.given_by) === Number(user.user_id);
+                                    const isOwnAssignment = !assignment.parent_report_assignment_id;
+                                    const isAccomplishment = Number(assignment.category_id) === 0;
+                                    return isCoordinatorCreated && isOwnAssignment && isAccomplishment;
+                                })
+                                .map(item => {
+                                    // Format the report to match the structure expected by the component
+                                    const report = item.report;
+                                    const assignment = item.assignment;
+                                    return {
+                                        submission_id: report.submission_id,
+                                        report_assignment_id: report.report_assignment_id,
+                                        title: assignment.title || report.assignment_title,
+                                        category_name: assignment.category_name || report.category_name || 'Accomplishment Report',
+                                        given_by_name: assignment.given_by_name || report.given_by_name,
+                                        from_date: assignment.from_date || report.from_date,
+                                        to_date: assignment.to_date || report.to_date,
+                                        instruction: assignment.instruction || report.instruction,
+                                        recipients_count: 1, // Coordinator's own assignment has only coordinator as assignee
+                                        status: report.status,
+                                        category_id: assignment.category_id || report.category_id
+                                    };
+                                });
+                            
+                            // Combine with regular deadlines, avoiding duplicates
+                            const seenIds = new Set(filtered.map(d => d.submission_id || d.report_assignment_id));
+                            const uniqueOwnAssignments = coordinatorOwnAssignments.filter(d => {
+                                const key = d.submission_id || d.report_assignment_id;
+                                return key && !seenIds.has(key);
+                            });
+                            
+                            // Combine both lists
+                            setDeadlines([...filtered, ...uniqueOwnAssignments]);
+                        }
+                    } catch (err) {
+                        console.warn('Failed to fetch coordinator own assignments:', err);
+                        setDeadlines(filtered);
+                    }
+                } else {
+                    setDeadlines(filtered);
+                }
             } catch (e) {
                 console.error('Failed to load data:', e);
                 setDeadlines([]);
@@ -69,7 +157,7 @@ function Accomplishment() {
         };
 
         fetchData();
-    }, [user?.user_id, isTeacher]);
+    }, [user?.user_id, isTeacher, isCoordinator]);
 
     const onRowClick = (d) => {
         // Always show Instruction first; ensure-submission occurs on Prepare Report

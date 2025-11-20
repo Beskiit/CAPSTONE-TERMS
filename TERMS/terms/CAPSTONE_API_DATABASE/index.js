@@ -3357,6 +3357,7 @@ app.get("/reports/upcoming-deadlines/:userId", async (req, res) => {
         ra.quarter,
         ra.year,
         ra.coordinator_user_id,
+        ra.parent_report_assignment_id,
 
         c.category_name,
         sc.sub_category_name,
@@ -3392,11 +3393,17 @@ app.get("/reports/upcoming-deadlines/:userId", async (req, res) => {
       WHERE s.submitted_by = ?
       AND ra.is_given = 0
       AND (s.status = 1 OR s.status = 4)
+      -- Exclude coordinator's own assignments (parent assignment created by coordinator for Accomplishment Report or LAEMPL)
+      AND NOT (
+        ra.parent_report_assignment_id IS NULL 
+        AND ra.given_by = ?
+        AND (ra.category_id = 0 OR (ra.category_id = 1 AND ra.sub_category_id = 3))
+      )
       ORDER BY ra.to_date ASC, s.date_submitted ASC
     `;
 
     const result = await new Promise((resolve, reject) => {
-      db.query(query, [userId], (err, results) => {
+      db.query(query, [userId, userId], (err, results) => {
         if (err) reject(err);
         else resolve(results);
       });

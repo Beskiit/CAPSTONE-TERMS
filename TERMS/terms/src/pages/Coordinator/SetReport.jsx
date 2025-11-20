@@ -577,8 +577,15 @@ function SetReport() {
           
           // Store subject IDs for auto-population (will be set when subjects list is loaded)
           // BUT skip if we're editing a specific report (extracting from title)
+          // OR if coordinator has already selected recipients (subjects should be manually selected)
+          const hasSelectedRecipients = (selectedTeachers.length > 0) || 
+                                        (selectedTeacher && String(selectedTeacher).trim() !== '');
+          
           if (editingReportId) {
             console.log("[SetReport] Skipping inherited subjects - editing specific report, will extract from title");
+            setInheritedSubjectIds([]);
+          } else if (hasSelectedRecipients) {
+            console.log("[SetReport] Skipping inherited subjects - recipients already selected, subjects must be manually selected");
             setInheritedSubjectIds([]);
           } else if (data?.subject_ids && Array.isArray(data.subject_ids) && data.subject_ids.length > 0) {
             const subjectIds = data.subject_ids.map(id => String(id));
@@ -599,7 +606,7 @@ function SetReport() {
     };
 
     fetchCoordinatorGrade();
-  }, [isCoordinator, user?.user_id, selectedCategory, selectedSubCategory, selectedGradeLevel, editingReportId, subjectToExtractFromTitle]);
+  }, [isCoordinator, user?.user_id, selectedCategory, selectedSubCategory, selectedGradeLevel, editingReportId, subjectToExtractFromTitle, selectedTeachers, selectedTeacher]);
 
   // ✅ Auto-populate subjects when they're loaded and we have inherited subject IDs
   useEffect(() => {
@@ -621,13 +628,30 @@ function SetReport() {
       return;
     }
     
+    // Skip auto-population when coordinator is assigning to teachers/coordinators
+    // Check if coordinator has selected any teachers or coordinators to assign to
+    const hasSelectedRecipients = (selectedTeachers.length > 0) || 
+                                  (selectedTeacher && String(selectedTeacher).trim() !== '');
+    
+    if (hasSelectedRecipients || isFromPrincipalAssignment) {
+      console.log("[SetReport] Skipping inherited subjects auto-population - coordinator assigning to teachers/coordinators, subjects should be manually selected", {
+        hasSelectedRecipients,
+        selectedTeachersCount: selectedTeachers.length,
+        selectedTeacher,
+        isFromPrincipalAssignment
+      });
+      return;
+    }
+    
     console.log("[SetReport] Subject auto-population check:", {
       inheritedSubjectIds,
       subjectsCount: subjects.length,
-      selectedSubjectsCount: selectedSubjects.length
+      selectedSubjectsCount: selectedSubjects.length,
+      hasSelectedRecipients: false
     });
     
     // If we have inherited subject IDs and subjects are loaded, auto-populate
+    // Only auto-populate when coordinator is creating their own assignment (no recipients selected)
     if (inheritedSubjectIds.length > 0 && subjects.length > 0) {
       // Verify that the subject IDs exist in the available subjects list
       const validSubjectIds = inheritedSubjectIds.filter(id => 
@@ -655,7 +679,46 @@ function SetReport() {
     } else {
       console.log("[SetReport] Waiting for subjects to load or inherited IDs. inheritedSubjectIds:", inheritedSubjectIds.length, "subjects:", subjects.length);
     }
-  }, [isCoordinator, selectedCategory, selectedSubCategory, subjects, selectedSubjects, subjectToExtractFromTitle]);
+  }, [isCoordinator, selectedCategory, selectedSubCategory, subjects, selectedSubjects, subjectToExtractFromTitle, isFromPrincipalAssignment, selectedTeachers, selectedTeacher]);
+
+  // ✅ Clear selected subjects when coordinator selects recipients (teachers/coordinators)
+  // This ensures subjects must be manually selected when assigning to others
+  useEffect(() => {
+    // Only for coordinators with LAEMPL & MPS
+    if (!isCoordinator) return;
+    const isQuarterlyAchievementTest = String(selectedCategory) === "1";
+    const isLAEMPLMPS = String(selectedSubCategory) === "3";
+    if (!isQuarterlyAchievementTest || !isLAEMPLMPS) return;
+    
+    // Skip if we're extracting subject from title (editing specific report)
+    if (subjectToExtractFromTitle) return;
+    
+    // Check if coordinator has selected any teachers or coordinators to assign to
+    const hasSelectedRecipients = (selectedTeachers.length > 0) || 
+                                  (selectedTeacher && String(selectedTeacher).trim() !== '');
+    
+    // If recipients are selected, clear any auto-populated subjects
+    // This ensures subjects must be manually selected when assigning to teachers/coordinators
+    if (hasSelectedRecipients && selectedSubjects.length > 0) {
+      // Check if the selected subjects match the inherited subject IDs (auto-populated)
+      // If they do, clear them so user must manually select
+      const hasInheritedSubjects = inheritedSubjectIds.length > 0 && 
+        selectedSubjects.every(subjectId => 
+          inheritedSubjectIds.some(inheritedId => Number(inheritedId) === subjectId)
+        ) && 
+        selectedSubjects.length === inheritedSubjectIds.length;
+      
+      if (hasInheritedSubjects) {
+        console.log("[SetReport] Clearing auto-populated subjects because recipients are selected - subjects must be manually selected", {
+          selectedSubjectsCount: selectedSubjects.length,
+          inheritedSubjectIdsCount: inheritedSubjectIds.length
+        });
+        setSelectedSubjects([]);
+        // Also clear inherited subject IDs to prevent re-population
+        setInheritedSubjectIds([]);
+      }
+    }
+  }, [isCoordinator, selectedCategory, selectedSubCategory, selectedTeachers, selectedTeacher, selectedSubjects, inheritedSubjectIds, subjectToExtractFromTitle]);
 
   // ✅ Extract and set subject from report title when editing
   useEffect(() => {
@@ -1488,8 +1551,10 @@ function SetReport() {
 
     try {
       // Determine recipients early to check if coordinator is assigning to teachers
-      const recipients =
-        selectedTeachers.length > 0 ? selectedTeachers : [selectedTeacher];
+      // Filter out empty strings and invalid values
+      const recipients = selectedTeachers.length > 0 
+        ? selectedTeachers.filter(id => id && String(id).trim() !== '')
+        : (selectedTeacher && String(selectedTeacher).trim() !== '' ? [selectedTeacher] : []);
       
       const coordinatorAwareRecipients = [...recipients];
       if (isPrincipal && selectedSubCategory === "3" && selectedCoordinatorId) {
@@ -1940,46 +2005,63 @@ function SetReport() {
       parent_report_assignment_id: (isCoordinatorAssigning && !isPrincipal) ? parentAssignmentId ?? null : null,
       };
       
-      // Only add coordinator_user_id if principal is assigning to a coordinator
+      // Only add coordinator_user_id if principal is assigning to ONLY a coordinator (not teachers + coordinator)
       // AND that coordinator is actually the coordinator for LAEMPL & MPS (category_id = 1, sub_category_id = 3)
       // Never add it when coordinator is assigning to avoid conflicts
-      if (isPrincipal && selectedSubCategory === "3" && selectedCoordinatorId) {
-        // Check if this coordinator is the assigned coordinator for LAEMPL & MPS
-        try {
-          const checkRes = await fetch(`${API_BASE}/reports/given_to/${selectedCoordinatorId}`, {
-            credentials: "include"
-          });
-          if (checkRes.ok) {
-            const assignments = await res.json();
-            // Check if this coordinator is the assigned coordinator for LAEMPL & MPS
-            const isLaemplMpsCoordinator = assignments.some(assignment => 
-              Number(assignment.category_id) === 1 &&
-              Number(assignment.sub_category_id) === 3 &&
-              assignment.coordinator_user_id != null &&
-              Number(assignment.coordinator_user_id) === Number(selectedCoordinatorId)
-            );
-            
-            if (isLaemplMpsCoordinator) {
-              base.coordinator_user_id = Number(selectedCoordinatorId);
-              console.log("✅ [SetReport] Setting coordinator_user_id for LAEMPL & MPS:", {
-                coordinator_user_id: base.coordinator_user_id,
-                reason: "Coordinator is assigned coordinator for LAEMPL & MPS"
-              });
+      // If principal assigns to Teacher(s) + Coordinator, coordinator should act as teacher (no coordinator_user_id)
+      // CRITICAL: Never set coordinator_user_id when coordinator is assigning (even if somehow isPrincipal is true)
+      if (isPrincipal && !isCoordinator && selectedSubCategory === "3" && selectedCoordinatorId) {
+        // Check if there are any teachers in the recipients (if yes, coordinator acts as teacher)
+        const hasTeacherRecipients = recipients.some(recipientId => {
+          const recipientUser = usersWithGrades.find(u => String(u.user_id) === String(recipientId)) ||
+            coordinators.find(u => String(u.user_id) === String(recipientId));
+          return recipientUser?.role?.toLowerCase() === 'teacher';
+        });
+        
+        // Only set coordinator_user_id if there are NO teachers (coordinator only)
+        if (!hasTeacherRecipients) {
+          // Check if this coordinator is the assigned coordinator for LAEMPL & MPS
+          try {
+            const checkRes = await fetch(`${API_BASE}/reports/given_to/${selectedCoordinatorId}`, {
+              credentials: "include"
+            });
+            if (checkRes.ok) {
+              const assignments = await res.json();
+              // Check if this coordinator is the assigned coordinator for LAEMPL & MPS
+              const isLaemplMpsCoordinator = assignments.some(assignment => 
+                Number(assignment.category_id) === 1 &&
+                Number(assignment.sub_category_id) === 3 &&
+                assignment.coordinator_user_id != null &&
+                Number(assignment.coordinator_user_id) === Number(selectedCoordinatorId)
+              );
+              
+              if (isLaemplMpsCoordinator) {
+                base.coordinator_user_id = Number(selectedCoordinatorId);
+                console.log("✅ [SetReport] Setting coordinator_user_id for LAEMPL & MPS:", {
+                  coordinator_user_id: base.coordinator_user_id,
+                  reason: "Coordinator is assigned coordinator for LAEMPL & MPS (coordinator only, no teachers)"
+                });
+              } else {
+                console.log("🔍 [SetReport] NOT setting coordinator_user_id for LAEMPL & MPS:", {
+                  coordinatorId: selectedCoordinatorId,
+                  reason: "Coordinator is NOT the assigned coordinator for LAEMPL & MPS - will act as teacher"
+                });
+              }
             } else {
               console.log("🔍 [SetReport] NOT setting coordinator_user_id for LAEMPL & MPS:", {
                 coordinatorId: selectedCoordinatorId,
-                reason: "Coordinator is NOT the assigned coordinator for LAEMPL & MPS - will act as teacher"
+                reason: "Failed to fetch coordinator assignments - defaulting to teacher role"
               });
             }
-          } else {
-            console.log("🔍 [SetReport] NOT setting coordinator_user_id for LAEMPL & MPS:", {
-              coordinatorId: selectedCoordinatorId,
-              reason: "Failed to fetch coordinator assignments - defaulting to teacher role"
-            });
+          } catch (err) {
+            console.warn("🔍 [SetReport] Failed to check coordinator assignments for LAEMPL & MPS:", err);
+            // Default to NOT setting it if check fails (safer - let them act as teacher)
           }
-        } catch (err) {
-          console.warn("🔍 [SetReport] Failed to check coordinator assignments for LAEMPL & MPS:", err);
-          // Default to NOT setting it if check fails (safer - let them act as teacher)
+        } else {
+          console.log("🔍 [SetReport] NOT setting coordinator_user_id for LAEMPL & MPS:", {
+            coordinatorId: selectedCoordinatorId,
+            reason: "Principal assigned to Teacher(s) + Coordinator - coordinator will act as teacher"
+          });
         }
       }
       
@@ -1991,25 +2073,41 @@ function SetReport() {
         finalRecipients
       });
       
-      if (isPrincipal && reportType === "accomplishment" && shouldSetAccomplishmentCoordinatorId) {
-        // Find the coordinator recipient
-        const coordinatorRecipient = finalRecipients.find(recipientId => {
+      // CRITICAL: Never set coordinator_user_id when coordinator is assigning (even if somehow isPrincipal is true)
+      if (isPrincipal && !isCoordinator && reportType === "accomplishment" && shouldSetAccomplishmentCoordinatorId) {
+        // Check if there are any teachers in the recipients (if yes, coordinator acts as teacher)
+        const hasTeacherRecipients = finalRecipients.some(recipientId => {
           const recipientUser = usersWithGrades.find(u => String(u.user_id) === String(recipientId)) ||
             coordinators.find(u => String(u.user_id) === String(recipientId));
-          return recipientUser?.role?.toLowerCase() === 'coordinator';
+          return recipientUser?.role?.toLowerCase() === 'teacher';
         });
         
-        if (coordinatorRecipient) {
-          base.coordinator_user_id = Number(coordinatorRecipient);
-          console.log("✅ [SetReport] Setting coordinator_user_id for Accomplishment Report:", {
-            coordinator_user_id: base.coordinator_user_id,
-            coordinatorRecipient,
-            baseObject: base
+        // Only set coordinator_user_id if there are NO teachers (coordinator only)
+        if (!hasTeacherRecipients) {
+          // Find the coordinator recipient
+          const coordinatorRecipient = finalRecipients.find(recipientId => {
+            const recipientUser = usersWithGrades.find(u => String(u.user_id) === String(recipientId)) ||
+              coordinators.find(u => String(u.user_id) === String(recipientId));
+            return recipientUser?.role?.toLowerCase() === 'coordinator';
           });
+          
+          if (coordinatorRecipient) {
+            base.coordinator_user_id = Number(coordinatorRecipient);
+            console.log("✅ [SetReport] Setting coordinator_user_id for Accomplishment Report:", {
+              coordinator_user_id: base.coordinator_user_id,
+              coordinatorRecipient,
+              baseObject: base,
+              reason: "Coordinator only (no teachers) - coordinator acts as coordinator"
+            });
+          } else {
+            console.log("❌ [SetReport] Coordinator recipient not found in finalRecipients:", {
+              finalRecipients,
+              coordinatorRecipient
+            });
+          }
         } else {
-          console.log("❌ [SetReport] Coordinator recipient not found in finalRecipients:", {
-            finalRecipients,
-            coordinatorRecipient
+          console.log("❌ [SetReport] NOT setting coordinator_user_id for Accomplishment Report:", {
+            reason: "Principal assigned to Teacher(s) + Coordinator - coordinator will act as teacher"
           });
         }
       } else {
@@ -2228,27 +2326,226 @@ function SetReport() {
           return;
         }
         
+        // Check if Principal is assigning to Teacher(s) or Coordinator + Teacher(s) (not just Coordinator only)
+        // In this case, we need to create TWO assignments:
+        // 1. Principal's assignment (with Principal as assignee)
+        // 2. Recipient assignment (with Teacher(s) or Coordinator + Teacher(s) as assignees, linked to Principal's assignment)
+        const isPrincipalAssigningToTeachersOrMixed = isPrincipal && !isCoordinator && user?.user_id && finalRecipients.length > 0;
+        let hasTeacherRecipients = false;
+        let hasOnlyCoordinator = false;
+        
+        if (isPrincipalAssigningToTeachersOrMixed) {
+          // Check if there are any teachers in the recipients
+          hasTeacherRecipients = finalRecipients.some(recipientId => {
+            const recipientUser = usersWithGrades.find(u => String(u.user_id) === String(recipientId)) ||
+              coordinators.find(u => String(u.user_id) === String(recipientId));
+            return recipientUser?.role?.toLowerCase() === 'teacher';
+          });
+          
+          // Check if there's only a coordinator (no teachers)
+          const coordinatorRecipients = finalRecipients.filter(recipientId => {
+            const recipientUser = usersWithGrades.find(u => String(u.user_id) === String(recipientId)) ||
+              coordinators.find(u => String(u.user_id) === String(recipientId));
+            return recipientUser?.role?.toLowerCase() === 'coordinator';
+          });
+          
+          hasOnlyCoordinator = coordinatorRecipients.length === finalRecipients.length && coordinatorRecipients.length > 0;
+        }
+        
+        // If Principal is assigning to Teacher(s) or Coordinator + Teacher(s), create two assignments
+        if (isPrincipalAssigningToTeachersOrMixed && hasTeacherRecipients && !hasOnlyCoordinator) {
+          console.log("✅ [SetReport] Principal assigning to Teacher(s) or Coordinator + Teacher(s) - creating two assignments");
+          
+          // Step 1: Create Principal's assignment (with Principal as assignee)
+          const principalBody = {
+            ...base,
+            assignees: [Number(user.user_id)], // Principal as assignee
+            title: fallbackTitle,
+            parent_report_assignment_id: null, // Principal's assignment is the parent
+            coordinator_user_id: null, // No coordinator_user_id for Principal's own assignment
+          };
+          
+          const principalRes = await fetch(`${API_BASE}/reports/accomplishment/give`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify(principalBody),
+          });
+          
+          if (!principalRes.ok) {
+            const errText = await principalRes.text();
+            toast.error("Failed to create principal assignment: " + errText);
+            setSubmitting(false);
+            return;
+          }
+          
+          const principalData = await principalRes.json();
+          const principalAssignmentId = principalData.report_assignment_id;
+          console.log('✅ [SetReport] Created principal assignment:', principalAssignmentId);
+          
+          // Step 2: Create recipient assignment (with Teacher(s) or Coordinator + Teacher(s) as assignees, linked to Principal's assignment)
+          const { coordinator_user_id: baseCoordinatorUserId, ...baseWithoutCoordinatorId } = base;
+          
+          const recipientBody = {
+            ...baseWithoutCoordinatorId,
+            assignees: finalRecipients.map((x) => Number(x)), // All recipients (teachers and/or coordinators)
+            title: fallbackTitle,
+            parent_report_assignment_id: principalAssignmentId, // Link to Principal's assignment
+            coordinator_user_id: null, // No coordinator_user_id when Principal assigns to Teacher(s) or Coordinator + Teacher(s)
+          };
+          
+          const recipientRes = await fetch(`${API_BASE}/reports/accomplishment/give`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify(recipientBody),
+          });
+          
+          if (!recipientRes.ok) {
+            const errText = await recipientRes.text();
+            toast.error(`Created principal assignment, but failed to create recipient assignment: ${errText}`);
+            setSubmitting(false);
+            return;
+          }
+          
+          toast.success(`Successfully created principal assignment and recipient assignment with ${finalRecipients.length} recipient(s)!`);
+          setIsFormSubmitted(true);
+          
+          // Redirect after creating all assignments
+          const redirectUrl = `/AssignedReport?year=${yearId}&quarter=${quarterId}`;
+          navigate(redirectUrl);
+          setSubmitting(false);
+          return;
+        }
+        
+        // Check if Accomplishment Coordinator is assigning to Teacher(s) or Teacher(s) + Coordinator (not their own assignment, not from principal)
+        // In this case, we need to create TWO assignments:
+        // 1. Coordinator's assignment (with Coordinator as assignee)
+        // 2. Recipient assignment (with Teacher(s) or Teacher(s) + Coordinator as assignees, linked to Coordinator's assignment)
+        const isCoordinatorAssigningToTeachersOrMixed = isCoordinator && !isPrincipal && !isCoordinatorOwnAssignment && !isFromPrincipalAssignment && 
+          reportType === "accomplishment" && user?.user_id && finalRecipients.length > 0;
+        let hasTeacherRecipientsCoordinator = false;
+        let hasOnlyCoordinatorCoordinator = false;
+        
+        if (isCoordinatorAssigningToTeachersOrMixed) {
+          // Check if there are any teachers in the recipients
+          hasTeacherRecipientsCoordinator = finalRecipients.some(recipientId => {
+            const recipientUser = usersWithGrades.find(u => String(u.user_id) === String(recipientId)) ||
+              coordinators.find(u => String(u.user_id) === String(recipientId));
+            return recipientUser?.role?.toLowerCase() === 'teacher';
+          });
+          
+          // Check if there's only a coordinator (no teachers)
+          const coordinatorRecipientsCoordinator = finalRecipients.filter(recipientId => {
+            const recipientUser = usersWithGrades.find(u => String(u.user_id) === String(recipientId)) ||
+              coordinators.find(u => String(u.user_id) === String(recipientId));
+            return recipientUser?.role?.toLowerCase() === 'coordinator';
+          });
+          
+          hasOnlyCoordinatorCoordinator = coordinatorRecipientsCoordinator.length === finalRecipients.length && coordinatorRecipientsCoordinator.length > 0;
+        }
+        
+        // If Accomplishment Coordinator is assigning to Teacher(s) or Teacher(s) + Coordinator, create two assignments
+        if (isCoordinatorAssigningToTeachersOrMixed && hasTeacherRecipientsCoordinator && !hasOnlyCoordinatorCoordinator) {
+          console.log("✅ [SetReport] Accomplishment Coordinator assigning to Teacher(s) or Teacher(s) + Coordinator - creating two assignments");
+          
+          // Step 1: Create Coordinator's assignment (with Coordinator as assignee)
+          const coordinatorBodyForAssigning = {
+            ...base,
+            assignees: [Number(user.user_id)], // Coordinator as assignee
+            title: fallbackTitle,
+            parent_report_assignment_id: null, // Coordinator's assignment is the parent
+            coordinator_user_id: null, // No coordinator_user_id for Coordinator's own assignment
+          };
+          
+          const coordinatorResForAssigning = await fetch(`${API_BASE}/reports/accomplishment/give`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify(coordinatorBodyForAssigning),
+          });
+          
+          if (!coordinatorResForAssigning.ok) {
+            const errText = await coordinatorResForAssigning.text();
+            toast.error("Failed to create coordinator assignment: " + errText);
+            setSubmitting(false);
+            return;
+          }
+          
+          const coordinatorDataForAssigning = await coordinatorResForAssigning.json();
+          const coordinatorAssignmentIdForAssigning = coordinatorDataForAssigning.report_assignment_id;
+          console.log('✅ [SetReport] Created coordinator assignment for assigning to others:', coordinatorAssignmentIdForAssigning);
+          
+          // Step 2: Create recipient assignment (with Teacher(s) or Teacher(s) + Coordinator as assignees, linked to Coordinator's assignment)
+          const { coordinator_user_id: baseCoordinatorUserId, ...baseWithoutCoordinatorId } = base;
+          
+          const recipientBodyCoordinator = {
+            ...baseWithoutCoordinatorId,
+            assignees: finalRecipients.map((x) => Number(x)), // All recipients (teachers and/or coordinators)
+            title: fallbackTitle,
+            parent_report_assignment_id: coordinatorAssignmentIdForAssigning, // Link to Coordinator's assignment
+            coordinator_user_id: null, // No coordinator_user_id when Coordinator assigns to Teacher(s) or Teacher(s) + Coordinator
+          };
+          
+          const recipientResCoordinator = await fetch(`${API_BASE}/reports/accomplishment/give`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify(recipientBodyCoordinator),
+          });
+          
+          if (!recipientResCoordinator.ok) {
+            const errText = await recipientResCoordinator.text();
+            toast.error(`Created coordinator assignment, but failed to create recipient assignment: ${errText}`);
+            setSubmitting(false);
+            return;
+          }
+          
+          toast.success(`Successfully created coordinator assignment and recipient assignment with ${finalRecipients.length} recipient(s)!`);
+          setIsFormSubmitted(true);
+          
+          // Redirect after creating all assignments
+          const redirectUrl = `/AssignedReport?year=${yearId}&quarter=${quarterId}`;
+          navigate(redirectUrl);
+          setSubmitting(false);
+          return;
+        }
+        
         // Normal flow: create single assignment with all assignees
         endpoint = `${API_BASE}/reports/accomplishment/give`;
+        
+        // When coordinator is assigning to teachers/coordinators, coordinators should act as teachers
+        // Do NOT include coordinator_user_id - it should only be set when principal assigns to coordinator
+        const { coordinator_user_id: baseCoordinatorUserId, ...baseWithoutCoordinatorId } = base;
+        
         body = {
-          ...base,
+          ...baseWithoutCoordinatorId,
           title: fallbackTitle,
         };
         
-        // Ensure coordinator_user_id is included if it was set
-        if (base.coordinator_user_id) {
-          body.coordinator_user_id = base.coordinator_user_id;
+        // Only include coordinator_user_id if principal is assigning (not when coordinator is assigning to others)
+        // - Principal → Coordinator (only): coordinator_user_id is included (coordinator acts as coordinator)
+        // - Principal → Teacher(s) + Coordinator: coordinator_user_id is NOT included (coordinator acts as teacher)
+        // - Coordinator → Coordinator: coordinator_user_id is NOT included (recipient coordinator acts as teacher)
+        // - Coordinator → Teacher(s) + Coordinator: coordinator_user_id is NOT included (recipient coordinator acts as teacher)
+        // Explicitly ensure coordinator_user_id is NEVER included when coordinator is assigning
+        if (isCoordinator) {
+          // Coordinator is assigning - explicitly remove coordinator_user_id if it exists
+          delete body.coordinator_user_id;
+        } else if (isPrincipal && baseCoordinatorUserId) {
+          // Only include if principal is assigning (and not a coordinator)
+          body.coordinator_user_id = baseCoordinatorUserId;
           console.log("✅ [SetReport] Including coordinator_user_id in body:", {
             coordinator_user_id: body.coordinator_user_id,
-            base_coordinator_user_id: base.coordinator_user_id
+            base_coordinator_user_id: baseCoordinatorUserId
           });
         }
         
         // For principal assigning to coordinator: ensure parent_report_assignment_id is null (it's the parent)
-        if (isPrincipal && base.coordinator_user_id) {
+        if (isPrincipal && baseCoordinatorUserId) {
           body.parent_report_assignment_id = null;
           console.log("✅ [SetReport] Principal creating parent assignment for coordinator:", {
-            coordinator_user_id: base.coordinator_user_id,
+            coordinator_user_id: baseCoordinatorUserId,
             parent_report_assignment_id: null,
             is_given: base.is_given,
             body: body
@@ -2264,8 +2561,21 @@ function SetReport() {
           // The laempl-mps endpoint automatically creates one assignment per subject
           const subjectIds = selectedSubjects.map((id) => Number(id));
           
-          // Use the finalRecipients list that was already calculated (includes coordinator if principal, or coordinator's own assignment)
-          let assigneesList = finalRecipients.map(id => String(id));
+          // When coordinator is assigning to teachers, use recipients directly instead of finalRecipients
+          // finalRecipients might be set to [coordinator_id] for coordinator's own assignment, which is not what we want here
+          // Check if coordinator has selected any recipients (teachers/coordinators) to assign to
+          const hasSelectedRecipients = recipients.length > 0;
+          const isCoordinatorAssigningToOthers = isCoordinator && hasSelectedRecipients;
+          
+          let assigneesList;
+          if (isCoordinatorAssigningToOthers) {
+            // Coordinator assigning to teachers/coordinators: use recipients (the selected teachers/coordinators)
+            // This applies whether it's from principal assignment or coordinator's own assignment
+            assigneesList = recipients.filter(id => id && String(id).trim() !== '').map(id => String(id));
+          } else {
+            // Use the finalRecipients list that was already calculated (includes coordinator if principal, or coordinator's own assignment)
+            assigneesList = finalRecipients.filter(id => id != null && String(id).trim() !== '').map(id => String(id));
+          }
           
           // If principal is assigning to coordinator, include coordinator in assignees (already handled in finalRecipients)
           // This check is now redundant but kept for clarity
@@ -2299,26 +2609,379 @@ function SetReport() {
           // IMPORTANT: Filter out the assigner (current user) from assignees only when it matches
           const currentUserId = user?.user_id ? Number(user.user_id) : null;
           if (currentUserId) {
-            assigneesList = assigneesList.filter((assigneeId) => Number(assigneeId) !== currentUserId);
+            assigneesList = assigneesList.filter((assigneeId) => {
+              const assigneeIdNum = Number(assigneeId);
+              return !isNaN(assigneeIdNum) && assigneeIdNum !== currentUserId;
+            });
           }
+          
+          // Filter out empty strings and invalid values before validation
+          assigneesList = assigneesList.filter(id => id != null && String(id).trim() !== '' && !isNaN(Number(id)));
           
           // Validate assignees are not empty
           if (assigneesList.length === 0) {
             toast.error('Please select at least one teacher or coordinator to assign this report to.');
+            setSubmitting(false);
             return;
           }
           
           // Ensure all assignees are valid numbers
-          assigneesList = assigneesList.filter(id => id != null && !isNaN(Number(id))).map(id => Number(id));
+          assigneesList = assigneesList.map(id => Number(id));
           
           if (assigneesList.length === 0) {
             toast.error('Invalid assignees selected. Please select valid teachers or coordinators.');
+            setSubmitting(false);
+            return;
+          }
+          
+          // Check if Principal is assigning to Teacher(s) or Coordinator + Teacher(s) (not just Coordinator only)
+          // In this case, we need to create TWO sets of assignments:
+          // 1. Principal's assignments (one per subject, with Principal as assignee)
+          // 2. Recipient assignments (one per subject, with Teacher(s) or Coordinator + Teacher(s) as assignees, linked to Principal's assignments)
+          const isPrincipalAssigningToTeachersOrMixedLAEMPL = isPrincipal && !isCoordinator && user?.user_id && assigneesList.length > 0;
+          let hasTeacherRecipientsLAEMPL = false;
+          let hasOnlyCoordinatorLAEMPL = false;
+          
+          if (isPrincipalAssigningToTeachersOrMixedLAEMPL) {
+            // Check if there are any teachers in the recipients
+            hasTeacherRecipientsLAEMPL = assigneesList.some(recipientId => {
+              const recipientUser = usersWithGrades.find(u => String(u.user_id) === String(recipientId)) ||
+                coordinators.find(u => String(u.user_id) === String(recipientId));
+              return recipientUser?.role?.toLowerCase() === 'teacher';
+            });
+            
+            // Check if there's only a coordinator (no teachers)
+            const coordinatorRecipientsLAEMPL = assigneesList.filter(recipientId => {
+              const recipientUser = usersWithGrades.find(u => String(u.user_id) === String(recipientId)) ||
+                coordinators.find(u => String(u.user_id) === String(recipientId));
+              return recipientUser?.role?.toLowerCase() === 'coordinator';
+            });
+            
+            hasOnlyCoordinatorLAEMPL = coordinatorRecipientsLAEMPL.length === assigneesList.length && coordinatorRecipientsLAEMPL.length > 0;
+          }
+          
+          // If Principal is assigning to Teacher(s) or Coordinator + Teacher(s), create two sets of assignments
+          if (isPrincipalAssigningToTeachersOrMixedLAEMPL && hasTeacherRecipientsLAEMPL && !hasOnlyCoordinatorLAEMPL) {
+            console.log("✅ [SetReport] Principal assigning to Teacher(s) or Coordinator + Teacher(s) for LAEMPL & MPS - creating two sets of assignments");
+            
+            // Step 1: Create Principal's assignments (one per subject, with Principal as assignee)
+            const principalBodyLAEMPL = {
+              ...base,
+              assignees: [Number(user.user_id)], // Principal as assignee
+              title: fallbackTitle,
+              parent_report_assignment_id: null, // Principal's assignments are the parents
+              coordinator_user_id: null, // No coordinator_user_id for Principal's own assignments
+              grade_level_id: Number(selectedGradeLevel),
+              subject_ids: subjectIds, // This will create one assignment per subject
+              number_of_submission: numberValue, // INT or NULL
+            };
+            
+            const principalResLAEMPL = await fetch(`${API_BASE}/reports/laempl-mps`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify(principalBodyLAEMPL),
+            });
+            
+            if (!principalResLAEMPL.ok) {
+              const errText = await principalResLAEMPL.text();
+              toast.error("Failed to create principal assignments: " + errText);
+              setSubmitting(false);
+              return;
+            }
+            
+            const principalDataLAEMPL = await principalResLAEMPL.json();
+            const principalAssignmentsLAEMPL = principalDataLAEMPL.assignments || [];
+            console.log('✅ [SetReport] Created principal assignments:', principalAssignmentsLAEMPL.map(a => a.report_assignment_id));
+            
+            // Step 2: Create recipient assignments (one per subject, with Teacher(s) or Coordinator + Teacher(s) as assignees, linked to Principal's assignments)
+            // Note: The API creates one assignment per subject, so we need to link each recipient assignment to the corresponding principal assignment
+            const { coordinator_user_id: baseCoordinatorUserIdLAEMPL, ...baseWithoutCoordinatorId } = base;
+            
+            const recipientBodyLAEMPL = {
+              ...baseWithoutCoordinatorId,
+              assignees: assigneesList, // All recipients (teachers and/or coordinators)
+              title: fallbackTitle,
+              parent_report_assignment_id: null, // Will be linked after creation
+              coordinator_user_id: null, // No coordinator_user_id when Principal assigns to Teacher(s) or Coordinator + Teacher(s)
+              grade_level_id: Number(selectedGradeLevel),
+              subject_ids: subjectIds, // This will create one assignment per subject
+              number_of_submission: numberValue, // INT or NULL
+            };
+            
+            const recipientResLAEMPL = await fetch(`${API_BASE}/reports/laempl-mps`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify(recipientBodyLAEMPL),
+            });
+            
+            if (!recipientResLAEMPL.ok) {
+              const errText = await recipientResLAEMPL.text();
+              toast.error(`Created principal assignments, but failed to create recipient assignments: ${errText}`);
+              setSubmitting(false);
+              return;
+            }
+            
+            const recipientDataLAEMPL = await recipientResLAEMPL.json();
+            const recipientAssignmentsLAEMPL = recipientDataLAEMPL.assignments || [];
+            console.log('✅ [SetReport] Created recipient assignments:', recipientAssignmentsLAEMPL.map(a => a.report_assignment_id));
+            
+            // Step 3: Link each recipient assignment to the corresponding principal assignment
+            // The assignments should be in the same order (by subject), so we can link them by index
+            if (principalAssignmentsLAEMPL.length === recipientAssignmentsLAEMPL.length) {
+              try {
+                const linkPromises = recipientAssignmentsLAEMPL.map((recipientAssignment, index) => {
+                  const principalAssignment = principalAssignmentsLAEMPL[index];
+                  if (principalAssignment && recipientAssignment) {
+                    return fetch(`${API_BASE}/reports/accomplishment/link-parent`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      credentials: "include",
+                      body: JSON.stringify({
+                        teacher_assignment_id: recipientAssignment.report_assignment_id,
+                        coordinator_assignment_id: principalAssignment.report_assignment_id
+                      })
+                    });
+                  }
+                  return Promise.resolve(null);
+                });
+                
+                const linkResults = await Promise.allSettled(linkPromises);
+                const successCount = linkResults.filter(r => r.status === 'fulfilled' && r.value && r.value.ok).length;
+                console.log(`✅ [SetReport] Linked ${successCount}/${recipientAssignmentsLAEMPL.length} recipient assignment(s) to principal assignment(s)`);
+                
+                if (successCount < recipientAssignmentsLAEMPL.length) {
+                  console.warn("Some parent-link operations failed for LAEMPL & MPS");
+                }
+              } catch (e) {
+                console.warn("Parent-link API threw error for LAEMPL & MPS:", e);
+              }
+            } else {
+              console.warn("⚠️ [SetReport] Mismatch in assignment counts - principal:", principalAssignmentsLAEMPL.length, "recipient:", recipientAssignmentsLAEMPL.length);
+            }
+            
+            toast.success(`Successfully created principal assignments and recipient assignments with ${assigneesList.length} recipient(s) for ${subjectIds.length} subject(s)!`);
+            setIsFormSubmitted(true);
+            
+            // Redirect after creating all assignments
+            const redirectUrl = `/AssignedReport?year=${yearId}&quarter=${quarterId}`;
+            navigate(redirectUrl);
+            setSubmitting(false);
+            return;
+          }
+          
+          // Check if Coordinator is assigning LAEMPL & MPS to Teacher(s) or Teacher(s) + Coordinator (not their own assignment, not from principal)
+          // In this case, we need to create TWO sets of assignments:
+          // 1. Coordinator's assignments (one per subject, with Coordinator as assignee)
+          // 2. Recipient assignments (one per subject, with Teacher(s) or Teacher(s) + Coordinator as assignees, linked to Coordinator's assignments)
+          // IMPORTANT: isCoordinatorOwnAssignment is true when coordinator creates assignment for themselves only.
+          // But when coordinator assigns to others (has recipients), we need to create two assignments even if isCoordinatorOwnAssignment is true.
+          // So we check: coordinator is assigning AND has recipients (not just creating for themselves)
+          const coordinatorHasRecipients = assigneesList.length > 0 && assigneesList.some(id => {
+            const recipientId = Number(id);
+            return recipientId !== Number(user?.user_id); // Has recipients other than themselves
+          });
+          const isCoordinatorAssigningToTeachersOrMixedLAEMPL = isCoordinator && !isPrincipal && !isFromPrincipalAssignment && 
+            reportType === "laempl" && selectedSubCategory === "3" && user?.user_id && coordinatorHasRecipients;
+          
+          console.log("🔍 [SetReport] Checking if coordinator should create own assignment for LAEMPL & MPS:", {
+            isCoordinator,
+            isPrincipal,
+            isCoordinatorOwnAssignment,
+            isFromPrincipalAssignment,
+            reportType,
+            selectedSubCategory,
+            user_id: user?.user_id,
+            assigneesListLength: assigneesList.length,
+            assigneesList,
+            coordinatorHasRecipients,
+            isCoordinatorAssigningToTeachersOrMixedLAEMPL
+          });
+          
+          let hasTeacherRecipientsCoordinatorLAEMPL = false;
+          let hasOnlyCoordinatorCoordinatorLAEMPL = false;
+          
+          if (isCoordinatorAssigningToTeachersOrMixedLAEMPL) {
+            // Check if there are any teachers in the recipients
+            hasTeacherRecipientsCoordinatorLAEMPL = assigneesList.some(recipientId => {
+              const recipientUser = usersWithGrades.find(u => String(u.user_id) === String(recipientId)) ||
+                coordinators.find(u => String(u.user_id) === String(recipientId));
+              return recipientUser?.role?.toLowerCase() === 'teacher';
+            });
+            
+            // Check if there's only a coordinator (no teachers)
+            const coordinatorRecipientsCoordinatorLAEMPL = assigneesList.filter(recipientId => {
+              const recipientUser = usersWithGrades.find(u => String(u.user_id) === String(recipientId)) ||
+                coordinators.find(u => String(u.user_id) === String(recipientId));
+              return recipientUser?.role?.toLowerCase() === 'coordinator';
+            });
+            
+            hasOnlyCoordinatorCoordinatorLAEMPL = coordinatorRecipientsCoordinatorLAEMPL.length === assigneesList.length && coordinatorRecipientsCoordinatorLAEMPL.length > 0;
+            
+            console.log("🔍 [SetReport] Coordinator LAEMPL & MPS assignment check:", {
+              hasTeacherRecipientsCoordinatorLAEMPL,
+              hasOnlyCoordinatorCoordinatorLAEMPL,
+              assigneesList
+            });
+          }
+          
+          // If Coordinator is assigning LAEMPL & MPS to Teacher(s), Teacher(s) + Coordinator, or Coordinator only, create two sets of assignments
+          // This includes: Coordinator > Teacher(s), Coordinator > Teacher(s) + Coordinator, and Coordinator > Coordinator
+          if (isCoordinatorAssigningToTeachersOrMixedLAEMPL && (hasTeacherRecipientsCoordinatorLAEMPL || hasOnlyCoordinatorCoordinatorLAEMPL)) {
+            const assignmentType = hasOnlyCoordinatorCoordinatorLAEMPL 
+              ? "Coordinator > Coordinator" 
+              : hasTeacherRecipientsCoordinatorLAEMPL && !hasOnlyCoordinatorCoordinatorLAEMPL
+              ? "Coordinator > Teacher(s) or Teacher(s) + Coordinator"
+              : "Coordinator > Others";
+            console.log(`✅ [SetReport] Coordinator assigning LAEMPL & MPS (${assignmentType}) - creating two sets of assignments`);
+            
+            // Step 1: Create Coordinator's assignments (one per subject, with Coordinator as assignee)
+            // Clean up base to remove any fields that shouldn't be in coordinator's assignment
+            const { assignees: baseAssignees, parent_report_assignment_id: baseParentId, coordinator_user_id: baseCoordUserId, ...baseClean } = base;
+            
+            const coordinatorBodyLAEMPL = {
+              ...baseClean,
+              assignees: [Number(user.user_id)], // Coordinator as assignee
+              title: fallbackTitle,
+              parent_report_assignment_id: null, // Coordinator's assignments are the parents
+              coordinator_user_id: Number(user.user_id), // Set coordinator_user_id to the coordinator's own user_id
+              grade_level_id: Number(selectedGradeLevel),
+              subject_ids: subjectIds, // This will create one assignment per subject
+              number_of_submission: numberValue, // INT or NULL
+            };
+            
+            console.log("🔍 [SetReport] Creating coordinator's LAEMPL & MPS assignments with body:", {
+              assignees: coordinatorBodyLAEMPL.assignees,
+              parent_report_assignment_id: coordinatorBodyLAEMPL.parent_report_assignment_id,
+              coordinator_user_id: coordinatorBodyLAEMPL.coordinator_user_id,
+              grade_level_id: coordinatorBodyLAEMPL.grade_level_id,
+              subject_ids: coordinatorBodyLAEMPL.subject_ids,
+              category_id: coordinatorBodyLAEMPL.category_id,
+              sub_category_id: coordinatorBodyLAEMPL.sub_category_id,
+              note: "coordinator_user_id is set to coordinator's own user_id for parent assignment"
+            });
+            
+            const coordinatorResLAEMPL = await fetch(`${API_BASE}/reports/laempl-mps`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify(coordinatorBodyLAEMPL),
+            });
+            
+            if (!coordinatorResLAEMPL.ok) {
+              const errText = await coordinatorResLAEMPL.text();
+              console.error("❌ [SetReport] Failed to create coordinator assignments:", errText);
+              toast.error("Failed to create coordinator assignments: " + errText);
+              setSubmitting(false);
+              return;
+            }
+            
+            const coordinatorDataLAEMPL = await coordinatorResLAEMPL.json();
+            const coordinatorAssignmentsLAEMPL = coordinatorDataLAEMPL.assignments || [];
+            console.log('✅ [SetReport] Created coordinator assignments for LAEMPL & MPS:', {
+              count: coordinatorAssignmentsLAEMPL.length,
+              assignments: coordinatorAssignmentsLAEMPL.map(a => ({
+                report_assignment_id: a.report_assignment_id,
+                subject_id: a.subject_id,
+                subject_name: a.subject_name,
+                title: a.title
+              })),
+              fullResponse: coordinatorDataLAEMPL
+            });
+            
+            if (coordinatorAssignmentsLAEMPL.length === 0) {
+              console.error("❌ [SetReport] No coordinator assignments were created! Response:", coordinatorDataLAEMPL);
+              toast.error("Failed to create coordinator assignments - no assignments returned");
+              setSubmitting(false);
+              return;
+            }
+            
+            // Step 2: Create recipient assignments (one per subject, with Teacher(s) or Teacher(s) + Coordinator as assignees, linked to Coordinator's assignments)
+            const { coordinator_user_id: baseCoordinatorUserIdLAEMPL, ...baseWithoutCoordinatorId } = base;
+            
+            const recipientBodyCoordinatorLAEMPL = {
+              ...baseWithoutCoordinatorId,
+              assignees: assigneesList, // All recipients (teachers and/or coordinators)
+              title: fallbackTitle,
+              parent_report_assignment_id: null, // Will be linked after creation
+              coordinator_user_id: null, // No coordinator_user_id when Coordinator assigns to Teacher(s) or Teacher(s) + Coordinator
+              grade_level_id: Number(selectedGradeLevel),
+              subject_ids: subjectIds, // This will create one assignment per subject
+              number_of_submission: numberValue, // INT or NULL
+            };
+            
+            const recipientResCoordinatorLAEMPL = await fetch(`${API_BASE}/reports/laempl-mps`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify(recipientBodyCoordinatorLAEMPL),
+            });
+            
+            if (!recipientResCoordinatorLAEMPL.ok) {
+              const errText = await recipientResCoordinatorLAEMPL.text();
+              toast.error(`Created coordinator assignments, but failed to create recipient assignments: ${errText}`);
+              setSubmitting(false);
+              return;
+            }
+            
+            const recipientDataCoordinatorLAEMPL = await recipientResCoordinatorLAEMPL.json();
+            const recipientAssignmentsCoordinatorLAEMPL = recipientDataCoordinatorLAEMPL.assignments || [];
+            console.log('✅ [SetReport] Created recipient assignments for LAEMPL & MPS:', recipientAssignmentsCoordinatorLAEMPL.map(a => a.report_assignment_id));
+            
+            // Step 3: Link each recipient assignment to the corresponding coordinator assignment
+            // The assignments should be in the same order (by subject), so we can link them by index
+            if (coordinatorAssignmentsLAEMPL.length === recipientAssignmentsCoordinatorLAEMPL.length) {
+              try {
+                const linkPromises = recipientAssignmentsCoordinatorLAEMPL.map((recipientAssignment, index) => {
+                  const coordinatorAssignment = coordinatorAssignmentsLAEMPL[index];
+                  if (coordinatorAssignment && recipientAssignment) {
+                    return fetch(`${API_BASE}/reports/accomplishment/link-parent`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      credentials: "include",
+                      body: JSON.stringify({
+                        teacher_assignment_id: recipientAssignment.report_assignment_id,
+                        coordinator_assignment_id: coordinatorAssignment.report_assignment_id
+                      })
+                    });
+                  }
+                  return Promise.resolve(null);
+                });
+                
+                const linkResults = await Promise.allSettled(linkPromises);
+                const successCount = linkResults.filter(r => r.status === 'fulfilled' && r.value && r.value.ok).length;
+                console.log(`✅ [SetReport] Linked ${successCount}/${recipientAssignmentsCoordinatorLAEMPL.length} recipient assignment(s) to coordinator assignment(s) for LAEMPL & MPS`);
+                
+                if (successCount < recipientAssignmentsCoordinatorLAEMPL.length) {
+                  console.warn("Some parent-link operations failed for LAEMPL & MPS");
+                }
+              } catch (e) {
+                console.warn("Parent-link API threw error for LAEMPL & MPS:", e);
+              }
+            } else {
+              console.warn("⚠️ [SetReport] Mismatch in assignment counts - coordinator:", coordinatorAssignmentsLAEMPL.length, "recipient:", recipientAssignmentsCoordinatorLAEMPL.length);
+            }
+            
+            toast.success(`Successfully created coordinator assignments and recipient assignments with ${assigneesList.length} recipient(s) for ${subjectIds.length} subject(s)!`);
+            setIsFormSubmitted(true);
+            
+            // Redirect after creating all assignments
+            const redirectUrl = `/AssignedReport?year=${yearId}&quarter=${quarterId}`;
+            navigate(redirectUrl);
+            setSubmitting(false);
             return;
           }
           
           endpoint = `${API_BASE}/reports/laempl-mps`;
+          
+          // When coordinator is assigning to teachers/coordinators, coordinators should act as teachers
+          // Do NOT include coordinator_user_id - it should only be set when principal assigns to coordinator
+          // Explicitly exclude coordinator_user_id from base to ensure it's never included when coordinator assigns
+          const { coordinator_user_id: baseCoordinatorUserIdLAEMPL, ...baseWithoutCoordinatorId } = base;
+          
           body = {
-            ...base,
+            ...baseWithoutCoordinatorId,
             assignees: assigneesList, // Set assignees (coordinator or teachers)
             title: fallbackTitle,
             grade_level_id: Number(selectedGradeLevel),
@@ -2326,26 +2989,278 @@ function SetReport() {
             number_of_submission: numberValue, // INT or NULL
             parent_report_assignment_id: editingReportId || null // Link child assignments to parent if editing
           };
+          
+          // CRITICAL: Never include coordinator_user_id when coordinator is assigning
+          // - Principal → Coordinator (only): coordinator_user_id is included (coordinator acts as coordinator)
+          // - Principal → Teacher(s) + Coordinator: coordinator_user_id is NOT included (coordinator acts as teacher)
+          // - Coordinator → Coordinator: coordinator_user_id is NOT included (recipient coordinator acts as teacher)
+          // - Coordinator → Teacher(s) + Coordinator: coordinator_user_id is NOT included (recipient coordinator acts as teacher)
+          // Explicitly ensure coordinator_user_id is NEVER included when coordinator is assigning
+          if (isCoordinator) {
+            // Coordinator is assigning - explicitly remove coordinator_user_id if it exists (should never be set, but double-check)
+            if (body.coordinator_user_id !== undefined) {
+              delete body.coordinator_user_id;
+              console.warn("⚠️ [SetReport] Removed coordinator_user_id from body - coordinator is assigning, recipient should act as teacher");
+            }
+          } else if (isPrincipal && !isCoordinator && baseCoordinatorUserIdLAEMPL) {
+            // Only include if principal is assigning (and definitely not a coordinator)
+            body.coordinator_user_id = baseCoordinatorUserIdLAEMPL;
+          }
         } else {
+          // Simple LAEMPL (not LAEMPL & MPS)
+          // Check if Principal is assigning to Teacher(s) or Coordinator + Teacher(s) (not just Coordinator only)
+          const isPrincipalAssigningToTeachersOrMixedSimpleLAEMPL = isPrincipal && !isCoordinator && user?.user_id && finalRecipients.length > 0;
+          let hasTeacherRecipientsSimpleLAEMPL = false;
+          let hasOnlyCoordinatorSimpleLAEMPL = false;
+          
+          if (isPrincipalAssigningToTeachersOrMixedSimpleLAEMPL) {
+            // Check if there are any teachers in the recipients
+            hasTeacherRecipientsSimpleLAEMPL = finalRecipients.some(recipientId => {
+              const recipientUser = usersWithGrades.find(u => String(u.user_id) === String(recipientId)) ||
+                coordinators.find(u => String(u.user_id) === String(recipientId));
+              return recipientUser?.role?.toLowerCase() === 'teacher';
+            });
+            
+            // Check if there's only a coordinator (no teachers)
+            const coordinatorRecipientsSimpleLAEMPL = finalRecipients.filter(recipientId => {
+              const recipientUser = usersWithGrades.find(u => String(u.user_id) === String(recipientId)) ||
+                coordinators.find(u => String(u.user_id) === String(recipientId));
+              return recipientUser?.role?.toLowerCase() === 'coordinator';
+            });
+            
+            hasOnlyCoordinatorSimpleLAEMPL = coordinatorRecipientsSimpleLAEMPL.length === finalRecipients.length && coordinatorRecipientsSimpleLAEMPL.length > 0;
+          }
+          
+          // If Principal is assigning to Teacher(s) or Coordinator + Teacher(s), create two assignments
+          if (isPrincipalAssigningToTeachersOrMixedSimpleLAEMPL && hasTeacherRecipientsSimpleLAEMPL && !hasOnlyCoordinatorSimpleLAEMPL) {
+            console.log("✅ [SetReport] Principal assigning to Teacher(s) or Coordinator + Teacher(s) for simple LAEMPL - creating two assignments");
+            
+            // Step 1: Create Principal's assignment (with Principal as assignee)
+            const principalBodySimpleLAEMPL = {
+              ...base,
+              assignees: [Number(user.user_id)], // Principal as assignee
+              title: fallbackTitle,
+              parent_report_assignment_id: null, // Principal's assignment is the parent
+              coordinator_user_id: null, // No coordinator_user_id for Principal's own assignment
+              grade: 1,
+              number_of_submission: numberValue, // INT or NULL
+            };
+            
+            const principalResSimpleLAEMPL = await fetch(`${API_BASE}/reports/laempl`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify(principalBodySimpleLAEMPL),
+            });
+            
+            if (!principalResSimpleLAEMPL.ok) {
+              const errText = await principalResSimpleLAEMPL.text();
+              toast.error("Failed to create principal assignment: " + errText);
+              setSubmitting(false);
+              return;
+            }
+            
+            const principalDataSimpleLAEMPL = await principalResSimpleLAEMPL.json();
+            const principalAssignmentIdSimpleLAEMPL = principalDataSimpleLAEMPL.report_assignment_id;
+            console.log('✅ [SetReport] Created principal assignment for simple LAEMPL:', principalAssignmentIdSimpleLAEMPL);
+            
+            // Step 2: Create recipient assignment (with Teacher(s) or Coordinator + Teacher(s) as assignees, linked to Principal's assignment)
+            const { coordinator_user_id: baseCoordinatorUserIdLAEMPLSimple, ...baseWithoutCoordinatorIdLAEMPLSimple } = base;
+            
+            const recipientBodySimpleLAEMPL = {
+              ...baseWithoutCoordinatorIdLAEMPLSimple,
+              assignees: finalRecipients.map((x) => Number(x)), // All recipients (teachers and/or coordinators)
+              title: fallbackTitle,
+              parent_report_assignment_id: principalAssignmentIdSimpleLAEMPL, // Link to Principal's assignment
+              coordinator_user_id: null, // No coordinator_user_id when Principal assigns to Teacher(s) or Coordinator + Teacher(s)
+              grade: 1,
+              number_of_submission: numberValue, // INT or NULL
+            };
+            
+            const recipientResSimpleLAEMPL = await fetch(`${API_BASE}/reports/laempl`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify(recipientBodySimpleLAEMPL),
+            });
+            
+            if (!recipientResSimpleLAEMPL.ok) {
+              const errText = await recipientResSimpleLAEMPL.text();
+              toast.error(`Created principal assignment, but failed to create recipient assignment: ${errText}`);
+              setSubmitting(false);
+              return;
+            }
+            
+            toast.success(`Successfully created principal assignment and recipient assignment with ${finalRecipients.length} recipient(s) for simple LAEMPL!`);
+            setIsFormSubmitted(true);
+            
+            // Redirect after creating all assignments
+            const redirectUrl = `/AssignedReport?year=${yearId}&quarter=${quarterId}`;
+            navigate(redirectUrl);
+            setSubmitting(false);
+            return;
+          }
+          
           endpoint = `${API_BASE}/reports/laempl`;
+          
+          // When coordinator is assigning, coordinators should act as teachers
+          // Do NOT include coordinator_user_id - it should only be set when principal assigns to coordinator
+          const { coordinator_user_id: baseCoordinatorUserIdLAEMPLSimple, ...baseWithoutCoordinatorIdLAEMPLSimple } = base;
+          
           body = {
-            ...base,
+            ...baseWithoutCoordinatorIdLAEMPLSimple,
             title: fallbackTitle,
             grade: 1,
             number_of_submission: numberValue, // INT or NULL
           };
+          
+          // Explicitly ensure coordinator_user_id is NEVER included when coordinator is assigning
+          if (isCoordinator) {
+            delete body.coordinator_user_id;
+          } else if (isPrincipal && baseCoordinatorUserIdLAEMPLSimple) {
+            body.coordinator_user_id = baseCoordinatorUserIdLAEMPLSimple;
+          }
         }
       } else {
         // generic + MPS both go here (MPS rows filled by teacher UI later)
+        // Check if Principal is assigning to Teacher(s) or Coordinator + Teacher(s) (not just Coordinator only)
+        const isPrincipalAssigningToTeachersOrMixedGeneric = isPrincipal && !isCoordinator && user?.user_id && finalRecipients.length > 0;
+        let hasTeacherRecipientsGeneric = false;
+        let hasOnlyCoordinatorGeneric = false;
+        
+        if (isPrincipalAssigningToTeachersOrMixedGeneric) {
+          // Check if there are any teachers in the recipients
+          hasTeacherRecipientsGeneric = finalRecipients.some(recipientId => {
+            const recipientUser = usersWithGrades.find(u => String(u.user_id) === String(recipientId)) ||
+              coordinators.find(u => String(u.user_id) === String(recipientId));
+            return recipientUser?.role?.toLowerCase() === 'teacher';
+          });
+          
+          // Check if there's only a coordinator (no teachers)
+          const coordinatorRecipientsGeneric = finalRecipients.filter(recipientId => {
+            const recipientUser = usersWithGrades.find(u => String(u.user_id) === String(recipientId)) ||
+              coordinators.find(u => String(u.user_id) === String(recipientId));
+            return recipientUser?.role?.toLowerCase() === 'coordinator';
+          });
+          
+          hasOnlyCoordinatorGeneric = coordinatorRecipientsGeneric.length === finalRecipients.length && coordinatorRecipientsGeneric.length > 0;
+        }
+        
+        // If Principal is assigning to Teacher(s) or Coordinator + Teacher(s), create two assignments
+        if (isPrincipalAssigningToTeachersOrMixedGeneric && hasTeacherRecipientsGeneric && !hasOnlyCoordinatorGeneric) {
+          console.log("✅ [SetReport] Principal assigning to Teacher(s) or Coordinator + Teacher(s) for generic/MPS - creating two assignments");
+          
+          // Step 1: Create Principal's assignment (with Principal as assignee)
+          const principalBodyGeneric = {
+            ...base,
+            assignees: [Number(user.user_id)], // Principal as assignee
+            title: fallbackTitle,
+            parent_report_assignment_id: null, // Principal's assignment is the parent
+            coordinator_user_id: null, // No coordinator_user_id for Principal's own assignment
+            field_definitions: [],
+            number_of_submission: numberValue, // INT or NULL
+          };
+          
+          const principalResGeneric = await fetch(`${API_BASE}/reports/give`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify(principalBodyGeneric),
+          });
+          
+          if (!principalResGeneric.ok) {
+            const errText = await principalResGeneric.text();
+            toast.error("Failed to create principal assignment: " + errText);
+            setSubmitting(false);
+            return;
+          }
+          
+          const principalDataGeneric = await principalResGeneric.json();
+          const principalAssignmentIdGeneric = principalDataGeneric.report_assignment_id;
+          console.log('✅ [SetReport] Created principal assignment for generic/MPS:', principalAssignmentIdGeneric);
+          
+          // Step 2: Create recipient assignment (with Teacher(s) or Coordinator + Teacher(s) as assignees, linked to Principal's assignment)
+          const { coordinator_user_id: baseCoordinatorUserIdGeneric, ...baseWithoutCoordinatorIdGeneric } = base;
+          
+          const recipientBodyGeneric = {
+            ...baseWithoutCoordinatorIdGeneric,
+            assignees: finalRecipients.map((x) => Number(x)), // All recipients (teachers and/or coordinators)
+            title: fallbackTitle,
+            parent_report_assignment_id: principalAssignmentIdGeneric, // Link to Principal's assignment
+            coordinator_user_id: null, // No coordinator_user_id when Principal assigns to Teacher(s) or Coordinator + Teacher(s)
+            field_definitions: [],
+            number_of_submission: numberValue, // INT or NULL
+          };
+          
+          const recipientResGeneric = await fetch(`${API_BASE}/reports/give`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify(recipientBodyGeneric),
+          });
+          
+          if (!recipientResGeneric.ok) {
+            const errText = await recipientResGeneric.text();
+            toast.error(`Created principal assignment, but failed to create recipient assignment: ${errText}`);
+            setSubmitting(false);
+            return;
+          }
+          
+          toast.success(`Successfully created principal assignment and recipient assignment with ${finalRecipients.length} recipient(s) for generic/MPS!`);
+          setIsFormSubmitted(true);
+          
+          // Redirect after creating all assignments
+          const redirectUrl = `/AssignedReport?year=${yearId}&quarter=${quarterId}`;
+          navigate(redirectUrl);
+          setSubmitting(false);
+          return;
+        }
+        
+        // When coordinator is assigning to teachers/coordinators, coordinators should act as teachers
+        // Do NOT include coordinator_user_id - it should only be set when principal assigns to coordinator
+        const { coordinator_user_id: baseCoordinatorUserIdGeneric, ...baseWithoutCoordinatorIdGeneric } = base;
+        
         endpoint = `${API_BASE}/reports/give`;
         body = {
-          ...base,
+          ...baseWithoutCoordinatorIdGeneric,
           title: fallbackTitle,
           field_definitions: [],
           number_of_submission: numberValue, // INT or NULL
         };
+        
+        // Only include coordinator_user_id if principal is assigning (not when coordinator is assigning to others)
+        // - Principal → Coordinator (only): coordinator_user_id is included (coordinator acts as coordinator)
+        // - Principal → Teacher(s) + Coordinator: coordinator_user_id is NOT included (coordinator acts as teacher)
+        // - Coordinator → Coordinator: coordinator_user_id is NOT included (recipient coordinator acts as teacher)
+        // - Coordinator → Teacher(s) + Coordinator: coordinator_user_id is NOT included (recipient coordinator acts as teacher)
+        // Explicitly ensure coordinator_user_id is NEVER included when coordinator is assigning
+        if (isCoordinator) {
+          // Coordinator is assigning - explicitly remove coordinator_user_id if it exists
+          delete body.coordinator_user_id;
+        } else if (isPrincipal && baseCoordinatorUserIdGeneric) {
+          // Only include if principal is assigning (and not a coordinator)
+          body.coordinator_user_id = baseCoordinatorUserIdGeneric;
+        }
       }
 
+      // FINAL SAFEGUARD: Ensure coordinator_user_id is NEVER included when coordinator is assigning
+      // This is a last check before sending to the API
+      if (isCoordinator && body.coordinator_user_id !== undefined) {
+        console.warn("⚠️ [SetReport] FINAL SAFEGUARD: Removing coordinator_user_id from body before API call - coordinator is assigning");
+        delete body.coordinator_user_id;
+      }
+      
+      // Log the final body for debugging
+      console.log("🔍 [SetReport] Final body being sent to API:", {
+        endpoint,
+        isCoordinator,
+        isPrincipal,
+        hasCoordinatorUserId: body.coordinator_user_id !== undefined,
+        coordinator_user_id: body.coordinator_user_id,
+        assignees: body.assignees,
+        bodyKeys: Object.keys(body)
+      });
+      
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -3004,11 +3919,6 @@ function SetReport() {
               <div className="form-actions">
                 <button type="submit" disabled={submitting}>
                   {(() => {
-                    // Determine button text based on context
-                    const isCoordinatorOwnAssignment = isCoordinator && !isFromPrincipalAssignment && !isPrincipalReportParam;
-                    const reportType = detectReportType(subCategories, selectedSubCategory, selectedCategory);
-                    const shouldShowSave = isCoordinatorOwnAssignment && (reportType === "accomplishment" || reportType === "laempl");
-                    
                     // If editing a principal's report and it's an Edit action, show "Edit"
                     if (isEditingPrincipalReport && isEditAction && editingReportId) {
                       if (submitting) {
@@ -3017,10 +3927,11 @@ function SetReport() {
                       return "Edit";
                     }
                     
+                    // Always show "Set Schedule" for consistency
                     if (submitting) {
-                      return shouldShowSave ? "Saving..." : "Setting...";
+                      return "Setting...";
                     }
-                    return shouldShowSave ? "Save" : "Set Schedule";
+                    return "Set Schedule";
                   })()}
                 </button>
               </div>

@@ -151,28 +151,42 @@ function DashboardCoordinator() {
         const seenIds = new Set();
 
         // First add not given deadlines (is_given = 0) - these come with submission data
+        // Filter out coordinator's own assignments (parent assignment created by coordinator for Accomplishment Report or LAEMPL)
         notGivenDeadlines.forEach(d => {
           const key = d.report_assignment_id || d.submission_id;
           if (key && !seenIds.has(key)) {
-            seenIds.add(key);
-            combinedDeadlines.push({
-              ...d,
-              title: d.assignment_title || d.title,
-              is_given: 0 // Mark as not given for reference
-            });
+            // Exclude coordinator's own assignments
+            const isOwnAssignment = !d.parent_report_assignment_id && 
+              d.given_by === user.user_id &&
+              (d.category_id === 0 || (d.category_id === 1 && d.sub_category_id === 3));
+            if (!isOwnAssignment) {
+              seenIds.add(key);
+              combinedDeadlines.push({
+                ...d,
+                title: d.assignment_title || d.title,
+                is_given: 0 // Mark as not given for reference
+              });
+            }
           }
         });
 
         // Then add given deadlines (is_given = 1)
+        // Filter out coordinator's own assignments (parent assignment created by coordinator for Accomplishment Report or LAEMPL)
         givenDeadlines.forEach(d => {
           const key = d.report_assignment_id || d.submission_id;
           if (key && !seenIds.has(key)) {
-            seenIds.add(key);
-            combinedDeadlines.push({
-              ...d,
-              title: d.title || d.assignment_title,
-              is_given: 1 // Mark as given for reference
-            });
+            // Exclude coordinator's own assignments
+            const isOwnAssignment = !d.parent_report_assignment_id && 
+              d.given_by === user.user_id &&
+              (d.category_id === 0 || (d.category_id === 1 && d.sub_category_id === 3));
+            if (!isOwnAssignment) {
+              seenIds.add(key);
+              combinedDeadlines.push({
+                ...d,
+                title: d.title || d.assignment_title,
+                is_given: 1 // Mark as given for reference
+              });
+            }
           }
         });
 

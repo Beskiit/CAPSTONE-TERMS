@@ -132,6 +132,21 @@ export const giveAccomplishmentReport = (req, res) => {
     const hasTeacher = recipients.some(uid => (idToRole.get(Number(uid)) || '') === 'teacher');
     const hasCoordinator = recipients.some(uid => (idToRole.get(Number(uid)) || '') === 'coordinator');
 
+    // CRITICAL: Never set coordinator_user_id when assigner is a coordinator
+    // When coordinator assigns to Teacher(s) + Coordinator, recipient coordinator should act as teacher
+    // This matches the behavior of Principal → Teacher(s) + Coordinator
+    let finalCoordinatorUserId = coordinator_user_id;
+    if (giverRoleDetected === 'coordinator') {
+      // Coordinator is assigning - recipient coordinator should act as teacher (no coordinator_user_id)
+      finalCoordinatorUserId = null;
+    } else if (giverRoleDetected === 'principal' && hasTeacher && hasCoordinator) {
+      // Principal → Teacher(s) + Coordinator: coordinator should act as teacher (no coordinator_user_id)
+      finalCoordinatorUserId = null;
+    } else if (giverRoleDetected === 'principal' && hasCoordinator && !hasTeacher) {
+      // Principal → Coordinator (only): coordinator acts as coordinator (keep coordinator_user_id if provided)
+      // finalCoordinatorUserId already set from request body
+    }
+
     // Default respects inbound flag; override only for principal
     let computedIsGiven = _is_given;
     if (giverRoleDetected === 'principal') {
@@ -163,7 +178,7 @@ export const giveAccomplishmentReport = (req, res) => {
           _allow_late,
           title,
           parent_report_assignment_id ?? null,
-          coordinator_user_id ?? null,
+          finalCoordinatorUserId ?? null, // Use finalCoordinatorUserId instead of coordinator_user_id
         ];
         conn.query(insertReportSql, reportVals, (insErr, insRes) => {
           if (insErr) {

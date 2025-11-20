@@ -432,9 +432,27 @@ export const giveLAEMPLMPSReport = (req, res) => {
       // Determine coordinator recipient (if any) once per request
       // BUT: Skip this if parent_report_assignment_id is provided (coordinator assigning to teachers)
       // to avoid setting coordinator_user_id on child assignments
+      // ALSO: Never set coordinator_user_id when assigner is a coordinator (coordinator assigning to coordinator/teachers)
       let coordinatorRecipientId = null;
       const computeCoordinatorRecipient = async () => {
         if (!recipients.length) return;
+        
+        // Get the assigner's role to check if they are a coordinator
+        const assignerRoleSql = `SELECT LOWER(role) AS role FROM user_details WHERE user_id = ?`;
+        const assignerRoleResult = await new Promise((resolve, reject) => {
+          conn.query(assignerRoleSql, [authenticatedUserId], (err, results) => {
+            if (err) reject(err);
+            else resolve(results?.[0] || null);
+          });
+        }).catch(() => null);
+        const assignerRole = assignerRoleResult?.role || '';
+        const isAssignerCoordinator = assignerRole === 'coordinator';
+        
+        // If assigner is a coordinator, NEVER set coordinator_user_id (recipients should act as teachers)
+        if (isAssignerCoordinator) {
+          coordinatorRecipientId = null;
+          return;
+        }
         
         // If parent_report_assignment_id is provided, this is a child assignment from a coordinator
         // Don't automatically set coordinator_user_id - only use it if explicitly provided
@@ -514,9 +532,12 @@ export const giveLAEMPLMPSReport = (req, res) => {
           // Only use normalizedCoordinatorId fallback if:
           // 1. coordinator_user_id is not explicitly provided, AND
           // 2. parent_report_assignment_id is NOT provided (not a child assignment from coordinator)
+          // 3. normalizedCoordinatorId is not null (computed from recipients)
           // This prevents setting coordinator_user_id on child assignments when coordinator assigns to teachers
+          // AND prevents setting it when assigner is a coordinator (already handled in computeCoordinatorRecipient)
           if ((finalCoordinatorUserId === null || Number.isNaN(Number(finalCoordinatorUserId))) 
-              && parent_report_assignment_id == null) {
+              && parent_report_assignment_id == null
+              && normalizedCoordinatorId != null) {
             finalCoordinatorUserId = normalizedCoordinatorId;
           }
 

@@ -50,8 +50,15 @@ export default function CoordinatorDeadlineComponent({ deadlines = [] }) {
     fetchUserAndGrade();
   }, []);
 
-  // The API already filters for upcoming deadlines, so we don't need to filter again
-  const filteredDeadlines = deadlines;
+  // Filter out coordinator's own assignments (parent assignment created by coordinator for Accomplishment Report or LAEMPL)
+  const filteredDeadlines = deadlines.filter(d => {
+    if (!user?.user_id) return true;
+    // Exclude coordinator's own assignments
+    const isOwnAssignment = !d.parent_report_assignment_id && 
+      d.given_by === user.user_id &&
+      (d.category_id === 0 || (d.category_id === 1 && d.sub_category_id === 3));
+    return !isOwnAssignment;
+  });
 
   const fmtDateTime = (iso) => {
     if (!iso) return "";

@@ -12,13 +12,17 @@ export const getStatusCountsByUserInRange = (req, res) => {
   }
 
   const whereParts = ['s.submitted_by = ?'];
-  const params = [id];
+  const params = [id, id]; // Add id twice: once for submitted_by, once for given_by check in pending count
   if (from) { whereParts.push('DATE(ra.to_date) >= ?'); params.push(from); }
   if (to)   { whereParts.push('DATE(ra.to_date) <= ?'); params.push(to); }
 
   const sql = `
     SELECT
-      SUM(CASE WHEN LOWER(st.value) IN ('pending','for review') OR s.status = 1 THEN 1 ELSE 0 END) AS pending,
+      SUM(CASE WHEN (LOWER(st.value) IN ('pending','for review') OR s.status = 1) AND NOT (
+        ra.parent_report_assignment_id IS NULL 
+        AND ra.given_by = ?
+        AND (ra.category_id = 0 OR (ra.category_id = 1 AND ra.sub_category_id = 3))
+      ) THEN 1 ELSE 0 END) AS pending,
       SUM(CASE WHEN LOWER(st.value) = 'completed' OR s.status = 2 THEN 1 ELSE 0 END) AS completed_only,
       SUM(CASE WHEN LOWER(st.value) = 'approved'  OR s.status = 3 THEN 1 ELSE 0 END) AS approved_only,
       SUM(CASE WHEN LOWER(st.value) = 'rejected'  OR s.status = 4 THEN 1 ELSE 0 END) AS rejected,
@@ -62,16 +66,21 @@ export const getStatusCountsByUser = (req, res) => {
 
   const sql = `
     SELECT
-      SUM(CASE WHEN s.status = 1 THEN 1 ELSE 0 END) AS pending,
+      SUM(CASE WHEN s.status = 1 AND NOT (
+        ra.parent_report_assignment_id IS NULL 
+        AND ra.given_by = ?
+        AND (ra.category_id = 0 OR (ra.category_id = 1 AND ra.sub_category_id = 3))
+      ) THEN 1 ELSE 0 END) AS pending,
       SUM(CASE WHEN s.status = 2 THEN 1 ELSE 0 END) AS submitted,
       SUM(CASE WHEN s.status = 3 THEN 1 ELSE 0 END) AS approved,
       SUM(CASE WHEN s.status = 4 THEN 1 ELSE 0 END) AS rejected,
       COUNT(*) AS total
     FROM submission s
+    JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
     WHERE s.submitted_by = ?
   `;
 
-  db.query(sql, [id], (err, rows) => {
+  db.query(sql, [id, id], (err, rows) => {
     if (err) return res.status(500).send("DB error: " + err);
     const r = rows?.[0] || {};
     const pending   = Number(r.pending || 0);
