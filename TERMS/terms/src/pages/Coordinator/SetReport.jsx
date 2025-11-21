@@ -3917,7 +3917,11 @@ function SetReport() {
               </div>
 
               <div className="form-actions">
-                <button type="submit" disabled={submitting}>
+                <button
+                  type="submit"
+                  className="set-schedule-btn"
+                  disabled={submitting}
+                >
                   {(() => {
                     // If editing a principal's report and it's an Edit action, show "Edit"
                     if (isEditingPrincipalReport && isEditAction && editingReportId) {
