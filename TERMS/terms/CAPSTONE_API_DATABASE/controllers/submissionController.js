@@ -18,6 +18,25 @@ const normalizeFields = (row) => {
   return { ...row, fields: safeParseJSON(row.fields, {}) };
 };
 
+const sendEmailToUser = (userId, subject, message) => {
+  if (!userId) return;
+  const sql = `SELECT email FROM user_details WHERE user_id = ? LIMIT 1`;
+  db.query(sql, [userId], async (_err, rows) => {
+    const to = rows?.[0]?.email;
+    if (!to) return;
+    try {
+      await sendEmail({
+        to,
+        subject,
+        html: `<p>${message}</p>`,
+        text: message
+      });
+    } catch (e) {
+      console.error('Email send failed:', e?.message || e);
+    }
+  });
+};
+
 export const createSubmission = (req, res) => {
   const { category_id, submitted_by, status = 0, value = null, fields } = req.body;
   if (category_id == null || submitted_by == null || fields == null) {
@@ -485,34 +504,53 @@ export const patchLAEMPLBySubmissionId = (req, res) => {
         if (fErr) return res.status(500).send('Database error: ' + fErr);
         const out = { ...fRes[0] };
         try { out.fields = typeof out.fields === 'string' ? JSON.parse(out.fields) : out.fields; } catch {}
-        // If explicitly approved (status === 3), email the submitter
-        try {
-          if (status === 3) {
-            const metaSql = `
-              SELECT s.submitted_by, ra.title
-              FROM submission s
-              JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
-              WHERE s.submission_id = ?
-            `;
-            db.query(metaSql, [id], async (mErr, mRows) => {
-              if (!mErr && mRows?.length) {
-                const meta = mRows[0];
-                const uSql = `SELECT email FROM user_details WHERE user_id = ? LIMIT 1`;
-                db.query(uSql, [meta.submitted_by], async (_ue, uRows) => {
-                  const to = uRows?.[0]?.email;
-                  if (to) {
-                    const approver = (req.user?.name || req.user?.email || 'Principal').toString();
-                    const subj = `Submission approved: ${meta.title}`;
-                    const msg  = `${approver} approved your report ${meta.title}`;
-                    try { await sendEmail({ to, subject: subj, html: `<p>${msg}</p>`, text: msg }); } catch (e) { console.error('Email send failed:', e?.message || e); }
-                  }
-                });
-              }
-            });
-          }
-        } catch (e) {
-          console.error('Approval email failed:', e?.message || e);
+
+        const finalStatus = Number(out?.status);
+        const becameSubmitted = Number.isInteger(requestedStatus)
+          ? requestedStatus === 2
+          : (currentStatus < 2);
+
+        if (becameSubmitted || finalStatus === 3 || finalStatus === 4) {
+          const metaSql = `
+            SELECT s.submitted_by, ra.given_by, ra.title
+            FROM submission s
+            JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
+            WHERE s.submission_id = ?
+          `;
+          db.query(metaSql, [id], (metaErr, metaRows) => {
+            if (metaErr || !metaRows?.length) return;
+            const meta = metaRows[0];
+
+            if (becameSubmitted) {
+              const payload = {
+                title: `Report submitted: ${meta.title}`,
+                message: 'A teacher submitted a LAEMPL report for your review.',
+                type: 'report_submitted',
+                ref_type: 'submission',
+                ref_id: Number(id)
+              };
+              createNotification(meta.given_by, payload, (err) => {
+                if (err) console.error('Failed to create notification:', err);
+              });
+              sendEmailToUser(
+                meta.given_by,
+                `Report submitted: ${meta.title}`,
+                'A report was submitted and is ready to view.'
+              );
+            }
+
+            if (finalStatus === 3) {
+              const approver = (req.user?.name || req.user?.email || 'Principal').toString();
+              const msg = `${approver} approved your report ${meta.title}`;
+              sendEmailToUser(meta.submitted_by, `Submission approved: ${meta.title}`, msg);
+            } else if (finalStatus === 4) {
+              const approver = (req.user?.name || req.user?.email || 'Principal').toString();
+              const msg = `${approver} rejected your report ${meta.title}. Please review the feedback.`;
+              sendEmailToUser(meta.submitted_by, `Submission rejected: ${meta.title}`, msg);
+            }
+          });
         }
+
         return res.json(out);
       });
     });
@@ -606,27 +644,46 @@ export const patchMPSBySubmissionId = (req, res) => {
         if (fErr) return res.status(500).send('Database error: ' + fErr);
         const out = { ...fRes[0] };
         try { out.fields = typeof out.fields === 'string' ? JSON.parse(out.fields) : out.fields; } catch {}
-        // Notify assigner on first submit (status 2)
+        const finalStatus = Number(out?.status);
         const becameSubmitted = Number.isInteger(requestedStatus) ? requestedStatus === 2 : (currentStatus < 2);
-        if (becameSubmitted && out?.submission_id) {
+
+        if (becameSubmitted || finalStatus === 3 || finalStatus === 4) {
           const metaSql = `
-            SELECT ra.given_by, ra.title
+            SELECT s.submitted_by, ra.given_by, ra.title
             FROM submission s
             JOIN report_assignment ra ON ra.report_assignment_id = s.report_assignment_id
             WHERE s.submission_id = ?
           `;
           db.query(metaSql, [id], (mErr, mRows) => {
-            if (!mErr && mRows?.length) {
-              const meta = mRows[0];
-              createNotification(meta.given_by, {
+            if (mErr || !mRows?.length) return;
+            const meta = mRows[0];
+
+            if (becameSubmitted) {
+              const payload = {
                 title: `Report submitted: ${meta.title}`,
                 message: `A teacher submitted an MPS report for your review.`,
                 type: 'report_submitted',
                 ref_type: 'submission',
                 ref_id: Number(id)
-              }, (err, result) => {
+              };
+              createNotification(meta.given_by, payload, (err) => {
                 if (err) console.error('Failed to create notification:', err);
               });
+              sendEmailToUser(
+                meta.given_by,
+                `Report submitted: ${meta.title}`,
+                'A report was submitted and is ready to view.'
+              );
+            }
+
+            if (finalStatus === 3) {
+              const approver = (req.user?.name || req.user?.email || 'Principal').toString();
+              const msg = `${approver} approved your report ${meta.title}`;
+              sendEmailToUser(meta.submitted_by, `Submission approved: ${meta.title}`, msg);
+            } else if (finalStatus === 4) {
+              const approver = (req.user?.name || req.user?.email || 'Principal').toString();
+              const msg = `${approver} rejected your report ${meta.title}. Please review the feedback.`;
+              sendEmailToUser(meta.submitted_by, `Submission rejected: ${meta.title}`, msg);
             }
           });
         }

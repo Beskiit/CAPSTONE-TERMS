@@ -1,5 +1,6 @@
 // controllers/reportAssignmentCon.js
 import db from '../db.js';
+import { sendEmail } from '../services/emailService.js';
 
 /* =========================
    LIST / READ
@@ -148,6 +149,46 @@ function isAutoLike(v) {
   if (v == null || v === '') return true;
   const s = String(v).toLowerCase();
   return s === 'auto' || s === 'unlimited';
+}
+
+function emailUsers(userIds, subject, messageHtml, messageText) {
+  if (!Array.isArray(userIds) || !userIds.length) return;
+  const placeholders = userIds.map(() => '?').join(',');
+  const sql = `SELECT email FROM user_details WHERE user_id IN (${placeholders}) AND email IS NOT NULL AND email <> ''`;
+  db.query(sql, userIds, async (_e, rows) => {
+    if (!rows || !rows.length) return;
+    for (const r of rows) {
+      try {
+        await sendEmail({
+          to: r.email,
+          subject,
+          html: messageHtml,
+          text: messageText || undefined
+        });
+      } catch (err) {
+        console.error('Email send failed:', err?.message || err);
+      }
+    }
+  });
+}
+
+function sendAssignmentEmails({ recipientIds, givenBy, title, dueDate }) {
+  const normalized = Array.isArray(recipientIds)
+    ? Array.from(new Set(
+        recipientIds
+          .map((id) => Number(id))
+          .filter((id) => Number.isFinite(id))
+      ))
+    : [];
+  if (!normalized.length) return;
+
+  const nameSql = `SELECT name FROM user_details WHERE user_id = ? LIMIT 1`;
+  db.query(nameSql, [givenBy], (_err, rows) => {
+    const giverName = rows?.[0]?.name || 'Coordinator';
+    const subject = `New report assigned: ${title}`;
+    const message = `Assigned by ${giverName} — due on ${dueDate || 'TBD'}.`;
+    emailUsers(normalized, subject, `<p>${message}</p>`, message);
+  });
 }
 
 // compute next attempt using the SAME connection
@@ -721,6 +762,12 @@ export const giveLAEMPLMPSReport = (req, res) => {
             if (commitErr) {
               return res.status(500).send('Commit error: ' + commitErr.message);
             }
+            sendAssignmentEmails({
+              recipientIds: recipients,
+              givenBy: given_by,
+              title,
+              dueDate: to_date
+            });
             res.json({
               success: true,
               message: `Created ${results.length} LAEMPL & MPS assignments`,
@@ -874,6 +921,12 @@ export const giveLAEMPLReport = (req, res) => {
                     return conn.rollback(() => { conn.release(); res.status(500).send('Commit error: ' + cErr.message); });
                   }
                   conn.release();
+                  sendAssignmentEmails({
+                    recipientIds: recipients,
+                    givenBy: given_by,
+                    title,
+                    dueDate: to_date
+                  });
                   res.status(201).json({
                     report_assignment_id,
                     submission_ids: rows.map(r => r.submission_id)
