@@ -132,12 +132,19 @@ export const giveAccomplishmentReport = (req, res) => {
     const hasTeacher = recipients.some(uid => (idToRole.get(Number(uid)) || '') === 'teacher');
     const hasCoordinator = recipients.some(uid => (idToRole.get(Number(uid)) || '') === 'coordinator');
 
+    const normalizedCoordinatorId =
+      coordinator_user_id != null && coordinator_user_id !== '' && !Number.isNaN(Number(coordinator_user_id))
+        ? Number(coordinator_user_id)
+        : null;
+    const isCoordinatorSeedAssignment = recipients.length === 0 && normalizedCoordinatorId != null;
+
     // CRITICAL: Never set coordinator_user_id when assigner is a coordinator
     // When coordinator assigns to Teacher(s) + Coordinator, recipient coordinator should act as teacher
     // This matches the behavior of Principal → Teacher(s) + Coordinator
-    let finalCoordinatorUserId = coordinator_user_id;
-    if (giverRoleDetected === 'coordinator') {
-      // Coordinator is assigning - recipient coordinator should act as teacher (no coordinator_user_id)
+    // EXCEPTION: allow coordinator_user_id when we're seeding a coordinator-only assignment (no recipients)
+    let finalCoordinatorUserId = normalizedCoordinatorId;
+    if (giverRoleDetected === 'coordinator' && !isCoordinatorSeedAssignment) {
+      // Coordinator is assigning to recipients - treat fellow coordinators as teachers
       finalCoordinatorUserId = null;
     } else if (giverRoleDetected === 'principal' && hasTeacher && hasCoordinator) {
       // Principal → Teacher(s) + Coordinator: coordinator should act as teacher (no coordinator_user_id)
