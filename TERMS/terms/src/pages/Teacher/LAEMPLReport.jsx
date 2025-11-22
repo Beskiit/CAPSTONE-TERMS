@@ -3218,11 +3218,6 @@ const parseMpsRows = (rowsInput) => {
                           </td>
                           <td style={{ padding: 12, border: "1px solid #ddd" }}>
                             {peer.name || peer.teacher_name || "Unknown Teacher"}
-                            {isAlreadyConsolidated && (
-                              <span style={{ marginLeft: 8, fontSize: 11, color: '#dc2626', fontStyle: 'italic' }}>
-                                (Already Consolidated{consolidatedIntoSubmissionId ? ` into submission #${consolidatedIntoSubmissionId}` : ''})
-                              </span>
-                            )}
                           </td>
                           <td style={{ padding: 12, border: "1px solid #ddd" }}>
                             Grade {peer.grade_level || "Unknown"}

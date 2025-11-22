@@ -730,33 +730,54 @@ function SetReport() {
       return;
     }
     
-    console.log('[SetReport] Looking for subject:', subjectToExtractFromTitle, 'in', subjects.length, 'subjects');
+    // Handle both single string and array of strings
+    const subjectNamesToMatch = Array.isArray(subjectToExtractFromTitle) 
+      ? subjectToExtractFromTitle 
+      : [subjectToExtractFromTitle];
     
-    const matchingSubject = subjects.find(s => {
-      const subjectName = s.subject_name?.trim();
-      // Try exact match first
-      if (subjectName === subjectToExtractFromTitle) return true;
-      // Try matching if subject name starts with the extracted name (handles cases like "GMRC (15 - 25 points)")
-      if (subjectName && subjectName.startsWith(subjectToExtractFromTitle)) return true;
-      // Try matching if extracted name starts with subject name
-      if (subjectToExtractFromTitle.startsWith(subjectName)) return true;
-      return false;
+    console.log('[SetReport] Looking for subjects:', subjectNamesToMatch, 'in', subjects.length, 'subjects');
+    
+    const matchingSubjectIds = [];
+    
+    subjectNamesToMatch.forEach(subjectNameToMatch => {
+      const matchingSubject = subjects.find(s => {
+        const subjectName = s.subject_name?.trim();
+        // Try exact match first
+        if (subjectName === subjectNameToMatch) return true;
+        // Try matching if subject name starts with the extracted name (handles cases like "GMRC (15 - 25 points)")
+        if (subjectName && subjectName.startsWith(subjectNameToMatch)) return true;
+        // Try matching if extracted name starts with subject name
+        if (subjectNameToMatch.startsWith(subjectName)) return true;
+        return false;
+      });
+      
+      if (matchingSubject && !matchingSubjectIds.includes(matchingSubject.subject_id)) {
+        matchingSubjectIds.push(matchingSubject.subject_id);
+        console.log('[SetReport] Found matching subject:', matchingSubject.subject_id, matchingSubject.subject_name);
+      }
     });
     
-    if (matchingSubject) {
-      console.log('[SetReport] Found matching subject from title:', matchingSubject.subject_id, matchingSubject.subject_name);
-      // Set ONLY this subject (clear any other selections)
-      setSelectedSubjects([matchingSubject.subject_id]);
+    if (matchingSubjectIds.length > 0) {
+      console.log('[SetReport] Setting subjects from title/child assignments:', matchingSubjectIds);
+      // Set all matching subjects (for principal reports, this will be all subjects from child assignments)
+      setSelectedSubjects(matchingSubjectIds);
       // Clear inherited subject IDs to prevent auto-population from overriding
       setInheritedSubjectIds([]);
       // Clear the extraction flag
       setSubjectToExtractFromTitle(null);
     } else {
-      console.log('[SetReport] No matching subject found for:', subjectToExtractFromTitle, 'Available subjects:', subjects.map(s => s.subject_name));
+      console.log('[SetReport] No matching subjects found for:', subjectNamesToMatch, 'Available subjects:', subjects.map(s => s.subject_name));
       // Clear the extraction flag even if not found to prevent infinite loop
       setSubjectToExtractFromTitle(null);
     }
   }, [subjectToExtractFromTitle, subjects, selectedCategory, selectedSubCategory, selectedSubjects]);
+
+  // ✅ Close subject menu when report becomes disabled (from principal)
+  useEffect(() => {
+    if (isCoordinator && (isFromPrincipalAssignment || isPrincipalReportParam) && subjectMenuOpen) {
+      setSubjectMenuOpen(false);
+    }
+  }, [isCoordinator, isFromPrincipalAssignment, isPrincipalReportParam, subjectMenuOpen]);
 
   // ✅ Load subjects when grade level changes
   useEffect(() => {
@@ -991,24 +1012,123 @@ function SetReport() {
         setSelectedTeacher("");
       }
       
-      // Extract subject from title for LAEMPL & MPS reports (format: "Title - SubjectName")
-      if (reportData.title && 
+      // For reports from principal, fetch all subjects from sibling assignments
+      if (fromPrincipal && isCoordinator && 
           reportData.category_id === 1 && 
-          reportData.sub_category_id === 3 && 
-          reportData.title.includes(' - ')) {
-        const subjectNameFromTitle = reportData.title.split(' - ').pop()?.trim();
-        console.log('[SetReport] Extracted subject from title:', subjectNameFromTitle);
+          reportData.sub_category_id === 3) {
+        // Set grade level first if available, so subjects can load
+        if (reportData.grade_level_id) {
+          setSelectedGradeLevel(String(reportData.grade_level_id));
+        }
         
-        // Store the subject name to match later when subjects list is loaded
-        if (subjectNameFromTitle) {
-          setSubjectToExtractFromTitle(subjectNameFromTitle);
-          // Set grade level first if available, so subjects can load
-          if (reportData.grade_level_id) {
-            setSelectedGradeLevel(String(reportData.grade_level_id));
+        // Fetch all assignments with the same coordinator_user_id, grade_level_id, quarter, and year
+        // These are the sibling assignments (one per subject) created by the principal
+        try {
+          console.log('[SetReport] Fetching sibling assignments for coordinator:', {
+            coordinator_user_id: reportData.coordinator_user_id,
+            grade_level_id: reportData.grade_level_id,
+            quarter: reportData.quarter,
+            year: reportData.year
+          });
+          
+          // Fetch all reports and filter by coordinator_user_id, grade_level_id, quarter, and year
+          const allReportsRes = await fetch(`${API_BASE}/reports`, {
+            credentials: "include"
+          });
+          
+          if (allReportsRes.ok) {
+            const allReports = await allReportsRes.json();
+            console.log('[SetReport] Received all reports:', allReports.length);
+            
+            // Filter for sibling assignments (same coordinator_user_id, grade_level_id, quarter, year)
+            const siblingAssignments = allReports.filter(assignment => 
+              assignment.category_id === 1 &&
+              assignment.sub_category_id === 3 &&
+              assignment.coordinator_user_id === reportData.coordinator_user_id &&
+              assignment.grade_level_id === reportData.grade_level_id &&
+              assignment.quarter === reportData.quarter &&
+              assignment.year === reportData.year
+            );
+            
+            console.log('[SetReport] Found sibling assignments:', siblingAssignments.length);
+            
+            // Extract all unique subjects from sibling assignment titles (format: "Title - SubjectName")
+            const subjectNames = new Set();
+            siblingAssignments.forEach(assignment => {
+              if (assignment.title && assignment.title.includes(' - ')) {
+                const subjectName = assignment.title.split(' - ').pop()?.trim();
+                if (subjectName) {
+                  subjectNames.add(subjectName);
+                }
+              }
+            });
+            
+            console.log('[SetReport] Extracted subject names from sibling assignments:', Array.from(subjectNames));
+            
+            // Store subject names to match later when subjects list is loaded
+            if (subjectNames.size > 0) {
+              // Store as array for later matching
+              setSubjectToExtractFromTitle(Array.from(subjectNames));
+            } else {
+              // Fallback: extract from current report title if no sibling assignments
+              if (reportData.title && reportData.title.includes(' - ')) {
+                const subjectNameFromTitle = reportData.title.split(' - ').pop()?.trim();
+                if (subjectNameFromTitle) {
+                  setSubjectToExtractFromTitle([subjectNameFromTitle]);
+                } else {
+                  setSubjectToExtractFromTitle(null);
+                }
+              } else {
+                setSubjectToExtractFromTitle(null);
+              }
+            }
+          } else {
+            // Fallback: extract from current report title
+            if (reportData.title && reportData.title.includes(' - ')) {
+              const subjectNameFromTitle = reportData.title.split(' - ').pop()?.trim();
+              if (subjectNameFromTitle) {
+                setSubjectToExtractFromTitle([subjectNameFromTitle]);
+              } else {
+                setSubjectToExtractFromTitle(null);
+              }
+            } else {
+              setSubjectToExtractFromTitle(null);
+            }
+          }
+        } catch (err) {
+          console.error('[SetReport] Error fetching sibling assignments:', err);
+          // Fallback: extract from current report title
+          if (reportData.title && reportData.title.includes(' - ')) {
+            const subjectNameFromTitle = reportData.title.split(' - ').pop()?.trim();
+            if (subjectNameFromTitle) {
+              setSubjectToExtractFromTitle([subjectNameFromTitle]);
+            } else {
+              setSubjectToExtractFromTitle(null);
+            }
+          } else {
+            setSubjectToExtractFromTitle(null);
           }
         }
       } else {
-        setSubjectToExtractFromTitle(null);
+        // Extract subject from title for non-principal reports (format: "Title - SubjectName")
+        if (reportData.title && 
+            reportData.category_id === 1 && 
+            reportData.sub_category_id === 3 && 
+            reportData.title.includes(' - ')) {
+          const subjectNameFromTitle = reportData.title.split(' - ').pop()?.trim();
+          console.log('[SetReport] Extracted subject from title:', subjectNameFromTitle);
+          
+          // Store the subject name to match later when subjects list is loaded
+          if (subjectNameFromTitle) {
+            setSubjectToExtractFromTitle(subjectNameFromTitle);
+            // Set grade level first if available, so subjects can load
+            if (reportData.grade_level_id) {
+              setSelectedGradeLevel(String(reportData.grade_level_id));
+            }
+          }
+        } else {
+          setSubjectToExtractFromTitle(null);
+        }
       }
       
       toast.success('Report data loaded. You can now modify the schedule before assigning to teachers.');
@@ -1617,179 +1737,54 @@ function SetReport() {
               
               try {
                 // First, try to get assignments where they are recipients (might include coordinator_user_id info)
-                const checkRes = await fetch(`${API_BASE}/reports/given_to/${coordinatorId}`, {
-                  credentials: "include"
-                });
-                
-                let allAssignments = [];
-                if (checkRes.ok) {
-                  const recipientAssignments = await checkRes.json();
-                  console.log("🔍 [SetReport] Assignments where coordinator is recipient:", recipientAssignments);
-                  allAssignments = recipientAssignments;
-                }
-                
-                // The API responses might not include coordinator_user_id field
-                // Also, /reports/given_to/ only returns assignments where coordinator is a RECIPIENT,
-                // not where they are coordinator_user_id. We need to check assignments assigned by the principal.
-                
-                // First, check assignments assigned by the principal (these should include coordinator_user_id)
-                let foundCoordinatorAssignment = false;
-                
-                if (user?.user_id) {
-                  try {
-                    const assignedByRes = await fetch(`${API_BASE}/reports/assigned_by/${user.user_id}`, {
-                      credentials: "include"
-                    });
-                    if (assignedByRes.ok) {
-                      const assignedByPrincipal = await assignedByRes.json();
-                      console.log("🔍 [SetReport] Assignments assigned by principal:", assignedByPrincipal);
-                      
-                      // Get Accomplishment Report assignments and fetch their details to check coordinator_user_id
-                      const accomplishmentAssignmentsFromPrincipal = assignedByPrincipal.filter(assignment => 
-                        Number(assignment.category_id) === 0
-                      );
-                      
-                      console.log("🔍 [SetReport] Accomplishment Reports assigned by principal:", accomplishmentAssignmentsFromPrincipal);
-                      
-                      if (accomplishmentAssignmentsFromPrincipal.length > 0) {
-                        // Fetch assignment details for each to get coordinator_user_id
-                        const assignmentChecks = await Promise.all(
-                          accomplishmentAssignmentsFromPrincipal.map(async (assignment) => {
-                            const assignmentId = assignment.report_assignment_id || assignment.id;
-                            if (!assignmentId) return null;
-                            
-                            try {
-                              const assignmentDetailRes = await fetch(`${API_BASE}/reports/assignment/${assignmentId}`, {
-                                credentials: "include"
-                              });
-                              if (assignmentDetailRes.ok) {
-                                const assignmentDetail = await assignmentDetailRes.json();
-                                return {
-                                  ...assignment,
-                                  coordinator_user_id: assignmentDetail.coordinator_user_id,
-                                  assignmentDetail: assignmentDetail
-                                };
-                              }
-                            } catch (err) {
-                              console.warn(`🔍 [SetReport] Failed to fetch assignment ${assignmentId} details:`, err);
-                            }
-                            return assignment;
-                          })
-                        );
-                        
-                        console.log("🔍 [SetReport] Accomplishment assignments with details (from assigned_by):", assignmentChecks);
-                        
-                        // Check if any have coordinator_user_id matching
-                        const assignmentsWhereCoordinator = assignmentChecks.filter(assignment => {
-                          if (!assignment) return false;
-                          const assignmentCoordinatorId = assignment.coordinator_user_id != null 
-                            ? Number(assignment.coordinator_user_id) 
-                            : null;
-                          const matches = assignmentCoordinatorId === Number(coordinatorId);
-                          
-                          console.log("🔍 [SetReport] Checking assignment (from assigned_by):", {
-                            assignment_id: assignment.report_assignment_id || assignment.id,
-                            coordinator_user_id: assignment.coordinator_user_id,
-                            assignmentCoordinatorId,
-                            coordinatorId: Number(coordinatorId),
-                            matches
-                          });
-                          
-                          return matches;
-                        });
-                        
-                        console.log("🔍 [SetReport] Accomplishment assignments where coordinator_user_id matches (from assigned_by):", assignmentsWhereCoordinator);
-                        
-                        if (assignmentsWhereCoordinator.length > 0) {
-                          foundCoordinatorAssignment = true;
-                          isAccomplishmentCoordinator = true;
-                          console.log("✅ [SetReport] Coordinator is the actual Accomplishment Report coordinator (from assigned_by):", {
-                            matchingAssignments: assignmentsWhereCoordinator.length
-                          });
-                        }
-                      }
-                    }
-                  } catch (assignedByErr) {
-                    console.warn("🔍 [SetReport] Error fetching assignments assigned by principal:", assignedByErr);
-                  }
-                }
-                
-                // If not found in assigned_by, check assignments where coordinator is recipient
-                if (!foundCoordinatorAssignment) {
-                  const accomplishmentAssignments = allAssignments.filter(assignment => 
-                    Number(assignment.category_id) === 0
-                  );
+                // Check if coordinator has ANY past accomplishment report assignment with coordinator_user_id
+                // This includes assignments created by admin, principal, or any other user
+                try {
+                  // Fetch ALL reports and check if ANY accomplishment report (category_id = 0) 
+                  // has coordinator_user_id matching this coordinator
+                  const allReportsRes = await fetch(`${API_BASE}/reports`, {
+                    credentials: "include"
+                  });
                   
-                  console.log("🔍 [SetReport] Accomplishment Report assignments (from given_to):", accomplishmentAssignments);
-                  
-                  if (accomplishmentAssignments.length > 0) {
-                    // Fetch assignment details for each Accomplishment Report to get coordinator_user_id
-                    const assignmentChecks = await Promise.all(
-                      accomplishmentAssignments.map(async (assignment) => {
-                        const assignmentId = assignment.report_assignment_id || assignment.id;
-                        if (!assignmentId) return null;
-                        
-                        try {
-                          const assignmentDetailRes = await fetch(`${API_BASE}/reports/assignment/${assignmentId}`, {
-                            credentials: "include"
-                          });
-                          if (assignmentDetailRes.ok) {
-                            const assignmentDetail = await assignmentDetailRes.json();
-                            return {
-                              ...assignment,
-                              coordinator_user_id: assignmentDetail.coordinator_user_id,
-                              assignmentDetail: assignmentDetail
-                            };
-                          }
-                        } catch (err) {
-                          console.warn(`🔍 [SetReport] Failed to fetch assignment ${assignmentId} details:`, err);
-                        }
-                        return assignment;
-                      })
-                    );
+                  if (allReportsRes.ok) {
+                    const allReports = await allReportsRes.json();
                     
-                    console.log("🔍 [SetReport] Accomplishment assignments with details (from given_to):", assignmentChecks);
-                    
-                    // Check if any have coordinator_user_id matching
-                    const assignmentsWhereCoordinator = assignmentChecks.filter(assignment => {
-                      if (!assignment) return false;
-                      const assignmentCoordinatorId = assignment.coordinator_user_id != null 
-                        ? Number(assignment.coordinator_user_id) 
-                        : null;
-                      const matches = assignmentCoordinatorId === Number(coordinatorId);
-                      
-                      console.log("🔍 [SetReport] Checking assignment (from given_to):", {
-                        assignment_id: assignment.report_assignment_id || assignment.id,
-                        coordinator_user_id: assignment.coordinator_user_id,
-                        assignmentCoordinatorId,
-                        coordinatorId: Number(coordinatorId),
-                        matches
-                      });
-                      
-                      return matches;
+                    // Filter for accomplishment reports (category_id = 0) where coordinator_user_id matches
+                    const accomplishmentReportsWithCoordinator = allReports.filter(report => {
+                      const isAccomplishment = Number(report.category_id) === 0;
+                      const hasMatchingCoordinator = report.coordinator_user_id != null && 
+                        Number(report.coordinator_user_id) === Number(coordinatorId);
+                      return isAccomplishment && hasMatchingCoordinator;
                     });
                     
-                    console.log("🔍 [SetReport] Accomplishment assignments where coordinator_user_id matches (from given_to):", assignmentsWhereCoordinator);
+                    console.log("🔍 [SetReport] Checking for past accomplishment reports with coordinator_user_id:", {
+                      coordinatorId: Number(coordinatorId),
+                      totalReports: allReports.length,
+                      accomplishmentReportsWithCoordinator: accomplishmentReportsWithCoordinator.length
+                    });
                     
-                    if (assignmentsWhereCoordinator.length > 0) {
+                    if (accomplishmentReportsWithCoordinator.length > 0) {
                       isAccomplishmentCoordinator = true;
-                      console.log("✅ [SetReport] Coordinator is the actual Accomplishment Report coordinator (from given_to):", {
-                        matchingAssignments: assignmentsWhereCoordinator.length,
-                        totalAccomplishmentAssignments: accomplishmentAssignments.length
+                      console.log("✅ [SetReport] Coordinator has past accomplishment report assignment with coordinator_user_id:", {
+                        matchingAssignments: accomplishmentReportsWithCoordinator.length,
+                        assignmentIds: accomplishmentReportsWithCoordinator.map(r => r.report_assignment_id)
                       });
                     } else {
-                      // They have Accomplishment Report assignments, but coordinator_user_id is NULL or different
+                      // No past accomplishment report assignment with coordinator_user_id found
                       isAccomplishmentCoordinator = false;
-                      console.log("❌ [SetReport] Coordinator has Accomplishment Report assignments but coordinator_user_id doesn't match - will act as teacher:", {
-                        totalAccomplishmentAssignments: accomplishmentAssignments.length,
-                        assignmentsWhereCoordinator: assignmentsWhereCoordinator.length
+                      console.log("❌ [SetReport] No past accomplishment report assignment with coordinator_user_id found - will act as teacher:", {
+                        coordinatorId: Number(coordinatorId)
                       });
                     }
                   } else {
-                    // No Accomplishment Report assignments found - act as teacher
+                    // If fetch fails, don't set them as coordinator_user_id (safer)
                     isAccomplishmentCoordinator = false;
-                    console.log("❌ [SetReport] No Accomplishment Report assignments found - will act as teacher");
+                    console.warn("❌ [SetReport] Failed to fetch reports - NOT setting as coordinator_user_id");
                   }
+                } catch (fetchErr) {
+                  // If fetch fails, don't set them as coordinator_user_id (safer)
+                  isAccomplishmentCoordinator = false;
+                  console.warn("❌ [SetReport] Error checking assignments - NOT setting as coordinator_user_id:", fetchErr);
                 }
               } catch (fetchErr) {
                 // If fetch fails, don't set them as coordinator_user_id (safer)
@@ -3783,9 +3778,10 @@ function SetReport() {
                     <button
                       className="teacher-trigger"
                       type="button"
-                      onClick={() => setSubjectMenuOpen((v) => !v)}
+                      onClick={() => !(isCoordinator && (isFromPrincipalAssignment || isPrincipalReportParam)) && setSubjectMenuOpen((v) => !v)}
                       aria-haspopup="listbox"
                       aria-expanded={subjectMenuOpen}
+                      disabled={isCoordinator && (isFromPrincipalAssignment || isPrincipalReportParam)}
                       title={
                         selectedSubjects.length
                           ? subjects
@@ -3805,7 +3801,7 @@ function SetReport() {
                           : "Select Subjects"}
                       </span>
                     </button>
-                    {subjectMenuOpen && (
+                    {subjectMenuOpen && !(isCoordinator && (isFromPrincipalAssignment || isPrincipalReportParam)) && (
                       <div
                         role="listbox"
                         className="teacher-menu"

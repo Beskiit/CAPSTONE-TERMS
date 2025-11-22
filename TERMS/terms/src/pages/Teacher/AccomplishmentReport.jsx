@@ -1525,44 +1525,6 @@ function AccomplishmentReport() {
                 </div>
               )}
 
-              {!isTeacher && submissionStatus >= 2 && submissionStatus !== 4 && showSubmittedAlert && (
-                <div
-                  className="alert info"
-                  style={{
-                    marginBottom: 12,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "10px 12px",
-                    border: "1px solid #93c5fd",
-                    background: "#dbeafe",
-                    color: "#1e40af",
-                    borderRadius: 8,
-                    fontSize: 14
-                  }}
-                >
-                  <span>
-                    ✅ This submission has been <strong>sent to the Principal</strong> for approval. Further edits are disabled.
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowSubmittedAlert(false)}
-                    style={{
-                      marginLeft: 12,
-                      border: "none",
-                      background: "transparent",
-                      cursor: "pointer",
-                      fontSize: 16,
-                      color: "#1e40af"
-                    }}
-                    aria-label="Dismiss"
-                    title="Dismiss"
-                  >
-                    ×
-                  </button>
-                </div>
-              )}
-
               {!isTeacher && submissionStatus === 4 && showSubmittedAlert && (
                 <div
                   className="alert warning"
